@@ -2233,6 +2233,17 @@ typedef struct AlterEnumStmt
 } AlterEnumStmt;
 
 /* ----------------------
+ *		Create Type Statement, enum types
+ * ----------------------
+ */
+typedef struct CreateRangeStmt
+{
+	NodeTag		type;
+	List	   *typeName;		/* qualified name (list of Value strings) */
+	List	   *params;			/* range parameters (list of DefElem) */
+} CreateRangeStmt;
+
+/* ----------------------
  *		Create View Statement
  * ----------------------
  */

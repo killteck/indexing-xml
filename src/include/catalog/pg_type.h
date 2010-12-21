@@ -633,6 +633,7 @@ DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in
 #define  TYPTYPE_DOMAIN		'd' /* domain over another type */
 #define  TYPTYPE_ENUM		'e' /* enumerated type */
 #define  TYPTYPE_PSEUDO		'p' /* pseudo-type */
+#define  TYPTYPE_RANGE		'r' /* range type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'
@@ -644,6 +645,7 @@ DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in
 #define  TYPCATEGORY_NETWORK	'I'		/* think INET */
 #define  TYPCATEGORY_NUMERIC	'N'
 #define  TYPCATEGORY_PSEUDOTYPE 'P'
+#define  TYPCATEGORY_RANGE		'R'
 #define  TYPCATEGORY_STRING		'S'
 #define  TYPCATEGORY_TIMESPAN	'T'
 #define  TYPCATEGORY_USER		'U'

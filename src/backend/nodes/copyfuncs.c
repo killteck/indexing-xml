@@ -2931,6 +2931,17 @@ _copyCreateEnumStmt(CreateEnumStmt *from)
 	return newnode;
 }
 
+static CreateRangeStmt *
+_copyCreateRangeStmt(CreateRangeStmt *from)
+{
+	CreateRangeStmt *newnode = makeNode(CreateRangeStmt);
+
+	COPY_NODE_FIELD(typeName);
+	COPY_NODE_FIELD(params);
+
+	return newnode;
+}
+
 static AlterEnumStmt *
 _copyAlterEnumStmt(AlterEnumStmt *from)
 {
@@ -4126,6 +4137,9 @@ copyObject(void *from)
 			break;
 		case T_CreateEnumStmt:
 			retval = _copyCreateEnumStmt(from);
+			break;
+		case T_CreateRangeStmt:
+			retval = _copyCreateRangeStmt(from);
 			break;
 		case T_AlterEnumStmt:
 			retval = _copyAlterEnumStmt(from);
