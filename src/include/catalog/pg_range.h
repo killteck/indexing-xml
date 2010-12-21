@@ -36,6 +36,8 @@ CATALOG(pg_range,3541) BKI_WITHOUT_OIDS
 	Oid			rngsubtype;		/* OID of range's subtype */
 	Oid			rngdtype;		/* OID of difference type, if not 'subtype' */
 	regproc		rngalign;		/* canonicalize range, or 0 */
+	regproc		rnginput;		/* optional input parser */
+	regproc		rngoutput;		/* optional output function */
 	regproc		rngsubcmp;		/* compare values of type 'subtype' */
 	regproc		rngsubplus;		/* add values of type 'subtype' */
 	regproc		rngsubminus;	/* subtract values of type 'subtype' */
@@ -57,9 +59,11 @@ typedef FormData_pg_range *Form_pg_range;
 #define Anum_pg_range_rngsubtype		2
 #define Anum_pg_range_rngdtype			3
 #define Anum_pg_range_rngalign			4
-#define Anum_pg_range_rngsubcmp			5
-#define Anum_pg_range_rngsubplus		6
-#define Anum_pg_range_rngsubminus		7
+#define Anum_pg_range_rnginput			5
+#define Anum_pg_range_rngoutput			6
+#define Anum_pg_range_rngsubcmp			7
+#define Anum_pg_range_rngsubplus		8
+#define Anum_pg_range_rngsubminus		9
 
 /* ----------------
  *		pg_range has no initial contents
