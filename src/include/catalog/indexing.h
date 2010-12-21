@@ -289,6 +289,9 @@ DECLARE_UNIQUE_INDEX(pg_db_role_setting_databaseid_rol_index, 2965, on pg_db_rol
 DECLARE_UNIQUE_INDEX(pg_seclabel_object_index, 3597, on pg_seclabel using btree(objoid oid_ops, classoid oid_ops, objsubid int4_ops, provider text_ops));
 #define SecLabelObjectIndexId				3597
 
+DECLARE_UNIQUE_INDEX(pg_range_rgntypid_index, 3542, on pg_range using btree(rngtypid oid_ops));
+#define RangeTypidIndexId					3542
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 
