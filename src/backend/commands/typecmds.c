@@ -42,6 +42,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
 #include "commands/defrem.h"
@@ -723,6 +724,14 @@ RemoveTypeById(Oid typeOid)
 	if (((Form_pg_type) GETSTRUCT(tup))->typtype == TYPTYPE_ENUM)
 		EnumValuesDelete(typeOid);
 
+	/*
+	 * If it is a range type, delete the pg_range entries too; we
+	 * don't bother with making dependency entries for those, so it
+	 * has to be done "by hand" here.
+	 */
+	if (((Form_pg_type) GETSTRUCT(tup))->typtype == TYPTYPE_RANGE)
+		RangeDelete(typeOid);
+
 	ReleaseSysCache(tup);
 
 	heap_close(relation, RowExclusiveLock);
@@ -1208,6 +1217,91 @@ DefineRange(CreateRangeStmt *stmt)
 	Oid			old_type_oid;
 	Oid			rangeArrayOid;
 
+	ListCell	*lc;
+	regproc		 rangeTypmodIn	   = InvalidOid;
+	regproc		 rangeTypmodOut	   = InvalidOid;
+	Oid			 rangeSubType	   = InvalidOid;
+	Oid			 rangeDiffType	   = InvalidOid;
+	regproc		 rangeCanonical	   = InvalidOid;
+	regproc		 rangeParse		   = InvalidOid;
+	regproc		 rangeDeparse	   = InvalidOid;
+	regproc		 rangeSubtypeCmp   = InvalidOid;
+	regproc		 rangeSubtypePlus  = InvalidOid;
+	regproc		 rangeSubtypeMinus = InvalidOid;
+
+	/* TODO: parse parameters */
+	foreach(lc, stmt->params)
+	{
+		DefElem *defel  = lfirst(lc);
+
+		if (pg_strcasecmp(defel->defname, "subtype") == 0)
+		{
+			if (OidIsValid(rangeSubType))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+			rangeSubType = typenameTypeId(NULL, defGetTypeName(defel));
+		}
+		else if (pg_strcasecmp(defel->defname, "difftype") == 0)
+		{
+			if (OidIsValid(rangeDiffType))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+			rangeDiffType = typenameTypeId(NULL, defGetTypeName(defel));
+		}
+		else if (pg_strcasecmp(defel->defname, "parse") == 0)
+		{
+			//TODO
+		}
+		else if (pg_strcasecmp(defel->defname, "deparse") == 0)
+		{
+			//TODO
+		}
+		else if (pg_strcasecmp(defel->defname, "typmod_in") == 0)
+		{
+			if (OidIsValid(rangeTypmodIn))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+			rangeTypmodIn = findTypeTypmodinFunction(
+				defGetQualifiedName(defel));
+		}
+		else if (pg_strcasecmp(defel->defname, "typmod_out") == 0)
+		{
+			if (OidIsValid(rangeTypmodOut))
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+			rangeTypmodOut = findTypeTypmodoutFunction(
+				defGetQualifiedName(defel));
+		}
+		else if (pg_strcasecmp(defel->defname, "canonical") == 0)
+		{
+			//TODO
+		}
+		else if (pg_strcasecmp(defel->defname, "subtype_cmp") == 0)
+		{
+			//TODO
+		}
+		else if (pg_strcasecmp(defel->defname, "subtype_plus") == 0)
+		{
+			//TODO
+		}
+		else if (pg_strcasecmp(defel->defname, "subtype_minus") == 0)
+		{
+			//TODO
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					 errmsg("type attribute \"%s\" not recognized",
+							defel->defname)));
+			continue;
+		}
+	}
+
 	/* Convert list of names to a name and namespace */
 	rangeNamespace = QualifiedNameGetCreationNamespace(stmt->typeName,
 													   &rangeName);
@@ -1248,13 +1342,13 @@ DefineRange(CreateRangeStmt *stmt)
 				   TYPCATEGORY_RANGE,	/* type-category (range type) */
 				   false,		/* range types are never preferred */
 				   DEFAULT_TYPDELIM,	/* array element delimiter */
-				   F_ENUM_IN,	/* input procedure */   //TODO
-				   F_ENUM_OUT,	/* output procedure */   //TODO
-				   F_ENUM_RECV, /* receive procedure */   //TODO
-				   F_ENUM_SEND, /* send procedure */   //TODO
-				   InvalidOid,	/* typmodin procedure - none */   //TODO
-				   InvalidOid,	/* typmodout procedure - none */   //TODO
-				   InvalidOid,	/* analyze procedure - default */   //TODO
+				   F_RANGE_IN,	/* input procedure */
+				   F_RANGE_OUT,	/* output procedure */
+				   F_RANGE_RECV, /* receive procedure */
+				   F_RANGE_SEND, /* send procedure */
+				   rangeTypmodIn,	/* typmodin procedure - none */
+				   rangeTypmodOut,	/* typmodout procedure - none */
+				   InvalidOid,	/* analyze procedure - default */
 				   InvalidOid,	/* element type ID */
 				   false,		/* this is not an array type */
 				   rangeArrayOid,	/* array type we are about to create */
@@ -1268,9 +1362,10 @@ DefineRange(CreateRangeStmt *stmt)
 				   0,			/* Array dimensions of typbasetype */
 				   false);		/* Type NOT NULL */
 
-	//TODO
-	/* Enter the enum's values into pg_enum */
-	//EnumValuesCreate(enumTypeOid, stmt->vals);
+	/* create the entry in pg_range */
+	RangeCreate(rangeTypeOid, rangeSubType, rangeDiffType, rangeCanonical,
+				rangeParse, rangeDeparse, rangeSubtypeCmp, rangeSubtypePlus,
+				rangeSubtypeMinus);
 
 	/*
 	 * Create the array type that goes with it.
