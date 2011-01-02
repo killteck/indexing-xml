@@ -42,6 +42,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
@@ -86,7 +87,8 @@ static Oid	findTypeTypmodinFunction(List *procname);
 static Oid	findTypeTypmodoutFunction(List *procname);
 static Oid	findTypeAnalyzeFunction(List *procname, Oid typeOid);
 static Oid  findRangeCanonicalFunction(List *procname, Oid typeOid);
-static Oid	findRangeBinaryFunction(List *procname, Oid typeOid, Oid retType);
+static Oid	findRangeBinaryFunction(List *procname, Oid lArg, Oid rArg,
+									Oid retType);
 static Oid	findRangeParseFunction(List *procname);
 static Oid	findRangeDeparseFunction(List *procname);
 static List *get_rels_with_domain(Oid domainOid, LOCKMODE lockmode);
@@ -1235,6 +1237,10 @@ DefineRange(CreateRangeStmt *stmt)
 	regproc		 rangeSubtypeCmp	   = InvalidOid;
 	regproc		 rangeSubtypePlus	   = InvalidOid;
 	regproc		 rangeSubtypeMinus	   = InvalidOid;
+	regproc		 subtypeInput;
+	regproc		 subtypeOutput;
+	Oid			 ioParam;
+	bool		 varlena;
 
 
 	/*
@@ -1441,11 +1447,42 @@ DefineRange(CreateRangeStmt *stmt)
 					 errmsg("type attribute \"subtype_minus\" is required")));
 
 	rangeSubtypeCmp = findRangeBinaryFunction(
-		rangeSubtypeMinusName, rangeSubType, INT4OID);
+		rangeSubtypeCmpName, rangeSubType, rangeSubType, INT4OID);
+	if (func_volatile(rangeSubtypeCmp) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype comparison function %s must be immutable",
+						NameListToString(rangeSubtypeCmpName))));
+
 	rangeSubtypePlus = findRangeBinaryFunction(
-		rangeSubtypeMinusName, rangeSubType, rangeDiffType);
+		rangeSubtypePlusName, rangeSubType, rangeDiffType, rangeSubType);
+	if (func_volatile(rangeSubtypePlus) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype plus function %s must be immutable",
+						NameListToString(rangeSubtypePlusName))));
+
 	rangeSubtypeMinus = findRangeBinaryFunction(
-		rangeSubtypeMinusName, rangeSubType, rangeDiffType);
+		rangeSubtypeMinusName, rangeSubType, rangeSubType, rangeDiffType);
+	if (func_volatile(rangeSubtypeMinus) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype minus function %s must be immutable",
+						NameListToString(rangeSubtypeMinusName))));
+
+	getTypeInputInfo(rangeSubType, &subtypeInput, &ioParam);
+	if (func_volatile(subtypeInput) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype minus function %s must be immutable",
+						NameListToString(rangeSubtypeMinusName))));
+
+	getTypeOutputInfo(rangeSubType, &subtypeOutput, &varlena);
+	if (func_volatile(subtypeOutput) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype minus function %s must be immutable",
+						NameListToString(rangeSubtypeMinusName))));
 
 	rangeArrayOid = AssignTypeArrayOid();
 
@@ -1846,7 +1883,7 @@ findTypeAnalyzeFunction(List *procname, Oid typeOid)
  * e.g. the range subtype comparison function.
  */
 static Oid
-findRangeBinaryFunction(List *procname, Oid typeOid, Oid retType)
+findRangeBinaryFunction(List *procname, Oid lArg, Oid rArg, Oid retType)
 {
 	Oid			 argList[2];
 	Oid			 procOid;
@@ -1856,17 +1893,16 @@ findRangeBinaryFunction(List *procname, Oid typeOid, Oid retType)
 	/*
 	 * Binary functions take two arguments of type 'typeOid'.
 	 */
-	argList[0] = typeOid;
-	argList[1] = typeOid;
+	argList[0] = lArg;
+	argList[1] = rArg;
 
 	procOid = LookupFuncName(procname, 2, argList, true);
-	if (OidIsValid(procOid))
-		return procOid;
 
-	ereport(ERROR,
-			(errcode(ERRCODE_UNDEFINED_FUNCTION),
-			 errmsg("function %s does not exist",
-					func_signature_string(procname, 1, NIL, argList))));
+	if (!OidIsValid(procOid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("function %s does not exist",
+						func_signature_string(procname, 2, NIL, argList))));
 
 	retTypeTup = typeidType(retType);
 	retTypeStr = typeTypeName(retTypeTup);
@@ -1880,7 +1916,7 @@ findRangeBinaryFunction(List *procname, Oid typeOid, Oid retType)
 
 	pfree(retTypeStr);
 
-	return InvalidOid;			/* keep compiler quiet */
+	return procOid;			/* keep compiler quiet */
 }
 
 static Oid
