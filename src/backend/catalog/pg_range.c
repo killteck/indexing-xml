@@ -28,10 +28,8 @@
  *		Create an entry in pg_range.
  */
 void
-RangeCreate(Oid rangeTypeOid, Oid rangeSubType, Oid rangeDiffType,
-			regproc rangeCanonical, regproc rangeParse, regproc rangeDeparse,
-			regproc rangeSubtypeCmp, regproc rangeSubtypePlus,
-			regproc rangeSubtypeMinus)
+RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeCanonical,
+			regproc rangeParse, regproc rangeDeparse, regproc rangeSubtypeCmp)
 {
 	Relation			pg_range;
 	Datum				values[Natts_pg_range];
@@ -44,15 +42,12 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, Oid rangeDiffType,
 
 	memset(nulls, 0, Natts_pg_range * sizeof(bool));
 
-	values[Anum_pg_range_rngtypid - 1]	  = ObjectIdGetDatum(rangeTypeOid);
-	values[Anum_pg_range_rngsubtype - 1]  = ObjectIdGetDatum(rangeSubType);
-	values[Anum_pg_range_rngdtype - 1]	  = ObjectIdGetDatum(rangeDiffType);
-	values[Anum_pg_range_rngalign - 1]	  = ObjectIdGetDatum(rangeCanonical);
-	values[Anum_pg_range_rnginput - 1]	  = ObjectIdGetDatum(rangeParse);
-	values[Anum_pg_range_rngoutput - 1]	  = ObjectIdGetDatum(rangeDeparse);
-	values[Anum_pg_range_rngsubcmp - 1]	  = ObjectIdGetDatum(rangeSubtypeCmp);
-	values[Anum_pg_range_rngsubplus - 1]  = ObjectIdGetDatum(rangeSubtypePlus);
-	values[Anum_pg_range_rngsubminus - 1] = ObjectIdGetDatum(rangeSubtypeMinus);
+	values[Anum_pg_range_rngtypid - 1]	   = ObjectIdGetDatum(rangeTypeOid);
+	values[Anum_pg_range_rngsubtype - 1]   = ObjectIdGetDatum(rangeSubType);
+	values[Anum_pg_range_rngcanonical - 1] = ObjectIdGetDatum(rangeCanonical);
+	values[Anum_pg_range_rnginput - 1]	   = ObjectIdGetDatum(rangeParse);
+	values[Anum_pg_range_rngoutput - 1]	   = ObjectIdGetDatum(rangeDeparse);
+	values[Anum_pg_range_rngsubcmp - 1]	   = ObjectIdGetDatum(rangeSubtypeCmp);
 
 	tup = heap_form_tuple(RelationGetDescr(pg_range), values, nulls);
 	simple_heap_insert(pg_range, tup);
@@ -67,11 +62,6 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, Oid rangeDiffType,
 
 	referenced.classId	   = TypeRelationId;
 	referenced.objectId	   = rangeSubType;
-	referenced.objectSubId = 0;
-	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-
-	referenced.classId	   = TypeRelationId;
-	referenced.objectId	   = rangeDiffType;
 	referenced.objectSubId = 0;
 	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
@@ -101,16 +91,6 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, Oid rangeDiffType,
 
 	referenced.classId	   = ProcedureRelationId;
 	referenced.objectId	   = rangeSubtypeCmp;
-	referenced.objectSubId = 0;
-	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-
-	referenced.classId	   = ProcedureRelationId;
-	referenced.objectId	   = rangeSubtypePlus;
-	referenced.objectSubId = 0;
-	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-
-	referenced.classId	   = ProcedureRelationId;
-	referenced.objectId	   = rangeSubtypeMinus;
 	referenced.objectSubId = 0;
 	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 

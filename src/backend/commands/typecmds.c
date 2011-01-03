@@ -86,9 +86,10 @@ static Oid	findTypeSendFunction(List *procname, Oid typeOid);
 static Oid	findTypeTypmodinFunction(List *procname);
 static Oid	findTypeTypmodoutFunction(List *procname);
 static Oid	findTypeAnalyzeFunction(List *procname, Oid typeOid);
+static void checkRangeSubtypeIOFunctions(Oid typeOid, char *input_volatile,
+										 char *output_volatile);
 static Oid  findRangeCanonicalFunction(List *procname, Oid typeOid);
-static Oid	findRangeBinaryFunction(List *procname, Oid lArg, Oid rArg,
-									Oid retType);
+static Oid	findRangeSubtypeCmpFunction(List *procname, Oid typeOid);
 static Oid	findRangeParseFunction(List *procname);
 static Oid	findRangeDeparseFunction(List *procname);
 static List *get_rels_with_domain(Oid domainOid, LOCKMODE lockmode);
@@ -1223,24 +1224,17 @@ DefineRange(CreateRangeStmt *stmt)
 	List		*parameters = stmt->params;
 
 	ListCell	*lc;
-	List		*rangeSubtypeCmpName   = NIL;
-	List		*rangeSubtypePlusName  = NIL;
-	List		*rangeSubtypeMinusName = NIL;
-	regproc		 rangeTypmodIn		   = InvalidOid;
-	regproc		 rangeTypmodOut		   = InvalidOid;
-	regproc		 rangeAnalyze		   = InvalidOid;
-	Oid			 rangeSubType		   = InvalidOid;
-	Oid			 rangeDiffType		   = InvalidOid;
-	regproc		 rangeCanonical		   = InvalidOid;
-	regproc		 rangeParse			   = InvalidOid;
-	regproc		 rangeDeparse		   = InvalidOid;
-	regproc		 rangeSubtypeCmp	   = InvalidOid;
-	regproc		 rangeSubtypePlus	   = InvalidOid;
-	regproc		 rangeSubtypeMinus	   = InvalidOid;
-	regproc		 subtypeInput;
-	regproc		 subtypeOutput;
-	Oid			 ioParam;
-	bool		 varlena;
+	List		*rangeSubtypeCmpName = NIL;
+	regproc		 rangeTypmodIn		 = InvalidOid;
+	regproc		 rangeTypmodOut		 = InvalidOid;
+	regproc		 rangeAnalyze		 = InvalidOid;
+	Oid			 rangeSubType		 = InvalidOid;
+	regproc		 rangeCanonical		 = InvalidOid;
+	regproc		 rangeParse			 = InvalidOid;
+	regproc		 rangeDeparse		 = InvalidOid;
+	regproc		 rangeSubtypeCmp	 = InvalidOid;
+	char		 input_volatile;
+	char		 output_volatile;
 
 
 	/*
@@ -1329,14 +1323,6 @@ DefineRange(CreateRangeStmt *stmt)
 						 errmsg("conflicting or redundant options")));
 			rangeSubType = typenameTypeId(NULL, defGetTypeName(defel));
 		}
-		else if (pg_strcasecmp(defel->defname, "difftype") == 0)
-		{
-			if (OidIsValid(rangeDiffType))
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-			rangeDiffType = typenameTypeId(NULL, defGetTypeName(defel));
-		}
 		else if (pg_strcasecmp(defel->defname, "parse") == 0)
 		{
 			if (OidIsValid(rangeParse))
@@ -1397,22 +1383,6 @@ DefineRange(CreateRangeStmt *stmt)
 						 errmsg("conflicting or redundant options")));
 			rangeSubtypeCmpName = defGetQualifiedName(defel);
 		}
-		else if (pg_strcasecmp(defel->defname, "subtype_plus") == 0)
-		{
-			if (rangeSubtypePlusName != NIL)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-			rangeSubtypePlusName = defGetQualifiedName(defel);
-		}
-		else if (pg_strcasecmp(defel->defname, "subtype_minus") == 0)
-		{
-			if (rangeSubtypeMinusName != NIL)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-			rangeSubtypeMinusName = defGetQualifiedName(defel);
-		}
 		else
 		{
 			ereport(ERROR,
@@ -1428,61 +1398,16 @@ DefineRange(CreateRangeStmt *stmt)
 					(errcode(ERRCODE_SYNTAX_ERROR),
 					 errmsg("type attribute \"subtype\" is required")));
 
-	if (!OidIsValid(rangeDiffType))
-		rangeDiffType = rangeSubType;
-
 	if (rangeSubtypeCmpName == NIL)
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
 					 errmsg("type attribute \"subtype_cmp\" is required")));
 
-	if (rangeSubtypePlusName == NIL)
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("type attribute \"subtype_plus\" is required")));
+	rangeSubtypeCmp = findRangeSubtypeCmpFunction(
+		rangeSubtypeCmpName, rangeSubType);
 
-	if (rangeSubtypeMinusName == NIL)
-			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("type attribute \"subtype_minus\" is required")));
-
-	rangeSubtypeCmp = findRangeBinaryFunction(
-		rangeSubtypeCmpName, rangeSubType, rangeSubType, INT4OID);
-	if (func_volatile(rangeSubtypeCmp) != PROVOLATILE_IMMUTABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("range subtype comparison function %s must be immutable",
-						NameListToString(rangeSubtypeCmpName))));
-
-	rangeSubtypePlus = findRangeBinaryFunction(
-		rangeSubtypePlusName, rangeSubType, rangeDiffType, rangeSubType);
-	if (func_volatile(rangeSubtypePlus) != PROVOLATILE_IMMUTABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("range subtype plus function %s must be immutable",
-						NameListToString(rangeSubtypePlusName))));
-
-	rangeSubtypeMinus = findRangeBinaryFunction(
-		rangeSubtypeMinusName, rangeSubType, rangeSubType, rangeDiffType);
-	if (func_volatile(rangeSubtypeMinus) != PROVOLATILE_IMMUTABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("range subtype minus function %s must be immutable",
-						NameListToString(rangeSubtypeMinusName))));
-
-	getTypeInputInfo(rangeSubType, &subtypeInput, &ioParam);
-	if (func_volatile(subtypeInput) != PROVOLATILE_IMMUTABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("range subtype minus function %s must be immutable",
-						NameListToString(rangeSubtypeMinusName))));
-
-	getTypeOutputInfo(rangeSubType, &subtypeOutput, &varlena);
-	if (func_volatile(subtypeOutput) != PROVOLATILE_IMMUTABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-				 errmsg("range subtype minus function %s must be immutable",
-						NameListToString(rangeSubtypeMinusName))));
+	checkRangeSubtypeIOFunctions(rangeSubType, &input_volatile,
+								 &output_volatile);
 
 	rangeArrayOid = AssignTypeArrayOid();
 
@@ -1520,9 +1445,8 @@ DefineRange(CreateRangeStmt *stmt)
 				   false);		/* Type NOT NULL */
 
 	/* create the entry in pg_range */
-	RangeCreate(typoid, rangeSubType, rangeDiffType, rangeCanonical,
-				rangeParse, rangeDeparse, rangeSubtypeCmp, rangeSubtypePlus,
-				rangeSubtypeMinus);
+	RangeCreate(typoid, rangeSubType, rangeCanonical,
+				rangeParse, rangeDeparse, rangeSubtypeCmp);
 
 	/*
 	 * Create the array type that goes with it.
@@ -1879,22 +1803,38 @@ findTypeAnalyzeFunction(List *procname, Oid typeOid)
 }
 
 /*
- * Used to find binary functions that operate on a range's subtype,
- * e.g. the range subtype comparison function.
+ * Determine the volatility of the IO functions for a range's subtype.
+ */
+static void
+checkRangeSubtypeIOFunctions(Oid typeOid, char *input_volatile,
+							 char *output_volatile)
+{
+	bool		isVarlena;
+	Oid			ioParam;
+	regproc		subtypeInput;
+	regproc		subtypeOutput;
+
+	getTypeInputInfo(typeOid, &subtypeInput, &ioParam);
+	getTypeOutputInfo(typeOid, &subtypeOutput, &isVarlena);
+
+	*input_volatile	 = func_volatile(subtypeInput);
+	*output_volatile = func_volatile(subtypeOutput);
+}
+
+/*
+ * Used to find comparison function that operates on a range's subtype.
  */
 static Oid
-findRangeBinaryFunction(List *procname, Oid lArg, Oid rArg, Oid retType)
+findRangeSubtypeCmpFunction(List *procname, Oid subType)
 {
 	Oid			 argList[2];
 	Oid			 procOid;
-	Type		 retTypeTup;
-	char		*retTypeStr;
 
 	/*
 	 * Binary functions take two arguments of type 'typeOid'.
 	 */
-	argList[0] = lArg;
-	argList[1] = rArg;
+	argList[0] = subType;
+	argList[1] = subType;
 
 	procOid = LookupFuncName(procname, 2, argList, true);
 
@@ -1904,19 +1844,19 @@ findRangeBinaryFunction(List *procname, Oid lArg, Oid rArg, Oid retType)
 				 errmsg("function %s does not exist",
 						func_signature_string(procname, 2, NIL, argList))));
 
-	retTypeTup = typeidType(retType);
-	retTypeStr = typeTypeName(retTypeTup);
-	ReleaseSysCache(retTypeTup);
-
-	if (get_func_rettype(procOid) != retType)
+	if (get_func_rettype(procOid) != INT4OID)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-			  errmsg("range binary function %s must return type \"%s\"",
-					 NameListToString(procname), retTypeStr)));
+			  errmsg("range subtype comparison function %s must return type \"integer\"",
+					 func_signature_string(procname, 2, NIL, argList))));
 
-	pfree(retTypeStr);
+	if (func_volatile(procOid) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype comparison function %s must be immutable",
+						func_signature_string(procname, 2, NIL, argList))));
 
-	return procOid;			/* keep compiler quiet */
+	return procOid;
 }
 
 static Oid
@@ -1934,21 +1874,25 @@ findRangeParseFunction(List *procname)
 	argList[3] = INTERNALOID;
 
 	procOid = LookupFuncName(procname, 4, argList, true);
-	if (OidIsValid(procOid))
-		return procOid;
-
-	ereport(ERROR,
-			(errcode(ERRCODE_UNDEFINED_FUNCTION),
-			 errmsg("function %s does not exist",
-					func_signature_string(procname, 1, NIL, argList))));
+	if (!OidIsValid(procOid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("function %s does not exist",
+						func_signature_string(procname, 4, NIL, argList))));
 
 	if (get_func_rettype(procOid) != VOIDOID)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("range parse function %s must return type \"void\"",
-						NameListToString(procname))));
+						func_signature_string(procname, 4, NIL, argList))));
 
-	return InvalidOid;			/* keep compiler quiet */
+	if (func_volatile(procOid) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range parse function %s must be immutable",
+						func_signature_string(procname, 4, NIL, argList))));
+
+	return procOid;
 }
 
 static Oid
@@ -1965,21 +1909,25 @@ findRangeDeparseFunction(List *procname)
 	argList[2] = CSTRINGOID;
 
 	procOid = LookupFuncName(procname, 3, argList, true);
-	if (OidIsValid(procOid))
-		return procOid;
-
-	ereport(ERROR,
-			(errcode(ERRCODE_UNDEFINED_FUNCTION),
-			 errmsg("function %s does not exist",
-					func_signature_string(procname, 1, NIL, argList))));
+	if (!OidIsValid(procOid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("function %s does not exist",
+						func_signature_string(procname, 3, NIL, argList))));
 
 	if (get_func_rettype(procOid) != CSTRINGOID)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 			  errmsg("range deparse function %s must return type \"cstring\"",
-						NameListToString(procname))));
+					 func_signature_string(procname, 3, NIL, argList))));
 
-	return InvalidOid;			/* keep compiler quiet */
+	if (func_volatile(procOid) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range deparse function %s must be immutable",
+						func_signature_string(procname, 3, NIL, argList))));
+
+	return procOid;
 }
 
 /*
@@ -1994,13 +1942,12 @@ findRangeCanonicalFunction(List *procname, Oid typeOid)
 	argList[0] = typeOid;
 
 	procOid = LookupFuncName(procname, 1, argList, true);
-	if (OidIsValid(procOid))
-		return procOid;
 
-	ereport(ERROR,
-			(errcode(ERRCODE_UNDEFINED_FUNCTION),
-			 errmsg("function %s does not exist",
-					func_signature_string(procname, 1, NIL, argList))));
+	if (!OidIsValid(procOid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("function %s does not exist",
+						func_signature_string(procname, 1, NIL, argList))));
 
 	if (get_func_rettype(procOid) != typeOid)
 		ereport(ERROR,
@@ -2008,7 +1955,13 @@ findRangeCanonicalFunction(List *procname, Oid typeOid)
 				 errmsg("range canonical function %s must return range type",
 						NameListToString(procname))));
 
-	return InvalidOid;			/* keep compiler quiet */
+	if (func_volatile(procOid) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range canonical function %s must be immutable",
+						func_signature_string(procname, 1, NIL, argList))));
+
+	return procOid;
 }
 
 /*

@@ -34,13 +34,10 @@ CATALOG(pg_range,3541) BKI_WITHOUT_OIDS
 {
 	Oid			rngtypid;		/* OID of owning range type */
 	Oid			rngsubtype;		/* OID of range's subtype */
-	Oid			rngdtype;		/* OID of difference type, if not 'subtype' */
 	regproc		rngcanonical;	/* canonicalize range, or 0 */
 	regproc		rngparse;		/* optional input parser */
 	regproc		rngdeparse;		/* optional output function */
 	regproc		rngsubcmp;		/* compare values of type 'subtype' */
-	regproc		rngsubplus;		/* add values of type 'subtype' */
-	regproc		rngsubminus;	/* subtract values of type 'subtype' */
 } FormData_pg_range;
 
 /* ----------------
@@ -54,16 +51,13 @@ typedef FormData_pg_range *Form_pg_range;
  *		compiler constants for pg_range
  * ----------------
  */
-#define Natts_pg_range					9
+#define Natts_pg_range					6
 #define Anum_pg_range_rngtypid			1
 #define Anum_pg_range_rngsubtype		2
-#define Anum_pg_range_rngdtype			3
-#define Anum_pg_range_rngalign			4
-#define Anum_pg_range_rnginput			5
-#define Anum_pg_range_rngoutput			6
-#define Anum_pg_range_rngsubcmp			7
-#define Anum_pg_range_rngsubplus		8
-#define Anum_pg_range_rngsubminus		9
+#define Anum_pg_range_rngcanonical		3
+#define Anum_pg_range_rnginput			4
+#define Anum_pg_range_rngoutput			5
+#define Anum_pg_range_rngsubcmp			6
 
 /* ----------------
  *		pg_range has no initial contents
@@ -74,10 +68,9 @@ typedef FormData_pg_range *Form_pg_range;
  * prototypes for functions in pg_range.c
  */
 
-void RangeCreate(Oid rangeTypeOid, Oid rangeSubType, Oid rangeDiffType,
+void RangeCreate(Oid rangeTypeOid, Oid rangeSubType,
 				 regproc rangeCanonical, regproc rangeParse,
-				 regproc rangeDeparse, regproc rangeSubtypeCmp,
-				 regproc rangeSubtypePlus, regproc rangeSubtypeMinus);
+				 regproc rangeDeparse, regproc rangeSubtypeCmp);
 void RangeDelete(Oid rangeTypeOid);
 
 #endif   /* PG_RANGE_H */
