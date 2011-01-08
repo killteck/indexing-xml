@@ -25,6 +25,7 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_range.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
@@ -2766,4 +2767,61 @@ get_namespace_name(Oid nspid)
 	}
 	else
 		return NULL;
+}
+
+Oid
+get_range_subtype(Oid rangeOid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(rangeOid));
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_range	rngtup = (Form_pg_range) GETSTRUCT(tp);
+		Oid				result;
+
+		result = rngtup->rngsubtype;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
+}
+
+Oid
+get_range_subtype_cmp(Oid rangeOid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(rangeOid));
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_range	rngtup = (Form_pg_range) GETSTRUCT(tp);
+		Oid				result;
+
+		result = rngtup->rngsubcmp;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
+}
+
+Oid
+get_range_canonical(Oid rangeOid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(rangeOid));
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_range	rngtup = (Form_pg_range) GETSTRUCT(tp);
+		Oid				result;
+
+		result = rngtup->rngcanonical;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
 }
