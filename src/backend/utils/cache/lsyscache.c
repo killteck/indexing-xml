@@ -1928,7 +1928,6 @@ get_type_io_data(Oid typid,
 	ReleaseSysCache(typeTuple);
 }
 
-#ifdef NOT_USED
 char
 get_typalign(Oid typid)
 {
@@ -1947,7 +1946,6 @@ get_typalign(Oid typid)
 	else
 		return 'i';
 }
-#endif
 
 char
 get_typstorage(Oid typid)
