@@ -28,8 +28,8 @@
  *		Create an entry in pg_range.
  */
 void
-RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeCanonical,
-			regproc rangeParse, regproc rangeDeparse, regproc rangeSubtypeCmp)
+RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeSubtypeCmp,
+			regproc rangeCanonical)
 {
 	Relation			pg_range;
 	Datum				values[Natts_pg_range];
@@ -44,10 +44,8 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeCanonical,
 
 	values[Anum_pg_range_rngtypid - 1]	   = ObjectIdGetDatum(rangeTypeOid);
 	values[Anum_pg_range_rngsubtype - 1]   = ObjectIdGetDatum(rangeSubType);
-	values[Anum_pg_range_rngcanonical - 1] = ObjectIdGetDatum(rangeCanonical);
-	values[Anum_pg_range_rnginput - 1]	   = ObjectIdGetDatum(rangeParse);
-	values[Anum_pg_range_rngoutput - 1]	   = ObjectIdGetDatum(rangeDeparse);
 	values[Anum_pg_range_rngsubcmp - 1]	   = ObjectIdGetDatum(rangeSubtypeCmp);
+	values[Anum_pg_range_rngcanonical - 1] = ObjectIdGetDatum(rangeCanonical);
 
 	tup = heap_form_tuple(RelationGetDescr(pg_range), values, nulls);
 	simple_heap_insert(pg_range, tup);
@@ -65,6 +63,11 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeCanonical,
 	referenced.objectSubId = 0;
 	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
+	referenced.classId	   = ProcedureRelationId;
+	referenced.objectId	   = rangeSubtypeCmp;
+	referenced.objectSubId = 0;
+	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+
 	if (OidIsValid(rangeCanonical))
 	{
 		referenced.classId	   = ProcedureRelationId;
@@ -72,27 +75,6 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeCanonical,
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
-
-	if (OidIsValid(rangeParse))
-	{
-		referenced.classId	   = ProcedureRelationId;
-		referenced.objectId	   = rangeParse;
-		referenced.objectSubId = 0;
-		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-	}
-
-	if (OidIsValid(rangeDeparse))
-	{
-		referenced.classId	   = ProcedureRelationId;
-		referenced.objectId	   = rangeDeparse;
-		referenced.objectSubId = 0;
-		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
-	}
-
-	referenced.classId	   = ProcedureRelationId;
-	referenced.objectId	   = rangeSubtypeCmp;
-	referenced.objectSubId = 0;
-	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
 	heap_close(pg_range, RowExclusiveLock);
 }
