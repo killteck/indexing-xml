@@ -1397,10 +1397,10 @@ DefineRange(CreateRangeStmt *stmt)
 				   TYPCATEGORY_RANGE,	/* type-category (range type) */
 				   false,		/* range types are never preferred */
 				   DEFAULT_TYPDELIM,	/* array element delimiter */
-				   F_ENUM_IN,	/* input procedure */ /*TODO*/
-				   F_ENUM_OUT,	/* output procedure */ /*TODO*/
-				   F_ENUM_RECV, /* receive procedure */ /*TODO*/
-				   F_ENUM_SEND, /* send procedure */ /*TODO*/
+				   F_ANYRANGE_IN,	/* input procedure */
+				   F_ANYRANGE_OUT,	/* output procedure */
+				   F_ANYRANGE_RECV, /* receive procedure */
+				   F_ANYRANGE_SEND, /* send procedure */
 				   rangeTypmodIn,	/* typmodin procedure - none */
 				   rangeTypmodOut,	/* typmodout procedure - none */
 				   rangeAnalyze,	/* analyze procedure - default */

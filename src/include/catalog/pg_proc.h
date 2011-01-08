@@ -4895,6 +4895,15 @@ DESCR("fetch the last row value");
 DATA(insert OID = 3114 (  nth_value		PGNSP PGUID 12 1 0 0 f t f t f i 2 0 2283 "2283 23" _null_ _null_ _null_ _null_ window_nth_value _null_ _null_ _null_ ));
 DESCR("fetch the Nth row value");
 
+/* procs for range types */
+DATA(insert OID = 3832 (  anyrange_in	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 "2275 26 23" _null_ _null_ _null_ _null_ anyrange_in _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3833 (  anyrange_out	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 2275 "3831" _null_ _null_ _null_ _null_ anyrange_out _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3834 (  anyrange_recv	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 "2281 26 23" _null_ _null_ _null_ _null_ anyrange_recv _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3835 (  anyrange_send	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 17 "3831" _null_ _null_ _null_ _null_ anyrange_send _null_ _null_ _null_ ));
+DESCR("I/O");
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result

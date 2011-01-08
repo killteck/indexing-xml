@@ -624,6 +624,8 @@ DATA(insert OID = 2776 ( anynonarray	PGNSP PGUID  4 t p P f t \054 0 0 0 anynona
 DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in anyenum_out - - - - - i p f 0 -1 0 _null_ _null_ ));
 #define ANYENUMOID		3500
 
+DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  4 t p P f t \054 0 0 0 anyrange_in anyrange_out - - - - - i p f 0 -1 0 _null_ _null_ ));
+#define ANYRANGEOID		3831
 
 /*
  * macros
