@@ -165,6 +165,7 @@ ProcedureCreate(const char *procedureName,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
+			case ANYRANGEOID:
 				genericInParam = true;
 				break;
 			case INTERNALOID:

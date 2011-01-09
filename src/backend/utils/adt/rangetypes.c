@@ -33,7 +33,11 @@ static void anyrange_parse(const char *input_str,  char *flags,
 						   char **lbound_str, char **ubound_str);
 static char *anyrange_deparse(char flags, char *lbound_str, char *ubound_str);
 
-/* Basic I/O support */
+/*
+ *----------------------------------------------------------
+ * I/O FUNCTIONS
+ *----------------------------------------------------------
+ */
 
 Datum
 anyrange_in(PG_FUNCTION_ARGS)
@@ -82,7 +86,7 @@ anyrange_in(PG_FUNCTION_ARGS)
 Datum
 anyrange_out(PG_FUNCTION_ARGS)
 {
-	Datum		range = PG_GETARG_DATUM(0);
+	RangeType *range = PG_GETARG_RANGE(0);
 
 	Oid			rngtypoid;
 	Oid			subtype;
@@ -128,6 +132,202 @@ anyrange_send(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID();
 }
+
+
+/*
+ *----------------------------------------------------------
+ * GENERIC FUNCTIONS
+ *----------------------------------------------------------
+ */
+
+
+/* range -> subtype */
+Datum
+anyrange_lbound(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_ubound(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+
+/* range -> bool */
+Datum
+anyrange_empty(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_lb_null(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_ub_null(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_lb_inf(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_ub_inf(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+
+/* range, range -> bool */
+Datum
+anyrange_eq(PG_FUNCTION_ARGS)
+{
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	Oid			rtype1, rtype2;
+	char		fl1, fl2;
+	Datum		lb1, lb2;
+	Datum		ub1, ub2;
+	regproc		cmpFn;
+
+	anyrange_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+	anyrange_deserialize(r2, &rtype2, &fl2, &lb2, &ub2);
+
+	if (rtype1 != rtype2)
+		elog(ERROR, "range types do not match");
+
+	if (fl1 != fl2)
+		PG_RETURN_BOOL(false);
+
+	cmpFn = get_range_subtype_cmp(rtype1);
+
+	if (!DatumGetBool(OidFunctionCall2(cmpFn, lb1, lb2)))
+		PG_RETURN_BOOL(false);
+
+	if (!DatumGetBool(OidFunctionCall2(cmpFn, ub1, ub2)))
+		PG_RETURN_BOOL(false);
+
+	PG_RETURN_BOOL(true);
+}
+
+Datum
+anyrange_neq(PG_FUNCTION_ARGS)
+{
+	bool eq = anyrange_eq(fcinfo);
+
+	PG_RETURN_BOOL(!eq);
+}
+
+Datum
+anyrange_contains(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_contained_by(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_before(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_after(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_overlaps(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_overleft(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_overright(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+
+/* range, range -> range */
+Datum
+anyrange_minus(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_union(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_intersect(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+
+/* GiST support */
+Datum
+anyrange_gist_consistent(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_gist_union(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_gist_penalty(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_gist_picksplit(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+anyrange_gist_same(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+
+/*
+ *----------------------------------------------------------
+ * SUPPORT FUNCTIONS
+ *----------------------------------------------------------
+ */
 
 /*
  * This serializes a range, but does not canonicalize it. This should
@@ -192,8 +392,8 @@ anyrange_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 }
 
 void
-anyrange_deserialize(Datum range, Oid *rngtypoid, char *flags, Datum *lbound,
-					 Datum *ubound)
+anyrange_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
+					 Datum *lbound, Datum *ubound)
 {
 	char		*ptr = VARDATA(range);
 	int			 llen;
@@ -255,7 +455,11 @@ make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 	PG_RETURN_DATUM(range);
 }
 
-/* STATIC FUNCTIONS */
+/*
+ *----------------------------------------------------------
+ * STATIC FUNCTIONS
+ *----------------------------------------------------------
+ */
 
 static void
 anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
