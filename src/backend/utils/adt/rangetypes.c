@@ -68,8 +68,10 @@ anyrange_in(PG_FUNCTION_ARGS)
 	getTypeInputInfo(subtype, &subInput, &ioParam);
 	fmgr_info(subInput, &subInputFn);
 
-	lbound = InputFunctionCall(&subInputFn, lbound_str, ioParam, typmod);
-	ubound = InputFunctionCall(&subInputFn, ubound_str, ioParam, typmod);
+	if (RANGE_HAS_LBOUND(flags))
+		lbound = InputFunctionCall(&subInputFn, lbound_str, ioParam, typmod);
+	if (RANGE_HAS_UBOUND(flags))
+		ubound = InputFunctionCall(&subInputFn, ubound_str, ioParam, typmod);
 
 	/* serialize and canonicalize */
 	range = make_range(rngtypoid, flags, lbound, ubound);
@@ -103,8 +105,11 @@ anyrange_out(PG_FUNCTION_ARGS)
 	/* output */
 	getTypeOutputInfo(subtype, &subOutput, &isVarlena);
 	fmgr_info(subOutput, &subOutputFn);
-	lbound_str = OutputFunctionCall(&subOutputFn, lbound);
-	ubound_str = OutputFunctionCall(&subOutputFn, ubound);
+
+	if (RANGE_HAS_LBOUND(flags))
+		lbound_str = OutputFunctionCall(&subOutputFn, lbound);
+	if (RANGE_HAS_UBOUND(flags))
+		ubound_str = OutputFunctionCall(&subOutputFn, ubound);
 
 	/* deparse */
 	output_str = anyrange_deparse(flags, lbound_str, ubound_str);
@@ -137,8 +142,8 @@ anyrange_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 	Oid			 subtype  = get_range_subtype(rngtypoid);
 	int16		 typlen	  = get_typlen(subtype);
 	char		 typalign = get_typalign(subtype);
-	size_t		 llen	  = att_addlength_datum(0, typlen, lbound);
-	size_t		 ulen	  = att_addlength_datum(0, typlen, ubound);
+	size_t		 llen;
+	size_t		 ulen;
 
 	msize  = VARHDRSZ;
 	msize += sizeof(Oid);
@@ -146,12 +151,14 @@ anyrange_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 
 	if (RANGE_HAS_LBOUND(flags))
 	{
+		llen = att_addlength_datum(0, typlen, lbound);
 		msize = att_align_nominal(msize, typalign);
 		msize += llen;
 	}
 
 	if (RANGE_HAS_UBOUND(flags))
 	{
+		ulen = att_addlength_datum(0, typlen, ubound);
 		msize = att_align_nominal(msize, typalign);
 		msize += ulen;
 	}
@@ -215,6 +222,8 @@ anyrange_deserialize(Datum range, Oid *rngtypoid, char *flags, Datum *lbound,
 		memcpy((void *) *lbound, ptr, llen);
 		ptr += llen;
 	}
+	else
+		*lbound = (Datum) 0;
 
 	if (RANGE_HAS_UBOUND(*flags))
 	{
@@ -224,6 +233,8 @@ anyrange_deserialize(Datum range, Oid *rngtypoid, char *flags, Datum *lbound,
 		memcpy((void *) *ubound, ptr, ulen);
 		ptr += ulen;
 	}
+	else
+		*ubound = (Datum) 0;
 }
 
 /*
@@ -256,6 +267,8 @@ anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
 	int			 lidx		   = 0;
 	int			 uidx		   = 0;
 	bool		 inside_quotes = false;
+	bool		 lb_quoted	   = false;
+	bool		 ub_quoted	   = false;
 	bool		 escape		   = false;
 	char		 fl			   = 0;
 	RangePState  pstate		   = RANGE_PSTATE_INIT;
@@ -270,7 +283,13 @@ anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
 			if (pstate != RANGE_PSTATE_LB && pstate != RANGE_PSTATE_UB)
 				elog(ERROR, "syntax error on range input, character %d", i);
 			if (ch == '"')
+			{
+				if (pstate == RANGE_PSTATE_LB)
+					lb_quoted = true;
+				else if (pstate == RANGE_PSTATE_UB)
+					ub_quoted = true;
 				inside_quotes = !inside_quotes;
+			}
 			else if (ch == '\\')
 				escape = true;
 			continue;
@@ -329,21 +348,40 @@ anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
 			continue;
 		}
 
-		elog(ERROR, "syntax error on range input, character %d", i);
+		elog(ERROR, "syntax error on range input: characters after end of input");
 	}
 
-	if (!RANGE_HAS_LBOUND(fl))
-		fl &= ~RANGE_LB_INC;
-
-	if (!RANGE_HAS_UBOUND(fl))
-		fl &= ~RANGE_UB_INC;
+	if (inside_quotes)
+		elog(ERROR, "syntax error on range input: unterminated quotation");
 
 	if (fl & RANGE_EMPTY)
 		fl = RANGE_EMPTY;
 
-	*flags		= fl;
+	if (!lb_quoted && strncmp(lb, "NULL", ilen) == 0)
+		fl |= RANGE_LB_NULL;
+	if (!ub_quoted && strncmp(ub, "NULL", ilen) == 0)
+		fl |= RANGE_UB_NULL;
+	if (!lb_quoted && strncmp(lb, "INF", ilen) == 0)
+		fl |= RANGE_LB_INF;
+	if (!ub_quoted && strncmp(ub, "INF", ilen) == 0)
+		fl |= RANGE_UB_INF;
+
+	if (!RANGE_HAS_LBOUND(fl))
+	{
+		lb	= NULL;
+		fl &= ~RANGE_LB_INC;
+	}
+
+	if (!RANGE_HAS_UBOUND(fl))
+	{
+		ub	= NULL;
+		fl &= ~RANGE_UB_INC;
+	}
+
 	*lbound_str = lb;
 	*ubound_str = ub;
+	*flags		= fl;
+
 	return;
 }
 
@@ -362,11 +400,13 @@ anyrange_deparse(char flags, char *lbound_str, char *ubound_str)
 	lb_c = (flags & RANGE_LB_INC) ? '[' : '(';
 	ub_c = (flags & RANGE_UB_INC) ? ']' : ')';
 
-	lb_str = (flags & RANGE_LB_NULL) ? "NULL" : lbound_str;
-	ub_str = (flags & RANGE_UB_NULL) ? "NULL" : ubound_str;
+	lb_str = lbound_str;
+	ub_str = ubound_str;
 
-	lb_str = (flags & RANGE_LB_INF) ? "INF" : lbound_str;
-	ub_str = (flags & RANGE_UB_INF) ? "INF" : ubound_str;
+	if (!RANGE_HAS_LBOUND(flags))
+		lb_str = (flags & RANGE_LB_NULL) ? "NULL" : "INF";
+	if (!RANGE_HAS_UBOUND(flags))
+		ub_str = (flags & RANGE_UB_NULL) ? "NULL" : "INF";
 
 	appendStringInfo(str, "%c %s, %s %c", lb_c, lb_str, ub_str, ub_c);
 
