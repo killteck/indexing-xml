@@ -16,10 +16,18 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "fmgr.h"
+#include "lib/stringinfo.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rangetypes.h"
 
+typedef enum
+{
+	RANGE_PSTATE_INIT,
+	RANGE_PSTATE_LB,
+	RANGE_PSTATE_UB,
+	RANGE_PSTATE_DONE
+} RangePState;
 
 static void anyrange_parse(const char *input_str,  char *flags,
 						   char **lbound_str, char **ubound_str);
@@ -205,6 +213,7 @@ anyrange_deserialize(Datum range, Oid *rngtypoid, char *flags, Datum *lbound,
 		llen = att_addlength_datum(0, typlen, (Datum) ptr);
 		*lbound = (Datum) palloc(llen);
 		memcpy((void *) *lbound, ptr, llen);
+		ptr += llen;
 	}
 
 	if (RANGE_HAS_UBOUND(*flags))
@@ -213,6 +222,7 @@ anyrange_deserialize(Datum range, Oid *rngtypoid, char *flags, Datum *lbound,
 		ulen = att_addlength_datum(0, typlen, (Datum) ptr);
 		*ubound = (Datum) palloc(ulen);
 		memcpy((void *) *ubound, ptr, ulen);
+		ptr += ulen;
 	}
 }
 
@@ -240,14 +250,125 @@ static void
 anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
 			   char **ubound_str)
 {
-	*flags = 0;
-	*lbound_str = "1";
-	*ubound_str = "10";
+	int			 ilen		   = strlen(input_str);
+	char		*lb			   = palloc0(ilen + 1);
+	char		*ub			   = palloc0(ilen + 1);
+	int			 lidx		   = 0;
+	int			 uidx		   = 0;
+	bool		 inside_quotes = false;
+	bool		 escape		   = false;
+	char		 fl			   = 0;
+	RangePState  pstate		   = RANGE_PSTATE_INIT;
+	int			 i;
+
+	for (i = 0; i < ilen; i++)
+	{
+		char ch = input_str[i];
+
+		if((ch == '"' || ch == '\\') && !escape)
+		{
+			if (pstate != RANGE_PSTATE_LB && pstate != RANGE_PSTATE_UB)
+				elog(ERROR, "syntax error on range input, character %d", i);
+			if (ch == '"')
+				inside_quotes = !inside_quotes;
+			else if (ch == '\\')
+				escape = true;
+			continue;
+		}
+
+		escape = false;
+
+		if(isspace(ch) && !inside_quotes)
+			continue;
+
+		if(ch == '-' && pstate == RANGE_PSTATE_INIT)
+		{
+			fl |= RANGE_EMPTY;
+			pstate = RANGE_PSTATE_DONE;
+			/* read the rest to make sure it's whitespace */
+			continue;
+		}
+
+		if((ch == '[' || ch == '(') && !inside_quotes)
+		{
+			if (pstate != RANGE_PSTATE_INIT)
+				elog(ERROR, "syntax error on range input, character %d", i);
+			if (ch == '[')
+				fl |= RANGE_LB_INC;
+			pstate = RANGE_PSTATE_LB;
+			continue;
+		}
+
+		if((ch == ')' || ch == ']') && !inside_quotes)
+		{
+			if (pstate != RANGE_PSTATE_UB)
+				elog(ERROR, "syntax error on range input, character %d", i);
+			if (ch == ']')
+				fl |= RANGE_UB_INC;
+			pstate = RANGE_PSTATE_DONE;
+			continue;
+		}
+
+		if(ch == ',' && !inside_quotes)
+		{
+			if (pstate != RANGE_PSTATE_LB)
+				elog(ERROR, "syntax error on range input, character %d", i);
+			pstate = RANGE_PSTATE_UB;
+			continue;
+		}
+
+		if (pstate == RANGE_PSTATE_LB)
+		{
+			lb[lidx++] = ch;
+			continue;
+		}
+
+		if (pstate == RANGE_PSTATE_UB)
+		{
+			ub[uidx++] = ch;
+			continue;
+		}
+
+		elog(ERROR, "syntax error on range input, character %d", i);
+	}
+
+	if (!RANGE_HAS_LBOUND(fl))
+		fl &= ~RANGE_LB_INC;
+
+	if (!RANGE_HAS_UBOUND(fl))
+		fl &= ~RANGE_UB_INC;
+
+	if (fl & RANGE_EMPTY)
+		fl = RANGE_EMPTY;
+
+	*flags		= fl;
+	*lbound_str = lb;
+	*ubound_str = ub;
 	return;
 }
 
 static char *
 anyrange_deparse(char flags, char *lbound_str, char *ubound_str)
 {
-	return pstrdup("(1, 10)");
+	StringInfo	 str = makeStringInfo();
+	char		 lb_c;
+	char		 ub_c;
+	char		*lb_str;
+	char		*ub_str;
+
+	if (flags & RANGE_EMPTY)
+		return pstrdup("-");
+
+	lb_c = (flags & RANGE_LB_INC) ? '[' : '(';
+	ub_c = (flags & RANGE_UB_INC) ? ']' : ')';
+
+	lb_str = (flags & RANGE_LB_NULL) ? "NULL" : lbound_str;
+	ub_str = (flags & RANGE_UB_NULL) ? "NULL" : ubound_str;
+
+	lb_str = (flags & RANGE_LB_INF) ? "INF" : lbound_str;
+	ub_str = (flags & RANGE_UB_INF) ? "INF" : ubound_str;
+
+	appendStringInfo(str, "%c %s, %s %c", lb_c, lb_str, ub_str, ub_c);
+
+	return str->data;
 }

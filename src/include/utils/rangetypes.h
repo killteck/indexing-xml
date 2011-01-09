@@ -12,10 +12,12 @@
 
 /* flags */
 #define RANGE_EMPTY		0x01
-#define RANGE_LB_NULL	0x02
-#define RANGE_LB_INF	0x04
-#define RANGE_UB_NULL	0x08
-#define RANGE_UB_INF	0x10
+#define RANGE_LB_INC	0x02
+#define RANGE_LB_NULL	0x04
+#define RANGE_LB_INF	0x08
+#define RANGE_UB_INC	0x10
+#define RANGE_UB_NULL	0x20
+#define RANGE_UB_INF	0x40
 
 #define RANGE_HAS_LBOUND(flags) (!(flags & (RANGE_EMPTY |   \
 											RANGE_LB_NULL |	\
