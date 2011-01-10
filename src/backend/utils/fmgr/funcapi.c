@@ -409,6 +409,7 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 	bool		have_anyarray_result = false;
 	bool		have_anynonarray = false;
 	bool		have_anyenum = false;
+	bool		have_anyrange = false;
 	Oid			anyelement_type = InvalidOid;
 	Oid			anyarray_type = InvalidOid;
 	int			i;
@@ -432,6 +433,9 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 				have_anyelement_result = true;
 				have_anyenum = true;
 				break;
+			case ANYRANGEOID:
+				have_anyelement_result = true;
+				have_anyrange = true;
 			default:
 				break;
 		}
@@ -453,6 +457,7 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
+			case ANYRANGEOID:
 				if (!OidIsValid(anyelement_type))
 					anyelement_type = get_call_expr_argtype(call_expr, i);
 				break;
@@ -487,6 +492,10 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 	if (have_anyenum && !type_is_enum(anyelement_type))
 		return false;
 
+	/* Enforce ANYRANGE if needed */
+	if (have_anyrange && !type_is_range(anyelement_type))
+		return false;
+
 	/* And finally replace the tuple column types as needed */
 	for (i = 0; i < natts; i++)
 	{
@@ -495,6 +504,7 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
+			case ANYRANGEOID:
 				TupleDescInitEntry(tupdesc, i + 1,
 								   NameStr(tupdesc->attrs[i]->attname),
 								   anyelement_type,
@@ -547,6 +557,7 @@ resolve_polymorphic_argtypes(int numargs, Oid *argtypes, char *argmodes,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
+			case ANYRANGEOID:
 				if (argmode == PROARGMODE_OUT || argmode == PROARGMODE_TABLE)
 					have_anyelement_result = true;
 				else
@@ -611,6 +622,7 @@ resolve_polymorphic_argtypes(int numargs, Oid *argtypes, char *argmodes,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
+			case ANYRANGEOID:
 				argtypes[i] = anyelement_type;
 				break;
 			case ANYARRAYOID:

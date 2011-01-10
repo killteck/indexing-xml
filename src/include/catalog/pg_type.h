@@ -659,6 +659,7 @@ DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  4 t p P f t \054 0 0 0 anyrange_
 	((typid) == ANYELEMENTOID || \
 	 (typid) == ANYARRAYOID || \
 	 (typid) == ANYNONARRAYOID || \
-	 (typid) == ANYENUMOID)
+	 (typid) == ANYENUMOID || \
+	 (typid) == ANYRANGEOID)
 
 #endif   /* PG_TYPE_H */

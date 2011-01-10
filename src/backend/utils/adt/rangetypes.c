@@ -29,9 +29,9 @@ typedef enum
 	RANGE_PSTATE_DONE
 } RangePState;
 
-static void anyrange_parse(const char *input_str,  char *flags,
+static void range_parse(const char *input_str,  char *flags,
 						   char **lbound_str, char **ubound_str);
-static char *anyrange_deparse(char flags, char *lbound_str, char *ubound_str);
+static char *range_deparse(char flags, char *lbound_str, char *ubound_str);
 
 /*
  *----------------------------------------------------------
@@ -40,7 +40,7 @@ static char *anyrange_deparse(char flags, char *lbound_str, char *ubound_str);
  */
 
 Datum
-anyrange_in(PG_FUNCTION_ARGS)
+range_in(PG_FUNCTION_ARGS)
 {
 	char		*input_str = PG_GETARG_CSTRING(0);
 	Oid			 rngtypoid = PG_GETARG_OID(1);
@@ -66,7 +66,7 @@ anyrange_in(PG_FUNCTION_ARGS)
 	subtype = get_range_subtype(rngtypoid);
 
 	/* parse */
-	anyrange_parse(input_str, &flags, &lbound_str, &ubound_str);
+	range_parse(input_str, &flags, &lbound_str, &ubound_str);
 
 	/* input */
 	getTypeInputInfo(subtype, &subInput, &ioParam);
@@ -84,7 +84,7 @@ anyrange_in(PG_FUNCTION_ARGS)
 }
 
 Datum
-anyrange_out(PG_FUNCTION_ARGS)
+range_out(PG_FUNCTION_ARGS)
 {
 	RangeType *range = PG_GETARG_RANGE(0);
 
@@ -103,7 +103,7 @@ anyrange_out(PG_FUNCTION_ARGS)
 	char		*output_str;
 
 	/* deserialize */
-	anyrange_deserialize(range, &rngtypoid, &flags, &lbound, &ubound);
+	range_deserialize(range, &rngtypoid, &flags, &lbound, &ubound);
 	subtype = get_range_subtype(rngtypoid);
 
 	/* output */
@@ -116,19 +116,19 @@ anyrange_out(PG_FUNCTION_ARGS)
 		ubound_str = OutputFunctionCall(&subOutputFn, ubound);
 
 	/* deparse */
-	output_str = anyrange_deparse(flags, lbound_str, ubound_str);
+	output_str = range_deparse(flags, lbound_str, ubound_str);
 
 	PG_RETURN_CSTRING(output_str);
 }
 
 Datum
-anyrange_recv(PG_FUNCTION_ARGS)
+range_recv(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID();
 }
 
 Datum
-anyrange_send(PG_FUNCTION_ARGS)
+range_send(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID();
 }
@@ -143,13 +143,13 @@ anyrange_send(PG_FUNCTION_ARGS)
 
 /* range -> subtype */
 Datum
-anyrange_lbound(PG_FUNCTION_ARGS)
+range_lbound(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_ubound(PG_FUNCTION_ARGS)
+range_ubound(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -157,31 +157,31 @@ anyrange_ubound(PG_FUNCTION_ARGS)
 
 /* range -> bool */
 Datum
-anyrange_empty(PG_FUNCTION_ARGS)
+range_empty(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_lb_null(PG_FUNCTION_ARGS)
+range_lb_null(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_ub_null(PG_FUNCTION_ARGS)
+range_ub_null(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_lb_inf(PG_FUNCTION_ARGS)
+range_lb_inf(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_ub_inf(PG_FUNCTION_ARGS)
+range_ub_inf(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -189,7 +189,7 @@ anyrange_ub_inf(PG_FUNCTION_ARGS)
 
 /* range, range -> bool */
 Datum
-anyrange_eq(PG_FUNCTION_ARGS)
+range_eq(PG_FUNCTION_ARGS)
 {
 	RangeType *r1 = PG_GETARG_RANGE(0);
 	RangeType *r2 = PG_GETARG_RANGE(1);
@@ -200,8 +200,8 @@ anyrange_eq(PG_FUNCTION_ARGS)
 	Datum		ub1, ub2;
 	regproc		cmpFn;
 
-	anyrange_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
-	anyrange_deserialize(r2, &rtype2, &fl2, &lb2, &ub2);
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+	range_deserialize(r2, &rtype2, &fl2, &lb2, &ub2);
 
 	if (rtype1 != rtype2)
 		elog(ERROR, "range types do not match");
@@ -211,61 +211,61 @@ anyrange_eq(PG_FUNCTION_ARGS)
 
 	cmpFn = get_range_subtype_cmp(rtype1);
 
-	if (!DatumGetBool(OidFunctionCall2(cmpFn, lb1, lb2)))
+	if (DatumGetInt32(OidFunctionCall2(cmpFn, lb1, lb2)) != 0)
 		PG_RETURN_BOOL(false);
 
-	if (!DatumGetBool(OidFunctionCall2(cmpFn, ub1, ub2)))
+	if (DatumGetInt32(OidFunctionCall2(cmpFn, ub1, ub2)) != 0)
 		PG_RETURN_BOOL(false);
 
 	PG_RETURN_BOOL(true);
 }
 
 Datum
-anyrange_neq(PG_FUNCTION_ARGS)
+range_neq(PG_FUNCTION_ARGS)
 {
-	bool eq = anyrange_eq(fcinfo);
+	bool eq = DatumGetBool(range_eq(fcinfo));
 
 	PG_RETURN_BOOL(!eq);
 }
 
 Datum
-anyrange_contains(PG_FUNCTION_ARGS)
+range_contains(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_contained_by(PG_FUNCTION_ARGS)
+range_contained_by(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_before(PG_FUNCTION_ARGS)
+range_before(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_after(PG_FUNCTION_ARGS)
+range_after(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_overlaps(PG_FUNCTION_ARGS)
+range_overlaps(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_overleft(PG_FUNCTION_ARGS)
+range_overleft(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_overright(PG_FUNCTION_ARGS)
+range_overright(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -273,19 +273,19 @@ anyrange_overright(PG_FUNCTION_ARGS)
 
 /* range, range -> range */
 Datum
-anyrange_minus(PG_FUNCTION_ARGS)
+range_minus(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_union(PG_FUNCTION_ARGS)
+range_union(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_intersect(PG_FUNCTION_ARGS)
+range_intersect(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -293,31 +293,31 @@ anyrange_intersect(PG_FUNCTION_ARGS)
 
 /* GiST support */
 Datum
-anyrange_gist_consistent(PG_FUNCTION_ARGS)
+range_gist_consistent(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_gist_union(PG_FUNCTION_ARGS)
+range_gist_union(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_gist_penalty(PG_FUNCTION_ARGS)
+range_gist_penalty(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_gist_picksplit(PG_FUNCTION_ARGS)
+range_gist_picksplit(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
 
 Datum
-anyrange_gist_same(PG_FUNCTION_ARGS)
+range_gist_same(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -334,7 +334,7 @@ anyrange_gist_same(PG_FUNCTION_ARGS)
  * only be called by a canonicalization function.
  */
 Datum
-anyrange_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
+range_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 {
 	Datum		 range;
 	size_t		 msize;
@@ -392,8 +392,8 @@ anyrange_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 }
 
 void
-anyrange_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
-					 Datum *lbound, Datum *ubound)
+range_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
+				  Datum *lbound, Datum *ubound)
 {
 	char		*ptr = VARDATA(range);
 	int			 llen;
@@ -447,7 +447,7 @@ make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 	Datum range;
 	Oid canonical = get_range_canonical(rngtypoid);
 
-	range = anyrange_serialize(rngtypoid, flags, lbound, ubound);
+	range = range_serialize(rngtypoid, flags, lbound, ubound);
 
 	if (OidIsValid(canonical))
 		range = OidFunctionCall1(canonical, range);
@@ -462,7 +462,7 @@ make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
  */
 
 static void
-anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
+range_parse(const char *input_str,  char *flags, char **lbound_str,
 			   char **ubound_str)
 {
 	int			 ilen		   = strlen(input_str);
@@ -590,7 +590,7 @@ anyrange_parse(const char *input_str,  char *flags, char **lbound_str,
 }
 
 static char *
-anyrange_deparse(char flags, char *lbound_str, char *ubound_str)
+range_deparse(char flags, char *lbound_str, char *ubound_str)
 {
 	StringInfo	 str = makeStringInfo();
 	char		 lb_c;

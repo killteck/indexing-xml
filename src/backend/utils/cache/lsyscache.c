@@ -2198,6 +2198,16 @@ type_is_enum(Oid typid)
 }
 
 /*
+ * type_is_range
+ *	  Returns true if the given type is an range type.
+ */
+bool
+type_is_range(Oid typid)
+{
+	return (get_typtype(typid) == TYPTYPE_RANGE);
+}
+
+/*
  * get_type_category_preferred
  *
  *		Given the type OID, fetch its category and preferred-type status.

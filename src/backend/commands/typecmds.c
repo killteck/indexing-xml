@@ -1393,14 +1393,14 @@ DefineRange(CreateRangeStmt *stmt)
 				   0,			/* relation kind (ditto) */
 				   GetUserId(), /* owner's ID */
 				   -1,			/* internal size */
-				   TYPTYPE_RANGE,	/* type-type (rage type) */
+				   TYPTYPE_RANGE,	/* type-type (range type) */
 				   TYPCATEGORY_RANGE,	/* type-category (range type) */
 				   false,		/* range types are never preferred */
 				   DEFAULT_TYPDELIM,	/* array element delimiter */
-				   F_ANYRANGE_IN,	/* input procedure */
-				   F_ANYRANGE_OUT,	/* output procedure */
-				   F_ANYRANGE_RECV, /* receive procedure */
-				   F_ANYRANGE_SEND, /* send procedure */
+				   F_RANGE_IN,	/* input procedure */
+				   F_RANGE_OUT,	/* output procedure */
+				   F_RANGE_RECV, /* receive procedure */
+				   F_RANGE_SEND, /* send procedure */
 				   rangeTypmodIn,	/* typmodin procedure - none */
 				   rangeTypmodOut,	/* typmodout procedure - none */
 				   rangeAnalyze,	/* analyze procedure - default */

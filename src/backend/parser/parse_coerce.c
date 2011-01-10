@@ -142,6 +142,7 @@ coerce_type(ParseState *pstate, Node *node,
 		targetTypeId == ANYELEMENTOID ||
 		targetTypeId == ANYNONARRAYOID ||
 		(targetTypeId == ANYARRAYOID && inputTypeId != UNKNOWNOID) ||
+		(targetTypeId == ANYRANGEOID && inputTypeId != UNKNOWNOID) ||
 		(targetTypeId == ANYENUMOID && inputTypeId != UNKNOWNOID))
 	{
 		/*
@@ -1249,6 +1250,7 @@ check_generic_type_consistency(Oid *actual_arg_types,
 	bool		have_anyelement = false;
 	bool		have_anynonarray = false;
 	bool		have_anyenum = false;
+	bool		have_anyrange = false;
 
 	/*
 	 * Loop through the arguments to see if we have any that are polymorphic.
@@ -1261,13 +1263,16 @@ check_generic_type_consistency(Oid *actual_arg_types,
 
 		if (decl_type == ANYELEMENTOID ||
 			decl_type == ANYNONARRAYOID ||
-			decl_type == ANYENUMOID)
+			decl_type == ANYENUMOID ||
+			decl_type == ANYRANGEOID)
 		{
 			have_anyelement = true;
 			if (decl_type == ANYNONARRAYOID)
 				have_anynonarray = true;
 			else if (decl_type == ANYENUMOID)
 				have_anyenum = true;
+			else if (decl_type == ANYRANGEOID)
+				have_anyrange = true;
 			if (actual_type == UNKNOWNOID)
 				continue;
 			if (OidIsValid(elem_typeid) && actual_type != elem_typeid)
@@ -1406,9 +1411,11 @@ enforce_generic_type_consistency(Oid *actual_arg_types,
 	Oid			array_typelem;
 	bool		have_anyelement = (rettype == ANYELEMENTOID ||
 								   rettype == ANYNONARRAYOID ||
-								   rettype == ANYENUMOID);
+								   rettype == ANYENUMOID ||
+								   rettype == ANYRANGEOID);
 	bool		have_anynonarray = (rettype == ANYNONARRAYOID);
 	bool		have_anyenum = (rettype == ANYENUMOID);
+	bool		have_anyrange = (rettype == ANYRANGEOID);
 
 	/*
 	 * Loop through the arguments to see if we have any that are polymorphic.
@@ -1421,13 +1428,16 @@ enforce_generic_type_consistency(Oid *actual_arg_types,
 
 		if (decl_type == ANYELEMENTOID ||
 			decl_type == ANYNONARRAYOID ||
-			decl_type == ANYENUMOID)
+			decl_type == ANYENUMOID ||
+			decl_type == ANYRANGEOID)
 		{
 			have_generics = have_anyelement = true;
 			if (decl_type == ANYNONARRAYOID)
 				have_anynonarray = true;
 			else if (decl_type == ANYENUMOID)
 				have_anyenum = true;
+			else if (decl_type == ANYRANGEOID)
+				have_anyrange = true;
 			if (actual_type == UNKNOWNOID)
 			{
 				have_unknowns = true;
@@ -1544,6 +1554,16 @@ enforce_generic_type_consistency(Oid *actual_arg_types,
 							format_type_be(elem_typeid))));
 	}
 
+	if (have_anyrange && elem_typeid != ANYELEMENTOID)
+	{
+		/* require the element type to be an enum */
+		if (!type_is_range(elem_typeid))
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("type matched to anyrange is not a range type: %s",
+							format_type_be(elem_typeid))));
+	}
+
 	/*
 	 * If we had any unknown inputs, re-scan to assign correct types
 	 */
@@ -1559,7 +1579,8 @@ enforce_generic_type_consistency(Oid *actual_arg_types,
 
 			if (decl_type == ANYELEMENTOID ||
 				decl_type == ANYNONARRAYOID ||
-				decl_type == ANYENUMOID)
+				decl_type == ANYENUMOID ||
+				decl_type == ANYRANGEOID)
 				declared_arg_types[j] = elem_typeid;
 			else if (decl_type == ANYARRAYOID)
 			{
@@ -1595,7 +1616,8 @@ enforce_generic_type_consistency(Oid *actual_arg_types,
 	/* if we return ANYELEMENT use the appropriate argument type */
 	if (rettype == ANYELEMENTOID ||
 		rettype == ANYNONARRAYOID ||
-		rettype == ANYENUMOID)
+		rettype == ANYENUMOID ||
+		rettype == ANYRANGEOID)
 		return elem_typeid;
 
 	/* we don't return a generic type; send back the original return type */
@@ -1636,7 +1658,8 @@ resolve_generic_type(Oid declared_type,
 		}
 		else if (context_declared_type == ANYELEMENTOID ||
 				 context_declared_type == ANYNONARRAYOID ||
-				 context_declared_type == ANYENUMOID)
+				 context_declared_type == ANYENUMOID ||
+				 context_declared_type == ANYRANGEOID)
 		{
 			/* Use the array type corresponding to actual type */
 			Oid			array_typeid = get_array_type(context_actual_type);
@@ -1651,7 +1674,8 @@ resolve_generic_type(Oid declared_type,
 	}
 	else if (declared_type == ANYELEMENTOID ||
 			 declared_type == ANYNONARRAYOID ||
-			 declared_type == ANYENUMOID)
+			 declared_type == ANYENUMOID ||
+			 declared_type == ANYRANGEOID)
 	{
 		if (context_declared_type == ANYARRAYOID)
 		{
@@ -1667,7 +1691,8 @@ resolve_generic_type(Oid declared_type,
 		}
 		else if (context_declared_type == ANYELEMENTOID ||
 				 context_declared_type == ANYNONARRAYOID ||
-				 context_declared_type == ANYENUMOID)
+				 context_declared_type == ANYENUMOID ||
+				 context_declared_type == ANYRANGEOID)
 		{
 			/* Use the actual type; it doesn't matter if array or not */
 			return context_actual_type;
@@ -1776,6 +1801,11 @@ IsBinaryCoercible(Oid srctype, Oid targettype)
 	/* Also accept any enum type as coercible to ANYENUM */
 	if (targettype == ANYENUMOID)
 		if (type_is_enum(srctype))
+			return true;
+
+	/* Also accept any enum type as coercible to ANYRANGE */
+	if (targettype == ANYRANGEOID)
+		if (type_is_range(srctype))
 			return true;
 
 	/* Also accept any composite type as coercible to RECORD */

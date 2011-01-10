@@ -4900,9 +4900,15 @@ DATA(insert OID = 3832 (  anyrange_in	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 
 DESCR("I/O");
 DATA(insert OID = 3833 (  anyrange_out	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 2275 "3831" _null_ _null_ _null_ _null_ anyrange_out _null_ _null_ _null_ ));
 DESCR("I/O");
-DATA(insert OID = 3834 (  anyrange_recv	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 "2281 26 23" _null_ _null_ _null_ _null_ anyrange_recv _null_ _null_ _null_ ));
+DATA(insert OID = 3834 (  range_in	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 "2275 26 23" _null_ _null_ _null_ _null_ range_in _null_ _null_ _null_ ));
 DESCR("I/O");
-DATA(insert OID = 3835 (  anyrange_send	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 17 "3831" _null_ _null_ _null_ _null_ anyrange_send _null_ _null_ _null_ ));
+DATA(insert OID = 3835 (  range_out	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 2275 "3831" _null_ _null_ _null_ _null_ range_out _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3836 (  range_recv	PGNSP PGUID 12 1 0 0 f f f t f s 3 0 3831 "2281 26 23" _null_ _null_ _null_ _null_ range_recv _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3837 (  range_send	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 17 "3831" _null_ _null_ _null_ _null_ range_send _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3838 (  range_eq	PGNSP PGUID 12 1 0 0 f f f t f i 2 0 16 "3831 3831" _null_ _null_ _null_ _null_ range_eq _null_ _null_ _null_ ));
 DESCR("I/O");
 
 /*

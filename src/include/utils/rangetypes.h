@@ -46,50 +46,52 @@ typedef struct varlena RangeType;
 /* IO */
 extern Datum anyrange_in(PG_FUNCTION_ARGS);
 extern Datum anyrange_out(PG_FUNCTION_ARGS);
-extern Datum anyrange_recv(PG_FUNCTION_ARGS);
-extern Datum anyrange_send(PG_FUNCTION_ARGS);
+extern Datum range_in(PG_FUNCTION_ARGS);
+extern Datum range_out(PG_FUNCTION_ARGS);
+extern Datum range_recv(PG_FUNCTION_ARGS);
+extern Datum range_send(PG_FUNCTION_ARGS);
 
 /* range -> subtype */
-extern Datum anyrange_lbound(PG_FUNCTION_ARGS);
-extern Datum anyrange_ubound(PG_FUNCTION_ARGS);
+extern Datum range_lbound(PG_FUNCTION_ARGS);
+extern Datum range_ubound(PG_FUNCTION_ARGS);
 
 /* range -> bool */
-extern Datum anyrange_empty(PG_FUNCTION_ARGS);
-extern Datum anyrange_lb_null(PG_FUNCTION_ARGS);
-extern Datum anyrange_ub_null(PG_FUNCTION_ARGS);
-extern Datum anyrange_lb_inf(PG_FUNCTION_ARGS);
-extern Datum anyrange_ub_inf(PG_FUNCTION_ARGS);
+extern Datum range_empty(PG_FUNCTION_ARGS);
+extern Datum range_lb_null(PG_FUNCTION_ARGS);
+extern Datum range_ub_null(PG_FUNCTION_ARGS);
+extern Datum range_lb_inf(PG_FUNCTION_ARGS);
+extern Datum range_ub_inf(PG_FUNCTION_ARGS);
 
 /* range, range -> bool */
-extern Datum anyrange_eq(PG_FUNCTION_ARGS);
-extern Datum anyrange_neq(PG_FUNCTION_ARGS);
-extern Datum anyrange_contains(PG_FUNCTION_ARGS);
-extern Datum anyrange_contained_by(PG_FUNCTION_ARGS);
-extern Datum anyrange_before(PG_FUNCTION_ARGS);
-extern Datum anyrange_after(PG_FUNCTION_ARGS);
-extern Datum anyrange_overlaps(PG_FUNCTION_ARGS);
-extern Datum anyrange_overleft(PG_FUNCTION_ARGS);
-extern Datum anyrange_overright(PG_FUNCTION_ARGS);
+extern Datum range_eq(PG_FUNCTION_ARGS);
+extern Datum range_neq(PG_FUNCTION_ARGS);
+extern Datum range_contains(PG_FUNCTION_ARGS);
+extern Datum range_contained_by(PG_FUNCTION_ARGS);
+extern Datum range_before(PG_FUNCTION_ARGS);
+extern Datum range_after(PG_FUNCTION_ARGS);
+extern Datum range_overlaps(PG_FUNCTION_ARGS);
+extern Datum range_overleft(PG_FUNCTION_ARGS);
+extern Datum range_overright(PG_FUNCTION_ARGS);
 
 /* range, range -> range */
-extern Datum anyrange_minus(PG_FUNCTION_ARGS);
-extern Datum anyrange_union(PG_FUNCTION_ARGS);
-extern Datum anyrange_intersect(PG_FUNCTION_ARGS);
+extern Datum range_minus(PG_FUNCTION_ARGS);
+extern Datum range_union(PG_FUNCTION_ARGS);
+extern Datum range_intersect(PG_FUNCTION_ARGS);
 
 /* GiST support */
-extern Datum anyrange_gist_consistent(PG_FUNCTION_ARGS);
-extern Datum anyrange_gist_union(PG_FUNCTION_ARGS);
-extern Datum anyrange_gist_penalty(PG_FUNCTION_ARGS);
-extern Datum anyrange_gist_picksplit(PG_FUNCTION_ARGS);
-extern Datum anyrange_gist_same(PG_FUNCTION_ARGS);
+extern Datum range_gist_consistent(PG_FUNCTION_ARGS);
+extern Datum range_gist_union(PG_FUNCTION_ARGS);
+extern Datum range_gist_penalty(PG_FUNCTION_ARGS);
+extern Datum range_gist_picksplit(PG_FUNCTION_ARGS);
+extern Datum range_gist_same(PG_FUNCTION_ARGS);
 
 /* for defining more generic functions */
 extern Datum make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound);
-extern void anyrange_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
-								 Datum *lbound, Datum *ubound);
+extern void range_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
+							  Datum *lbound, Datum *ubound);
 
 /* for defining a range "canonicalize" function */
-extern Datum anyrange_serialize(Oid rngtypoid, char flags, Datum lbound,
-								Datum ubound);
+extern Datum range_serialize(Oid rngtypoid, char flags, Datum lbound,
+							 Datum ubound);
 
 #endif   /* RANGETYPES_H */
