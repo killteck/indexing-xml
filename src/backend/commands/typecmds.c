@@ -1315,24 +1315,6 @@ DefineRange(CreateRangeStmt *stmt)
 						 errmsg("conflicting or redundant options")));
 			rangeSubType = typenameTypeId(NULL, defGetTypeName(defel));
 		}
-		else if (pg_strcasecmp(defel->defname, "typmod_in") == 0)
-		{
-			if (OidIsValid(rangeTypmodIn))
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-			rangeTypmodIn = findTypeTypmodinFunction(
-				defGetQualifiedName(defel));
-		}
-		else if (pg_strcasecmp(defel->defname, "typmod_out") == 0)
-		{
-			if (OidIsValid(rangeTypmodOut))
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("conflicting or redundant options")));
-			rangeTypmodOut = findTypeTypmodoutFunction(
-				defGetQualifiedName(defel));
-		}
 		else if (pg_strcasecmp(defel->defname, "canonical") == 0)
 		{
 			if (OidIsValid(rangeCanonical))
@@ -1383,6 +1365,9 @@ DefineRange(CreateRangeStmt *stmt)
 		rangeSubtypeCmpName, rangeSubType);
 
 	rangeArrayOid = AssignTypeArrayOid();
+
+	rangeTypmodIn  = get_typmodin(rangeSubType);
+	rangeTypmodOut = get_typmodout(rangeSubType);
 
 	/* Create the pg_type entry */
 	typoid =
@@ -1780,8 +1765,11 @@ findTypeAnalyzeFunction(List *procname, Oid typeOid)
 static Oid
 findRangeSubtypeCmpFunction(List *procname, Oid subType)
 {
-	Oid			 argList[2];
-	Oid			 procOid;
+	Oid					argList[2];
+	Oid					procOid;
+	FuncCandidateList	best_candidate;
+	FuncCandidateList	raw_candidates;
+	FuncCandidateList	cur_candidates;
 
 	/*
 	 * Binary functions take two arguments of type 'typeOid'.
@@ -1789,7 +1777,15 @@ findRangeSubtypeCmpFunction(List *procname, Oid subType)
 	argList[0] = subType;
 	argList[1] = subType;
 
-	procOid = LookupFuncName(procname, 2, argList, true);
+	/*
+	 * Find a matching function. We're more permissive regarding the
+	 * subtype_cmp function.
+	 */
+	raw_candidates = FuncnameGetCandidates(procname, 2, NIL, false, false);
+	func_match_argtypes(2, argList, raw_candidates, &cur_candidates);
+	best_candidate = func_select_candidate(2, argList, cur_candidates);
+
+	procOid = best_candidate->oid;
 
 	if (!OidIsValid(procOid))
 		ereport(ERROR,
