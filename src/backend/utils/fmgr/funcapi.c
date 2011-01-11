@@ -407,11 +407,12 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 	int			nargs = declared_args->dim1;
 	bool		have_anyelement_result = false;
 	bool		have_anyarray_result = false;
+	bool		have_anyrange_result = false;
 	bool		have_anynonarray = false;
 	bool		have_anyenum = false;
-	bool		have_anyrange = false;
 	Oid			anyelement_type = InvalidOid;
 	Oid			anyarray_type = InvalidOid;
+	Oid			anyrange_type = InvalidOid;
 	int			i;
 
 	/* See if there are any polymorphic outputs; quick out if not */
@@ -434,8 +435,7 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 				have_anyenum = true;
 				break;
 			case ANYRANGEOID:
-				have_anyelement_result = true;
-				have_anyrange = true;
+				have_anyrange_result = true;
 			default:
 				break;
 		}
@@ -457,13 +457,16 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
-			case ANYRANGEOID:
 				if (!OidIsValid(anyelement_type))
 					anyelement_type = get_call_expr_argtype(call_expr, i);
 				break;
 			case ANYARRAYOID:
 				if (!OidIsValid(anyarray_type))
 					anyarray_type = get_call_expr_argtype(call_expr, i);
+				break;
+			case ANYRANGEOID:
+				if (!OidIsValid(anyrange_type))
+					anyrange_type = get_call_expr_argtype(call_expr, i);
 				break;
 			default:
 				break;
@@ -484,16 +487,21 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 											 anyelement_type,
 											 ANYELEMENTOID);
 
+	if (have_anyelement_result && !OidIsValid(anyelement_type))
+		anyelement_type = resolve_generic_type(ANYELEMENTOID,
+											   anyrange_type,
+											   ANYRANGEOID);
+	if (have_anyrange_result && !OidIsValid(anyrange_type))
+		anyrange_type = resolve_generic_type(ANYRANGEOID,
+											 anyelement_type,
+											 ANYELEMENTOID);
+
 	/* Enforce ANYNONARRAY if needed */
 	if (have_anynonarray && type_is_array(anyelement_type))
 		return false;
 
 	/* Enforce ANYENUM if needed */
 	if (have_anyenum && !type_is_enum(anyelement_type))
-		return false;
-
-	/* Enforce ANYRANGE if needed */
-	if (have_anyrange && !type_is_range(anyelement_type))
 		return false;
 
 	/* And finally replace the tuple column types as needed */
@@ -504,7 +512,6 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 			case ANYELEMENTOID:
 			case ANYNONARRAYOID:
 			case ANYENUMOID:
-			case ANYRANGEOID:
 				TupleDescInitEntry(tupdesc, i + 1,
 								   NameStr(tupdesc->attrs[i]->attname),
 								   anyelement_type,
@@ -515,6 +522,13 @@ resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector *declared_args,
 				TupleDescInitEntry(tupdesc, i + 1,
 								   NameStr(tupdesc->attrs[i]->attname),
 								   anyarray_type,
+								   -1,
+								   0);
+				break;
+			case ANYRANGEOID:
+				TupleDescInitEntry(tupdesc, i + 1,
+								   NameStr(tupdesc->attrs[i]->attname),
+								   anyrange_type,
 								   -1,
 								   0);
 				break;

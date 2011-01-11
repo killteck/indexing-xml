@@ -141,6 +141,7 @@ extern void free_attstatsslot(Oid atttype,
 				  float4 *numbers, int nnumbers);
 extern char *get_namespace_name(Oid nspid);
 extern Oid get_range_subtype(Oid rangeOid);
+extern Oid get_range_from_subtype(Oid subtypeOid);
 extern Oid get_range_subtype_cmp(Oid rangeOid);
 extern Oid get_range_canonical(Oid rangeOid);
 

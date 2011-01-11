@@ -80,7 +80,7 @@ range_in(PG_FUNCTION_ARGS)
 	/* serialize and canonicalize */
 	range = make_range(rngtypoid, flags, lbound, ubound);
 
-	PG_RETURN_DATUM(range);
+	PG_RETURN_RANGE(range);
 }
 
 Datum
@@ -141,11 +141,50 @@ range_send(PG_FUNCTION_ARGS)
  */
 
 
+/* constructors */
+
+Datum
+range_make1(PG_FUNCTION_ARGS)
+{
+	Datum		 arg	  = PG_GETARG_DATUM(0);
+	char		 flags	  = RANGE_LB_INC | RANGE_UB_INC;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
+
+	PG_RETURN_RANGE(range);
+}
+
+Datum
+range_make2(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID();
+}
+
 /* range -> subtype */
 Datum
 range_lbound(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	if (fl1 & RANGE_EMPTY)
+		elog(ERROR, "range is empty");
+	if (fl1 & RANGE_LB_INF)
+		elog(ERROR, "range is infinite");
+
+	if (fl1 & RANGE_LB_NULL)
+		PG_RETURN_NULL();
+
+	PG_RETURN_DATUM(lb1);
 }
 
 Datum
@@ -388,7 +427,7 @@ range_serialize(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 	}
 
 	SET_VARSIZE(range, msize);
-	PG_RETURN_DATUM(range);
+	PG_RETURN_RANGE(range);
 }
 
 void
@@ -452,7 +491,7 @@ make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound)
 	if (OidIsValid(canonical))
 		range = OidFunctionCall1(canonical, range);
 
-	PG_RETURN_DATUM(range);
+	PG_RETURN_RANGE(range);
 }
 
 /*

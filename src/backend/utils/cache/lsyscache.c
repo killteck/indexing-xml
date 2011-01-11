@@ -2797,6 +2797,25 @@ get_range_subtype(Oid rangeOid)
 }
 
 Oid
+get_range_from_subtype(Oid subtypeOid)
+{
+	HeapTuple	tp;
+
+	tp = SearchSysCache1(RANGESUBTYPE, ObjectIdGetDatum(subtypeOid));
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_range	rngtup = (Form_pg_range) GETSTRUCT(tp);
+		Oid				result;
+
+		result = rngtup->rngtypid;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
+}
+
+Oid
 get_range_subtype_cmp(Oid rangeOid)
 {
 	HeapTuple	tp;

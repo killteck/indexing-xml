@@ -291,6 +291,8 @@ DECLARE_UNIQUE_INDEX(pg_seclabel_object_index, 3597, on pg_seclabel using btree(
 
 DECLARE_UNIQUE_INDEX(pg_range_rgntypid_index, 3542, on pg_range using btree(rngtypid oid_ops));
 #define RangeTypidIndexId					3542
+DECLARE_UNIQUE_INDEX(pg_range_rgnsubtype_index, 3543, on pg_range using btree(rngsubtype oid_ops));
+#define RangeSubtypeIndexId					3543
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

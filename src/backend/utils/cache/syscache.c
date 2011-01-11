@@ -543,6 +543,17 @@ static const struct cachedesc cacheinfo[] = {
 		},
 		1024
 	},
+	{RangeRelationId,		/* RANGESUBTYPE */
+		RangeSubtypeIndexId,
+		1,
+		{
+			Anum_pg_range_rngsubtype,
+			0,
+			0,
+			0
+		},
+		1024
+	},
 	{RelationRelationId,		/* RELNAMENSP */
 		ClassNameNspIndexId,
 		2,
