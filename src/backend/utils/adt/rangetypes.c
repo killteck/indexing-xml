@@ -18,6 +18,7 @@
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rangetypes.h"
 
@@ -32,6 +33,7 @@ typedef enum
 static void range_parse(const char *input_str,  char *flags,
 						   char **lbound_str, char **ubound_str);
 static char *range_deparse(char flags, char *lbound_str, char *ubound_str);
+static Datum range_make2(PG_FUNCTION_ARGS);
 
 /*
  *----------------------------------------------------------
@@ -152,15 +154,114 @@ range_make1(PG_FUNCTION_ARGS)
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
 
+	if (PG_ARGISNULL(0))
+		flags = RANGE_LB_NULL | RANGE_UB_NULL;
+
 	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
 
 	PG_RETURN_RANGE(range);
 }
 
 Datum
-range_make2(PG_FUNCTION_ARGS)
+range_linf_(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID();
+	Datum		 arg	  = PG_GETARG_DATUM(0);
+	char		 flags	  = RANGE_LB_INF;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	if (PG_ARGISNULL(0))
+		flags |= RANGE_UB_NULL;
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
+
+	PG_RETURN_RANGE(range);
+}
+
+Datum
+range_uinf_(PG_FUNCTION_ARGS)
+{
+	Datum		 arg	  = PG_GETARG_DATUM(0);
+	char		 flags	  = RANGE_UB_INF;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	if (PG_ARGISNULL(0))
+		flags |= RANGE_LB_NULL;
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
+
+	PG_RETURN_RANGE(range);
+}
+
+Datum
+range_linfi(PG_FUNCTION_ARGS)
+{
+	Datum		 arg	  = PG_GETARG_DATUM(0);
+	char		 flags	  = RANGE_LB_INF;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	if (PG_ARGISNULL(0))
+		flags |= RANGE_UB_NULL;
+	else
+		flags |= RANGE_UB_INC;
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
+
+	PG_RETURN_RANGE(range);
+}
+
+Datum
+range_uinfi(PG_FUNCTION_ARGS)
+{
+	Datum		 arg	  = PG_GETARG_DATUM(0);
+	char		 flags	  = RANGE_UB_INF;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	if (PG_ARGISNULL(0))
+		flags |= RANGE_LB_NULL;
+	else
+		flags |= RANGE_LB_INC;
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg, arg));
+
+	PG_RETURN_RANGE(range);
+}
+
+Datum
+range(PG_FUNCTION_ARGS)
+{
+	return range_make2(fcinfo);
+}
+
+Datum
+range__(PG_FUNCTION_ARGS)
+{
+	return range_make2(fcinfo);
+}
+
+Datum
+range_i(PG_FUNCTION_ARGS)
+{
+	return range_make2(fcinfo);
+}
+
+Datum
+rangei_(PG_FUNCTION_ARGS)
+{
+	return range_make2(fcinfo);
+}
+
+Datum
+rangeii(PG_FUNCTION_ARGS)
+{
+	return range_make2(fcinfo);
 }
 
 /* range -> subtype */
@@ -179,7 +280,7 @@ range_lbound(PG_FUNCTION_ARGS)
 	if (fl1 & RANGE_EMPTY)
 		elog(ERROR, "range is empty");
 	if (fl1 & RANGE_LB_INF)
-		elog(ERROR, "range is infinite");
+		elog(ERROR, "range lower bound is infinite");
 
 	if (fl1 & RANGE_LB_NULL)
 		PG_RETURN_NULL();
@@ -190,7 +291,24 @@ range_lbound(PG_FUNCTION_ARGS)
 Datum
 range_ubound(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	if (fl1 & RANGE_EMPTY)
+		elog(ERROR, "range is empty");
+	if (fl1 & RANGE_UB_INF)
+		elog(ERROR, "range upper bound is infinite");
+
+	if (fl1 & RANGE_UB_NULL)
+		PG_RETURN_NULL();
+
+	PG_RETURN_DATUM(ub1);
 }
 
 
@@ -198,31 +316,76 @@ range_ubound(PG_FUNCTION_ARGS)
 Datum
 range_empty(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	PG_RETURN_BOOL(fl1 & RANGE_EMPTY);
 }
 
 Datum
 range_lb_null(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	PG_RETURN_BOOL(fl1 & RANGE_LB_NULL);
 }
 
 Datum
 range_ub_null(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	PG_RETURN_BOOL(fl1 & RANGE_UB_NULL);
 }
 
 Datum
 range_lb_inf(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	PG_RETURN_BOOL(fl1 & RANGE_LB_INF);
 }
 
 Datum
 range_ub_inf(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+
+	Oid			rtype1;
+	char		fl1;
+	Datum		lb1;
+	Datum		ub1;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+
+	PG_RETURN_BOOL(fl1 & RANGE_UB_INF);
 }
 
 
@@ -654,4 +817,48 @@ range_deparse(char flags, char *lbound_str, char *ubound_str)
 	appendStringInfo(str, "%c %s, %s %c", lb_c, lb_str, ub_str, ub_c);
 
 	return str->data;
+}
+
+static Datum
+range_make2(PG_FUNCTION_ARGS)
+{
+	Datum		 arg1	  = PG_GETARG_DATUM(0);
+	Datum		 arg2	  = PG_GETARG_DATUM(1);
+	char		 flags;
+	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
+	Oid			 rngtypid = get_range_from_subtype(subtype);
+	RangeType	*range;
+
+	switch(fcinfo->flinfo->fn_oid)
+	{
+		case F_RANGE__:
+			flags = 0;
+			break;
+		case F_RANGE_I:
+			flags = RANGE_UB_INC;
+			break;
+		case F_RANGE:
+		case F_RANGEI_:
+			flags = RANGE_LB_INC;
+			break;
+		case F_RANGEII:
+			flags = RANGE_LB_INC | RANGE_UB_INC;
+			break;
+	}
+
+	if (PG_ARGISNULL(0))
+	{
+		flags &= ~RANGE_LB_INC;
+		flags |= RANGE_LB_NULL;
+	}
+
+	if (PG_ARGISNULL(1))
+	{
+		flags &= ~RANGE_UB_INC;
+		flags |= RANGE_UB_NULL;
+	}
+
+	range = DatumGetRangeType(make_range(rngtypid, flags, arg1, arg2));
+
+	PG_RETURN_RANGE(range);
 }

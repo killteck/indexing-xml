@@ -53,7 +53,15 @@ extern Datum range_send(PG_FUNCTION_ARGS);
 
 /* constructors */
 extern Datum range_make1(PG_FUNCTION_ARGS);
-extern Datum range_make2(PG_FUNCTION_ARGS);
+extern Datum range_linf_(PG_FUNCTION_ARGS);
+extern Datum range_uinf_(PG_FUNCTION_ARGS);
+extern Datum range_linfi(PG_FUNCTION_ARGS);
+extern Datum range_uinfi(PG_FUNCTION_ARGS);
+extern Datum range(PG_FUNCTION_ARGS);
+extern Datum range__(PG_FUNCTION_ARGS);
+extern Datum range_i(PG_FUNCTION_ARGS);
+extern Datum rangei_(PG_FUNCTION_ARGS);
+extern Datum rangeii(PG_FUNCTION_ARGS);
 
 /* range -> subtype */
 extern Datum range_lbound(PG_FUNCTION_ARGS);

@@ -4912,7 +4912,25 @@ DATA(insert OID = 3838 (  range_lbound	PGNSP PGUID 12 1 0 0 f f f t f i 1 0 2283
 DESCR("I/O");
 DATA(insert OID = 3839 (  range_eq	PGNSP PGUID 12 1 0 0 f f f t f i 2 0 16 "3831 3831" _null_ _null_ _null_ _null_ range_eq _null_ _null_ _null_ ));
 DESCR("I/O");
-DATA(insert OID = 3840 (  range	PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_make1 _null_ _null_ _null_ ));
+DATA(insert OID = 3840 (  range	PGNSP PGUID 12 1 0 0 f f f f f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_make1 _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3841 (  range	PGNSP PGUID 12 1 0 0 f f f f f i 2 0 3831 "2283 2283" _null_ _null_ _null_ _null_ range _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3842 (  range__	PGNSP PGUID 12 1 0 0 f f f f f i 2 0 3831 "2283 2283" _null_ _null_ _null_ _null_ range__ _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3843 (  range_i	PGNSP PGUID 12 1 0 0 f f f f f i 2 0 3831 "2283 2283" _null_ _null_ _null_ _null_ range_i _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3844 (  rangei_	PGNSP PGUID 12 1 0 0 f f f f f i 2 0 3831 "2283 2283" _null_ _null_ _null_ _null_ rangei_ _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3845 (  rangeii	PGNSP PGUID 12 1 0 0 f f f f f i 2 0 3831 "2283 2283" _null_ _null_ _null_ _null_ rangeii _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3846 (  range_linf_	PGNSP PGUID 12 1 0 0 f f f f f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_linf_ _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3847 (  range_uinf_	PGNSP PGUID 12 1 0 0 f f f f f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_uinf_ _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3848 (  range_linfi	PGNSP PGUID 12 1 0 0 f f f f f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_linfi _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3849 (  range_uinfi	PGNSP PGUID 12 1 0 0 f f f f f i 1 0 3831 "2283" _null_ _null_ _null_ _null_ range_uinfi _null_ _null_ _null_ ));
 DESCR("I/O");
 
 /*
