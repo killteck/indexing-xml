@@ -380,16 +380,53 @@ range_eq(PG_FUNCTION_ARGS)
 	if (rtype1 != rtype2)
 		elog(ERROR, "range types do not match");
 
-	if (fl1 != fl2)
-		PG_RETURN_BOOL(false);
-
 	cmpFn = get_range_subtype_cmp(rtype1);
 
-	if (DatumGetInt32(OidFunctionCall2(cmpFn, lb1, lb2)) != 0)
+	/* if a bound is defined for both, and doesn't match, return false */
+	if (RANGE_HAS_LBOUND(fl1) && RANGE_HAS_LBOUND(fl2))
+	{
+		int cmp = DatumGetInt32(OidFunctionCall2(cmpFn, lb1, lb2));
+		if (cmp != 0)
+			PG_RETURN_BOOL(false);
+		else if ((fl1 & RANGE_LB_INC) != (fl2 & RANGE_LB_INC))
+			PG_RETURN_BOOL(false);
+	}
+
+	if (RANGE_HAS_UBOUND(fl1) && RANGE_HAS_UBOUND(fl2))
+	{
+		int cmp = DatumGetInt32(OidFunctionCall2(cmpFn, ub1, ub2));
+		if (cmp != 0)
+			PG_RETURN_BOOL(false);
+		else if ((fl1 & RANGE_UB_INC) != (fl2 & RANGE_UB_INC))
+			PG_RETURN_BOOL(false);
+	}
+
+	if (RANGE_HAS_LBOUND(fl1) && (fl2 & RANGE_LB_INF))
 		PG_RETURN_BOOL(false);
 
-	if (DatumGetInt32(OidFunctionCall2(cmpFn, ub1, ub2)) != 0)
+	if (RANGE_HAS_UBOUND(fl1) && (fl2 & RANGE_UB_INF))
 		PG_RETURN_BOOL(false);
+
+	if (RANGE_HAS_LBOUND(fl2) && (fl1 & RANGE_LB_INF))
+		PG_RETURN_BOOL(false);
+
+	if (RANGE_HAS_UBOUND(fl2) && (fl1 & RANGE_UB_INF))
+		PG_RETURN_BOOL(false);
+
+	if ((fl1 & RANGE_EMPTY) && !(fl2 & RANGE_EMPTY) &&
+		!((fl2 & RANGE_LB_NULL) && (fl2 & RANGE_UB_NULL)))
+		PG_RETURN_BOOL(false);
+
+	if ((fl2 & RANGE_EMPTY) && !(fl1 & RANGE_EMPTY) &&
+		!((fl1 & RANGE_LB_NULL) && (fl1 & RANGE_UB_NULL)))
+		PG_RETURN_BOOL(false);
+
+	/*
+	 * By this point, if we haven't proven that a match is impossible,
+	 * and we have a NULL, return NULL
+	 */
+	if ((fl1 | fl2) & (RANGE_LB_NULL | RANGE_UB_NULL))
+		PG_RETURN_NULL();
 
 	PG_RETURN_BOOL(true);
 }
@@ -935,9 +972,9 @@ range_contains_internal(RangeType *r1, RangeType *r2, bool *isnull)
 
 	if ((fl1 & RANGE_LB_INF) && (fl2 & RANGE_LB_INF))
 		cmp_lb = 0;
-	else if (!(fl1 | RANGE_LB_INF) && (fl2 | RANGE_LB_INF))
+	else if (!(fl1 & RANGE_LB_INF) && (fl2 & RANGE_LB_INF))
 		cmp_lb = 1;
-	else if ((fl1 | RANGE_LB_INF) && !(fl2 | RANGE_LB_INF))
+	else if ((fl1 & RANGE_LB_INF) && !(fl2 & RANGE_LB_INF))
 		cmp_lb = -1;
 	else
 	{
@@ -953,9 +990,9 @@ range_contains_internal(RangeType *r1, RangeType *r2, bool *isnull)
 
 	if ((fl1 & RANGE_UB_INF) && (fl2 & RANGE_UB_INF))
 		cmp_ub = 0;
-	else if (!(fl1 | RANGE_UB_INF) && (fl2 | RANGE_UB_INF))
+	else if (!(fl1 & RANGE_UB_INF) && (fl2 & RANGE_UB_INF))
 		cmp_ub = 1;
-	else if ((fl1 | RANGE_UB_INF) && !(fl2 | RANGE_UB_INF))
+	else if ((fl1 & RANGE_UB_INF) && !(fl2 & RANGE_UB_INF))
 		cmp_ub = -1;
 	else
 	{
