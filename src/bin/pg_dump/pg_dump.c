@@ -162,6 +162,7 @@ static void dumpNamespace(Archive *fout, NamespaceInfo *nspinfo);
 static void dumpType(Archive *fout, TypeInfo *tyinfo);
 static void dumpBaseType(Archive *fout, TypeInfo *tyinfo);
 static void dumpEnumType(Archive *fout, TypeInfo *tyinfo);
+static void dumpRangeType(Archive *fout, TypeInfo *tyinfo);
 static void dumpDomain(Archive *fout, TypeInfo *tyinfo);
 static void dumpCompositeType(Archive *fout, TypeInfo *tyinfo);
 static void dumpCompositeTypeColComments(Archive *fout, TypeInfo *tyinfo);
@@ -6684,6 +6685,8 @@ dumpType(Archive *fout, TypeInfo *tyinfo)
 		dumpCompositeType(fout, tyinfo);
 	else if (tyinfo->typtype == TYPTYPE_ENUM)
 		dumpEnumType(fout, tyinfo);
+	else if (tyinfo->typtype == TYPTYPE_RANGE)
+		dumpRangeType(fout, tyinfo);
 }
 
 /*
@@ -6775,6 +6778,89 @@ dumpEnumType(Archive *fout, TypeInfo *tyinfo)
 			appendPQExpBuffer(q, ";\n\n");
 		}
 	}
+
+	ArchiveEntry(fout, tyinfo->dobj.catId, tyinfo->dobj.dumpId,
+				 tyinfo->dobj.name,
+				 tyinfo->dobj.namespace->dobj.name,
+				 NULL,
+				 tyinfo->rolname, false,
+				 "TYPE", SECTION_PRE_DATA,
+				 q->data, delq->data, NULL,
+				 tyinfo->dobj.dependencies, tyinfo->dobj.nDeps,
+				 NULL, NULL);
+
+	/* Dump Type Comments and Security Labels */
+	resetPQExpBuffer(q);
+
+	appendPQExpBuffer(q, "TYPE %s", fmtId(tyinfo->dobj.name));
+	dumpComment(fout, q->data,
+				tyinfo->dobj.namespace->dobj.name, tyinfo->rolname,
+				tyinfo->dobj.catId, 0, tyinfo->dobj.dumpId);
+	dumpSecLabel(fout, q->data,
+				 tyinfo->dobj.namespace->dobj.name, tyinfo->rolname,
+				 tyinfo->dobj.catId, 0, tyinfo->dobj.dumpId);
+
+	PQclear(res);
+	destroyPQExpBuffer(q);
+	destroyPQExpBuffer(delq);
+	destroyPQExpBuffer(query);
+}
+
+/*
+ * dumpEnumType
+ *	  writes out to fout the queries to recreate a user-defined enum type
+ */
+static void
+dumpRangeType(Archive *fout, TypeInfo *tyinfo)
+{
+	PQExpBuffer q = createPQExpBuffer();
+	PQExpBuffer delq = createPQExpBuffer();
+	PQExpBuffer query = createPQExpBuffer();
+	PGresult   *res;
+	int			num;
+
+	char		*canonical;
+	Oid			 canonicalOid;
+
+	/* Set proper schema search path */
+	selectSourceSchema("pg_catalog");
+
+	appendPQExpBuffer(query, "SELECT rngtypid, "
+						  "format_type(rngsubtype, NULL) as rngsubtype, "
+						  "rngsubcmp, rngcanonical "
+						  "FROM pg_catalog.pg_range "
+						  "WHERE rngtypid = '%u'",
+						  tyinfo->dobj.catId.oid);
+
+	res = PQexec(g_conn, query->data);
+	check_sql_result(res, g_conn, query->data, PGRES_TUPLES_OK);
+
+	num = PQntuples(res);
+
+	/*
+	 * DROP must be fully qualified in case same name appears in pg_catalog.
+	 * CASCADE shouldn't be required here as for normal types since the I/O
+	 * functions are generic and do not get dropped.
+	 */
+	appendPQExpBuffer(delq, "DROP TYPE %s.",
+					  fmtId(tyinfo->dobj.namespace->dobj.name));
+	appendPQExpBuffer(delq, "%s;\n",
+					  fmtId(tyinfo->dobj.name));
+
+	appendPQExpBuffer(q, "CREATE TYPE %s AS RANGE (",
+					  fmtId(tyinfo->dobj.name));
+
+	appendPQExpBuffer(q, "\n    SUBTYPE = %s",
+					  PQgetvalue(res, 0, PQfnumber(res, "rngsubtype")));
+	appendPQExpBuffer(q, ",\n    SUBTYPE_CMP = %s",
+					  PQgetvalue(res, 0, PQfnumber(res, "rngsubcmp")));
+
+	canonical = PQgetvalue(res, 0, PQfnumber(res, "rngcanonical"));
+	canonicalOid = atooid(canonical);
+	if (OidIsValid(canonicalOid))
+		appendPQExpBuffer(q, ",\n    CANONICAL = %s", canonical);
+
+	appendPQExpBuffer(q, "\n);\n");
 
 	ArchiveEntry(fout, tyinfo->dobj.catId, tyinfo->dobj.dumpId,
 				 tyinfo->dobj.name,
