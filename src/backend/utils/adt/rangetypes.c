@@ -34,6 +34,8 @@ static void range_parse(const char *input_str,  char *flags,
 						   char **lbound_str, char **ubound_str);
 static char *range_deparse(char flags, char *lbound_str, char *ubound_str);
 static Datum range_make2(PG_FUNCTION_ARGS);
+static bool range_contains_internal(RangeType *r1, RangeType *r2,
+									bool *isnull);
 
 /*
  *----------------------------------------------------------
@@ -329,36 +331,6 @@ range_empty(PG_FUNCTION_ARGS)
 }
 
 Datum
-range_lb_null(PG_FUNCTION_ARGS)
-{
-	RangeType *r1 = PG_GETARG_RANGE(0);
-
-	Oid			rtype1;
-	char		fl1;
-	Datum		lb1;
-	Datum		ub1;
-
-	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
-
-	PG_RETURN_BOOL(fl1 & RANGE_LB_NULL);
-}
-
-Datum
-range_ub_null(PG_FUNCTION_ARGS)
-{
-	RangeType *r1 = PG_GETARG_RANGE(0);
-
-	Oid			rtype1;
-	char		fl1;
-	Datum		lb1;
-	Datum		ub1;
-
-	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
-
-	PG_RETURN_BOOL(fl1 & RANGE_UB_NULL);
-}
-
-Datum
 range_lb_inf(PG_FUNCTION_ARGS)
 {
 	RangeType *r1 = PG_GETARG_RANGE(0);
@@ -431,15 +403,53 @@ range_neq(PG_FUNCTION_ARGS)
 }
 
 Datum
+range_contains_elem(PG_FUNCTION_ARGS)
+{
+	RangeType	*r1		  = PG_GETARG_RANGE(0);
+	RangeType	*r2;
+	Datum		 val	  = PG_GETARG_DATUM(1);
+	bool		 result;
+	bool		 isnull;
+	char		 flags	  = RANGE_LB_INC | RANGE_UB_INC;
+	Oid			 rngtypid = get_fn_expr_argtype(fcinfo->flinfo,0);
+
+	r2 = DatumGetRangeType(make_range(rngtypid, flags, val, val));
+
+	result = range_contains_internal(r1, r2, &isnull);
+	if (isnull)
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_BOOL(result);
+}
+
+Datum
 range_contains(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType	*r1 = PG_GETARG_RANGE(0);
+	RangeType	*r2 = PG_GETARG_RANGE(1);
+	bool		 result;
+	bool		 isnull;
+
+	result = range_contains_internal(r1, r2, &isnull);
+	if (isnull)
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_BOOL(result);
 }
 
 Datum
 range_contained_by(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType	*r1 = PG_GETARG_RANGE(0);
+	RangeType	*r2 = PG_GETARG_RANGE(1);
+	bool		 result;
+	bool		 isnull;
+
+	result = range_contains_internal(r1, r2, &isnull);
+	if (isnull)
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_BOOL(result);
 }
 
 Datum
@@ -450,6 +460,11 @@ range_before(PG_FUNCTION_ARGS)
 
 Datum
 range_after(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum range_adjacent(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }
@@ -767,7 +782,7 @@ range_parse(const char *input_str,  char *flags, char **lbound_str,
 		fl |= RANGE_LB_NULL;
 	if (!ub_quoted && strncmp(ub, "NULL", ilen) == 0)
 		fl |= RANGE_UB_NULL;
-	if (!lb_quoted && strncmp(lb, "INF", ilen) == 0)
+	if (!lb_quoted && strncmp(lb, "-INF", ilen) == 0)
 		fl |= RANGE_LB_INF;
 	if (!ub_quoted && strncmp(ub, "INF", ilen) == 0)
 		fl |= RANGE_UB_INF;
@@ -810,7 +825,7 @@ range_deparse(char flags, char *lbound_str, char *ubound_str)
 	ub_str = ubound_str;
 
 	if (!RANGE_HAS_LBOUND(flags))
-		lb_str = (flags & RANGE_LB_NULL) ? "NULL" : "INF";
+		lb_str = (flags & RANGE_LB_NULL) ? "NULL" : "-INF";
 	if (!RANGE_HAS_UBOUND(flags))
 		ub_str = (flags & RANGE_UB_NULL) ? "NULL" : "INF";
 
@@ -861,4 +876,101 @@ range_make2(PG_FUNCTION_ARGS)
 	range = DatumGetRangeType(make_range(rngtypid, flags, arg1, arg2));
 
 	PG_RETURN_RANGE(range);
+}
+
+static bool
+range_contains_internal(RangeType *r1, RangeType *r2, bool *isnull)
+{
+	Oid			rtype1, rtype2;
+	char		fl1, fl2;
+	Datum		lb1, lb2;
+	Datum		ub1, ub2;
+	regproc		cmpFn;
+	int			cmp_lb;
+	int			cmp_ub;
+
+	range_deserialize(r1, &rtype1, &fl1, &lb1, &ub1);
+	range_deserialize(r2, &rtype2, &fl2, &lb2, &ub2);
+
+	*isnull = false;
+
+	if (rtype1 != rtype2)
+		elog(ERROR, "range types do not match");
+
+	if ((fl1 & RANGE_EMPTY) && !(fl2 & RANGE_EMPTY))
+		return false;
+	if (fl2 & RANGE_EMPTY)
+		return true;
+
+	cmpFn = get_range_subtype_cmp(rtype1);
+
+	/* if either range has a NULL, then we can only return false or NULL */
+	if ((fl1 | fl2) & (RANGE_LB_NULL | RANGE_UB_NULL))
+	{
+		/* we can return false if r2.lb > r1.ub ... */
+		if (!(fl1 & RANGE_UB_NULL) && !(fl2 & RANGE_LB_NULL))
+		{
+			int cmp = DatumGetInt32(OidFunctionCall2(cmpFn, lb2, ub1));
+			/* if they are the same and not both inclusive */
+			if (cmp == 0 &&
+				!((fl1 & RANGE_UB_INC) && (fl2 & RANGE_LB_INC)))
+				return false;
+			else if (cmp > 0)
+				return false;
+		}
+		/* ... or if r2.ub < r1.lb */
+		if (!(fl1 & RANGE_LB_NULL) && !(fl2 & RANGE_UB_NULL))
+		{
+			int cmp = DatumGetInt32(OidFunctionCall2(cmpFn, ub2, lb1));
+			/* if they are the same and not both inclusive */
+			if (cmp == 0 &&
+				!((fl1 & RANGE_LB_INC) && (fl2 & RANGE_UB_INC)))
+				return false;
+			else if (cmp < 0)
+				return false;
+		}
+		*isnull = true;
+		return false;
+	}
+
+	if ((fl1 & RANGE_LB_INF) && (fl2 & RANGE_LB_INF))
+		cmp_lb = 0;
+	else if (!(fl1 | RANGE_LB_INF) && (fl2 | RANGE_LB_INF))
+		cmp_lb = 1;
+	else if ((fl1 | RANGE_LB_INF) && !(fl2 | RANGE_LB_INF))
+		cmp_lb = -1;
+	else
+	{
+		cmp_lb = DatumGetInt32(OidFunctionCall2(cmpFn, lb1, lb2));
+		if (cmp_lb == 0)
+		{
+			if ((fl1 & RANGE_LB_INC) && !(fl2 & RANGE_LB_INC))
+				cmp_lb = -1;
+			else if (!(fl1 & RANGE_LB_INC) && (fl2 & RANGE_LB_INC))
+				cmp_lb = 1;
+		}
+	}
+
+	if ((fl1 & RANGE_UB_INF) && (fl2 & RANGE_UB_INF))
+		cmp_ub = 0;
+	else if (!(fl1 | RANGE_UB_INF) && (fl2 | RANGE_UB_INF))
+		cmp_ub = 1;
+	else if ((fl1 | RANGE_UB_INF) && !(fl2 | RANGE_UB_INF))
+		cmp_ub = -1;
+	else
+	{
+		cmp_ub = DatumGetInt32(OidFunctionCall2(cmpFn, ub1, ub2));
+		if (cmp_ub == 0)
+		{
+			if ((fl1 & RANGE_UB_INC) && !(fl2 & RANGE_UB_INC))
+				cmp_ub = 1;
+			else if (!(fl1 & RANGE_UB_INC) && (fl2 & RANGE_UB_INC))
+				cmp_ub = -1;
+		}
+	}
+
+	if (cmp_lb <= 0 && cmp_ub >= 0)
+		return true;
+	else
+		return false;
 }

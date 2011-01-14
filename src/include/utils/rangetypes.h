@@ -69,10 +69,11 @@ extern Datum range_ubound(PG_FUNCTION_ARGS);
 
 /* range -> bool */
 extern Datum range_empty(PG_FUNCTION_ARGS);
-extern Datum range_lb_null(PG_FUNCTION_ARGS);
-extern Datum range_ub_null(PG_FUNCTION_ARGS);
 extern Datum range_lb_inf(PG_FUNCTION_ARGS);
 extern Datum range_ub_inf(PG_FUNCTION_ARGS);
+
+/* range, point -> bool */
+extern Datum range_contains_elem(PG_FUNCTION_ARGS);
 
 /* range, range -> bool */
 extern Datum range_eq(PG_FUNCTION_ARGS);
@@ -81,6 +82,7 @@ extern Datum range_contains(PG_FUNCTION_ARGS);
 extern Datum range_contained_by(PG_FUNCTION_ARGS);
 extern Datum range_before(PG_FUNCTION_ARGS);
 extern Datum range_after(PG_FUNCTION_ARGS);
+extern Datum range_adjacent(PG_FUNCTION_ARGS);
 extern Datum range_overlaps(PG_FUNCTION_ARGS);
 extern Datum range_overleft(PG_FUNCTION_ARGS);
 extern Datum range_overright(PG_FUNCTION_ARGS);
