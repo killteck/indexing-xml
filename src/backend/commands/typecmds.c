@@ -1221,8 +1221,6 @@ DefineRange(CreateRangeStmt *stmt)
 
 	ListCell	*lc;
 	List		*rangeSubtypeCmpName = NIL;
-	regproc		 rangeTypmodIn		 = InvalidOid;
-	regproc		 rangeTypmodOut		 = InvalidOid;
 	regproc		 rangeAnalyze		 = InvalidOid;
 	Oid			 rangeSubType		 = InvalidOid;
 	regproc		 rangeSubtypeCmp	 = InvalidOid;
@@ -1366,9 +1364,6 @@ DefineRange(CreateRangeStmt *stmt)
 
 	rangeArrayOid = AssignTypeArrayOid();
 
-	rangeTypmodIn  = get_typmodin(rangeSubType);
-	rangeTypmodOut = get_typmodout(rangeSubType);
-
 	/* Create the pg_type entry */
 	typoid =
 		TypeCreate(InvalidOid,	/* no predetermined type OID */
@@ -1386,8 +1381,8 @@ DefineRange(CreateRangeStmt *stmt)
 				   F_RANGE_OUT,	/* output procedure */
 				   F_RANGE_RECV, /* receive procedure */
 				   F_RANGE_SEND, /* send procedure */
-				   rangeTypmodIn,	/* typmodin procedure - none */
-				   rangeTypmodOut,	/* typmodout procedure - none */
+				   InvalidOid,	/* typmodin procedure - none */
+				   InvalidOid,	/* typmodout procedure - none */
 				   rangeAnalyze,	/* analyze procedure - default */
 				   InvalidOid,	/* element type ID */
 				   false,		/* this is not an array type */

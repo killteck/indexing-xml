@@ -2506,6 +2506,7 @@ get_typmodin(Oid typid)
 		return InvalidOid;
 }
 
+#ifdef NOT_USED
 /*
  * get_typmodout
  *
@@ -2529,6 +2530,7 @@ get_typmodout(Oid typid)
 	else
 		return InvalidOid;
 }
+#endif   /* NOT_USED */
 
 
 /*				---------- STATISTICS CACHE ----------					 */
