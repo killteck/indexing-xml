@@ -17,7 +17,6 @@ typedef struct
 	Datum		val;
 	Oid			rngtypid;
 	bool		infinite;
-	bool		isnull;
 	bool		lower;
 	bool		inclusive;
 } RangeBound;
@@ -98,7 +97,7 @@ extern Datum range_gist_same(PG_FUNCTION_ARGS);
 extern Datum make_range(RangeBound *lower, RangeBound *upper, bool empty);
 extern void range_deserialize(RangeType *range, RangeBound *lower,
 							  RangeBound *upper, bool *empty);
-extern int range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull);
+extern int range_cmp_bounds(RangeBound *b1, RangeBound *b2);
 extern RangeType *make_empty_range(Oid rngtypid);
 
 /* for defining a range "canonicalize" function */

@@ -93,12 +93,10 @@ range_in(PG_FUNCTION_ARGS)
 	fmgr_info(subInput, &subInputFn);
 
 	lower->rngtypid	 = rngtypoid;
-	lower->isnull	 = flags &	RANGE_LB_NULL;
 	lower->infinite	 = flags &	RANGE_LB_INF;
 	lower->inclusive = flags &	RANGE_LB_INC;
 	lower->lower	 = true;
 	upper->rngtypid	 = rngtypoid;
-	upper->isnull	 = flags &	RANGE_UB_NULL;
 	upper->infinite	 = flags &	RANGE_UB_INF;
 	upper->inclusive = flags &	RANGE_UB_INC;
 	upper->lower	 = false;
@@ -149,10 +147,8 @@ range_out(PG_FUNCTION_ARGS)
 
 	flags |= (lower.inclusive)	? RANGE_LB_INC  : 0;
 	flags |= (lower.infinite)	? RANGE_LB_INF  : 0;
-	flags |= (lower.isnull)		? RANGE_LB_NULL : 0;
 	flags |= (upper.inclusive)	? RANGE_UB_INC  : 0;
 	flags |= (upper.infinite)	? RANGE_UB_INF  : 0;
-	flags |= (upper.isnull)		? RANGE_UB_NULL : 0;
 
 	/* output */
 	getTypeOutputInfo(subtype, &subOutput, &isVarlena);
@@ -375,8 +371,6 @@ range_lower(PG_FUNCTION_ARGS)
 	if (lower.infinite)
 		elog(ERROR, "range lower bound is infinite");
 
-	Assert(!lower.isnull);
-
 	PG_RETURN_DATUM(lower.val);
 }
 
@@ -394,8 +388,6 @@ range_upper(PG_FUNCTION_ARGS)
 		elog(ERROR, "range is empty");
 	if (upper.infinite)
 		elog(ERROR, "range lower bound is infinite");
-
-	Assert(!upper.isnull);
 
 	PG_RETURN_DATUM(upper.val);
 }
@@ -479,8 +471,6 @@ range_eq(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -494,15 +484,11 @@ range_eq(PG_FUNCTION_ARGS)
 	if (empty1 != empty2)
 		PG_RETURN_BOOL(false);
 
-	if (range_cmp_bounds(&lower1, &lower2, &isnull) != 0)
+	if (range_cmp_bounds(&lower1, &lower2) != 0)
 		PG_RETURN_BOOL(false);
 
-	Assert(!isnull);
-
-	if (range_cmp_bounds(&upper1, &upper2, &isnull) != 0)
+	if (range_cmp_bounds(&upper1, &upper2) != 0)
 		PG_RETURN_BOOL(false);
-
-	Assert(!isnull);
 
 	PG_RETURN_BOOL(true);
 }
@@ -528,14 +514,12 @@ range_contains_elem(PG_FUNCTION_ARGS)
 	lower.rngtypid	= rngtypid;
 	lower.inclusive = true;
 	lower.infinite	= false;
-	lower.isnull	= false;
 	lower.lower		= true;
 	lower.val		= val;
 
 	upper.rngtypid	= rngtypid;
 	upper.inclusive = true;
 	upper.infinite	= false;
-	upper.isnull	= false;
 	upper.lower		= false;
 	upper.val		= val;
 
@@ -572,8 +556,6 @@ range_before(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -585,7 +567,7 @@ range_before(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		elog(ERROR, "empty range");
 
-	if (range_cmp_bounds(&upper1, &lower2, &isnull) < 0)
+	if (range_cmp_bounds(&upper1, &lower2) < 0)
 		PG_RETURN_BOOL(true);
 	else
 		PG_RETURN_BOOL(false);
@@ -601,8 +583,6 @@ range_after(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -614,7 +594,7 @@ range_after(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		elog(ERROR, "empty range");
 
-	if (range_cmp_bounds(&lower1, &upper2, &isnull) > 0)
+	if (range_cmp_bounds(&lower1, &upper2) > 0)
 		PG_RETURN_BOOL(true);
 	else
 		PG_RETURN_BOOL(false);
@@ -678,8 +658,6 @@ range_overlaps(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -691,12 +669,12 @@ range_overlaps(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		PG_RETURN_BOOL(false);
 
-	if (range_cmp_bounds(&lower1, &lower2, &isnull) >= 0 &&
-		range_cmp_bounds(&lower1, &upper2, &isnull) <= 0)
+	if (range_cmp_bounds(&lower1, &lower2) >= 0 &&
+		range_cmp_bounds(&lower1, &upper2) <= 0)
 		PG_RETURN_BOOL(true);
 
-	if (range_cmp_bounds(&lower2, &lower1, &isnull) >= 0 &&
-		range_cmp_bounds(&lower2, &upper1, &isnull) <= 0)
+	if (range_cmp_bounds(&lower2, &lower1) >= 0 &&
+		range_cmp_bounds(&lower2, &upper1) <= 0)
 		PG_RETURN_BOOL(true);
 
 	PG_RETURN_BOOL(false);
@@ -712,8 +690,6 @@ range_overleft(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -725,7 +701,7 @@ range_overleft(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		PG_RETURN_BOOL(false);
 
-	if (range_cmp_bounds(&upper1, &upper2, &isnull) <= 0)
+	if (range_cmp_bounds(&upper1, &upper2) <= 0)
 		PG_RETURN_BOOL(true);
 
 	PG_RETURN_BOOL(false);
@@ -741,8 +717,6 @@ range_overright(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -754,7 +728,7 @@ range_overright(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		PG_RETURN_BOOL(false);
 
-	if (range_cmp_bounds(&lower1, &lower2, &isnull) >= 0)
+	if (range_cmp_bounds(&lower1, &lower2) >= 0)
 		PG_RETURN_BOOL(true);
 
 	PG_RETURN_BOOL(false);
@@ -772,8 +746,6 @@ range_minus(PG_FUNCTION_ARGS)
 	RangeBound	upper1, upper2;
 	bool		empty1, empty2;
 
-	bool		isnull;
-
 	int cmp_l1l2, cmp_l1u2, cmp_u1l2, cmp_u1u2;
 
 	range_deserialize(r1, &lower1, &upper1, &empty1);
@@ -787,14 +759,10 @@ range_minus(PG_FUNCTION_ARGS)
 	if (empty1 || empty2)
 		PG_RETURN_RANGE(r1);
 
-	cmp_l1l2 = range_cmp_bounds(&lower1, &lower2, &isnull);
-	Assert(!isnull);
-	cmp_l1u2 = range_cmp_bounds(&lower1, &upper2, &isnull);
-	Assert(!isnull);
-	cmp_u1l2 = range_cmp_bounds(&upper1, &lower2, &isnull);
-	Assert(!isnull);
-	cmp_u1u2 = range_cmp_bounds(&upper1, &upper2, &isnull);
-	Assert(!isnull);
+	cmp_l1l2 = range_cmp_bounds(&lower1, &lower2);
+	cmp_l1u2 = range_cmp_bounds(&lower1, &upper2);
+	cmp_u1l2 = range_cmp_bounds(&upper1, &lower2);
+	cmp_u1u2 = range_cmp_bounds(&upper1, &upper2);
 
 	if (cmp_l1l2 < 0 && cmp_u1u2 > 0)
 		elog(ERROR, "range_minus resulted in two ranges");
@@ -894,18 +862,13 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 	if (lower->rngtypid != upper->rngtypid)
 		elog(ERROR, "range types do not match");
 
-	if (lower->isnull || upper->isnull)
-		elog(ERROR, "NULL range boundaries are not supported");
-
 	if (empty)
 		flags |= RANGE_EMPTY;
 
 	flags |= (lower->inclusive) ? RANGE_LB_INC  : 0;
 	flags |= (lower->infinite)  ? RANGE_LB_INF  : 0;
-	flags |= (lower->isnull)	? RANGE_LB_NULL : 0;
 	flags |= (upper->inclusive) ? RANGE_UB_INC  : 0;
 	flags |= (upper->infinite)  ? RANGE_UB_INF  : 0;
-	flags |= (upper->isnull)	? RANGE_UB_NULL : 0;
 
 	msize  = VARHDRSZ;
 	msize += sizeof(Oid);
@@ -1013,14 +976,12 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 	lower->val		 = lbound;
 	lower->inclusive = flags &	RANGE_LB_INC;
 	lower->infinite	 = flags &	RANGE_LB_INF;
-	lower->isnull	 = flags &	RANGE_LB_NULL;
 	lower->lower	 = true;
 
 	upper->rngtypid	 = rngtypid;
 	upper->val		 = ubound;;
 	upper->inclusive = flags &	RANGE_UB_INC;
 	upper->infinite	 = flags &	RANGE_UB_INF;
-	upper->isnull	 = flags &	RANGE_UB_NULL;
 	upper->lower	 = false;
 }
 
@@ -1046,15 +1007,10 @@ make_range(RangeBound *lower, RangeBound *upper, bool empty)
 }
 
 int
-range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull)
+range_cmp_bounds(RangeBound *b1, RangeBound *b2)
 {
 	regproc		cmpFn;
 	int			result;
-
-	if(b1->isnull || b2->isnull)
-		elog(ERROR, "NULL range boundaries are not supported");
-
-	*isnull = false;
 
 	if (b1->infinite && b2->infinite)
 	{
@@ -1206,9 +1162,9 @@ range_parse(const char *input_str,  char *flags, char **lbound_str,
 		fl = RANGE_EMPTY;
 
 	if (!lb_quoted && strncmp(lb, "NULL", ilen) == 0)
-		fl |= RANGE_LB_NULL;
+		elog(ERROR, "NULL range boundaries are not supported");
 	if (!ub_quoted && strncmp(ub, "NULL", ilen) == 0)
-		fl |= RANGE_UB_NULL;
+		elog(ERROR, "NULL range boundaries are not supported");
 	if (!lb_quoted && strncmp(lb, "-INF", ilen) == 0)
 		fl |= RANGE_LB_INF;
 	if (!ub_quoted && strncmp(ub, "INF", ilen) == 0)
@@ -1318,8 +1274,6 @@ range_contains_internal(RangeType *r1, RangeType *r2)
 	RangeBound	upper2;
 	bool		empty2;
 
-	bool		isnull;
-
 	range_deserialize(r1, &lower1, &upper1, &empty1);
 	range_deserialize(r2, &lower2, &upper2, &empty2);
 
@@ -1333,9 +1287,9 @@ range_contains_internal(RangeType *r1, RangeType *r2)
 	else if (empty2)
 		return true;
 
-	if (range_cmp_bounds(&lower1, &lower2, &isnull) > 0)
+	if (range_cmp_bounds(&lower1, &lower2) > 0)
 		return false;
-	if (range_cmp_bounds(&upper1, &upper2, &isnull) < 0)
+	if (range_cmp_bounds(&upper1, &upper2) < 0)
 		return false;
 
 	return true;
