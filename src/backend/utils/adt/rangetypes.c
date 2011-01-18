@@ -855,6 +855,7 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 	Oid			 subtype  = get_range_subtype(lower->rngtypid);
 	int16		 typlen	  = get_typlen(subtype);
 	char		 typalign = get_typalign(subtype);
+	char		 typbyval = get_typbyval(subtype);
 	size_t		 llen;
 	size_t		 ulen;
 	char		 flags = 0;
@@ -902,7 +903,10 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 	{
 		Assert(lower->lower);
 		ptr = (char *) att_align_nominal(ptr, typalign);
-		memcpy(ptr, (void *) lower->val, llen);
+		if (typbyval)
+			store_att_byval(ptr, lower->val, typlen);
+		else
+			memcpy(ptr, (void *) lower->val, llen);
 		ptr += llen;
 	}
 
@@ -910,7 +914,10 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 	{
 		Assert(!upper->lower);
 		ptr = (char *) att_align_nominal(ptr, typalign);
-		memcpy(ptr, (void *) upper->val, ulen);
+		if (typbyval)
+			store_att_byval(ptr, upper->val, typlen);
+		else
+			memcpy(ptr, (void *) upper->val, ulen);
 		ptr += ulen;
 	}
 
@@ -927,8 +934,10 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 	int			 ulen;
 	char		 typalign;
 	int16		 typlen;
+	int16		 typbyval;
 	char		 flags;
 	Oid			 rngtypid;
+	Oid			 subtype;
 	Datum		 lbound;
 	Datum		 ubound;
 
@@ -945,15 +954,16 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot output a value of type anyrange")));
 
-	typalign = get_typalign(rngtypid);
-	typlen	 = get_typlen(rngtypid);
+	subtype	 = get_range_subtype(rngtypid);
+	typalign = get_typalign(subtype);
+	typlen	 = get_typlen(subtype);
+	typbyval = get_typbyval(subtype);
 
 	if (RANGE_HAS_LBOUND(flags))
 	{
 		ptr = (char *) att_align_nominal(ptr, typalign);
 		llen = att_addlength_datum(0, typlen, (Datum) ptr);
-		lbound = (Datum) palloc(llen);
-		memcpy((void *) lbound, ptr, llen);
+		lbound = fetch_att(ptr, typbyval, typlen);
 		ptr += llen;
 	}
 	else
@@ -963,8 +973,7 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 	{
 		ptr = (char *) att_align_nominal(ptr, typalign);
 		ulen = att_addlength_datum(0, typlen, (Datum) ptr);
-		ubound = (Datum) palloc(ulen);
-		memcpy((void *) ubound, ptr, ulen);
+		ubound = fetch_att(ptr, typbyval, typlen);
 		ptr += ulen;
 	}
 	else
