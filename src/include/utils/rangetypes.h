@@ -99,6 +99,7 @@ extern Datum make_range(RangeBound *lower, RangeBound *upper, bool empty);
 extern void range_deserialize(RangeType *range, RangeBound *lower,
 							  RangeBound *upper, bool *empty);
 extern int range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull);
+extern RangeType *make_empty_range(Oid rngtypid);
 
 /* for defining a range "canonicalize" function */
 extern Datum range_serialize(RangeBound *lower, RangeBound *upper, bool empty);

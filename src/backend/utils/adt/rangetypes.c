@@ -475,12 +475,9 @@ range_eq(PG_FUNCTION_ARGS)
 	RangeType *r1 = PG_GETARG_RANGE(0);
 	RangeType *r2 = PG_GETARG_RANGE(1);
 
-	RangeBound	lower1;
-	RangeBound	upper1;
-	bool		empty1;
-	RangeBound	lower2;
-	RangeBound	upper2;
-	bool		empty2;
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
 
 	bool		isnull;
 
@@ -568,36 +565,199 @@ range_contained_by(PG_FUNCTION_ARGS)
 Datum
 range_before(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		elog(ERROR, "empty range");
+
+	if (range_cmp_bounds(&upper1, &lower2, &isnull) < 0)
+		PG_RETURN_BOOL(true);
+	else
+		PG_RETURN_BOOL(false);
 }
 
 Datum
 range_after(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		elog(ERROR, "empty range");
+
+	if (range_cmp_bounds(&lower1, &upper2, &isnull) > 0)
+		PG_RETURN_BOOL(true);
+	else
+		PG_RETURN_BOOL(false);
 }
 
 Datum range_adjacent(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	Oid			cmpFn;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		elog(ERROR, "empty range");
+
+	/*
+	 * For two ranges to be adjacent, the lower boundary of one range
+	 * has to match the upper boundary of the other. However, the
+	 * inclusivity of those two boundaries must also be different.
+	 *
+	 * The semantics for range_cmp_bounds aren't quite what we need
+	 * here, so we do the comparison more directly.
+	 */
+
+	cmpFn = get_range_subtype_cmp(lower1.rngtypid);
+
+	if (lower1.inclusive != upper2.inclusive)
+	{
+		if (DatumGetInt32(OidFunctionCall2(cmpFn, lower1.val, upper2.val)) == 0)
+			PG_RETURN_BOOL(true);
+	}
+
+	if (upper1.inclusive != lower2.inclusive)
+	{
+		if (DatumGetInt32(OidFunctionCall2(cmpFn, upper1.val, lower2.val)) == 0)
+			PG_RETURN_BOOL(true);
+	}
+
+	PG_RETURN_BOOL(false);
 }
 
 Datum
 range_overlaps(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		PG_RETURN_BOOL(false);
+
+	if (range_cmp_bounds(&lower1, &lower2, &isnull) >= 0 &&
+		range_cmp_bounds(&lower1, &upper2, &isnull) <= 0)
+		PG_RETURN_BOOL(true);
+
+	if (range_cmp_bounds(&lower2, &lower1, &isnull) >= 0 &&
+		range_cmp_bounds(&lower2, &upper1, &isnull) <= 0)
+		PG_RETURN_BOOL(true);
+
+	PG_RETURN_BOOL(false);
 }
 
 Datum
 range_overleft(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		PG_RETURN_BOOL(false);
+
+	if (range_cmp_bounds(&upper1, &upper2, &isnull) <= 0)
+		PG_RETURN_BOOL(true);
+
+	PG_RETURN_BOOL(false);
 }
 
 Datum
 range_overright(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		PG_RETURN_BOOL(false);
+
+	if (range_cmp_bounds(&lower1, &lower2, &isnull) >= 0)
+		PG_RETURN_BOOL(true);
+
+	PG_RETURN_BOOL(false);
 }
 
 
@@ -605,7 +765,62 @@ range_overright(PG_FUNCTION_ARGS)
 Datum
 range_minus(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_VOID(); //TODO
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	bool		isnull;
+
+	int cmp_l1l2, cmp_l1u2, cmp_u1l2, cmp_u1u2;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 || empty2)
+		PG_RETURN_RANGE(r1);
+
+	cmp_l1l2 = range_cmp_bounds(&lower1, &lower2, &isnull);
+	Assert(!isnull);
+	cmp_l1u2 = range_cmp_bounds(&lower1, &upper2, &isnull);
+	Assert(!isnull);
+	cmp_u1l2 = range_cmp_bounds(&upper1, &lower2, &isnull);
+	Assert(!isnull);
+	cmp_u1u2 = range_cmp_bounds(&upper1, &upper2, &isnull);
+	Assert(!isnull);
+
+	if (cmp_l1l2 < 0 && cmp_u1u2 > 0)
+		elog(ERROR, "range_minus resulted in two ranges");
+
+	if (cmp_l1u2 > 0 || cmp_u1l2 < 0)
+		PG_RETURN_RANGE(r1);
+
+	if (cmp_l1l2 >= 0 && cmp_u1u2 <= 0)
+		PG_RETURN_RANGE(make_empty_range(lower1.rngtypid));
+
+	if (cmp_l1l2 <= 0 && cmp_u1l2 >= 0 && cmp_u1u2 <= 0)
+	{
+		lower2.inclusive = !lower2.inclusive;
+		lower2.lower = false; /* it will become the upper bound */
+		PG_RETURN_RANGE(make_range(&lower1, &lower2, false));
+	}
+
+	if (cmp_l1l2 >= 0 && cmp_u1u2 >= 0 && cmp_l1u2 <= 0)
+	{
+		upper2.inclusive = !upper2.inclusive;
+		upper2.lower = true; /* it will become the lower bound */
+		PG_RETURN_RANGE(make_range(&upper2, &upper1, false));
+	}
+
+	elog(ERROR, "unexpected error in range_minus");
+	PG_RETURN_VOID();
 }
 
 Datum
@@ -828,6 +1043,60 @@ make_range(RangeBound *lower, RangeBound *upper, bool empty)
 		range = OidFunctionCall1(canonical, range);
 
 	PG_RETURN_RANGE(range);
+}
+
+int
+range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull)
+{
+	regproc		cmpFn;
+	int			result;
+
+	if(b1->isnull || b2->isnull)
+		elog(ERROR, "NULL range boundaries are not supported");
+
+	*isnull = false;
+
+	if (b1->infinite && b2->infinite)
+	{
+		if (b1->lower == b2->lower)
+			return 0;
+		else
+			return (b1->lower) ? -1 : 1;
+	}
+	else if (b1->infinite && !b2->infinite)
+		return (b1->lower) ? -1 : 1;
+	else if (!b1->infinite && b2->infinite)
+		return (b2->lower) ? 1 : -1;
+
+	cmpFn = get_range_subtype_cmp(b1->rngtypid);
+	result = DatumGetInt32(OidFunctionCall2(cmpFn, b1->val, b2->val));
+
+	if (result == 0)
+	{
+		if (b1->inclusive && !b2->inclusive)
+			return (b2->lower) ? -1 : 1;
+		else if (!b1->inclusive && b2->inclusive)
+			return (b1->lower) ? 1 : -1;
+	}
+
+	return result;
+}
+
+RangeType *
+make_empty_range(Oid rngtypid)
+{
+	RangeBound lower;
+	RangeBound upper;
+
+	memset(&lower, 0, sizeof(RangeBound));
+	memset(&upper, 0, sizeof(RangeBound));
+
+	lower.rngtypid = rngtypid;
+	lower.lower = true;
+	upper.rngtypid = rngtypid;
+	upper.lower = false;
+
+	return DatumGetRangeType(make_range(&lower, &upper, true));
 }
 
 /*
@@ -1070,41 +1339,4 @@ range_contains_internal(RangeType *r1, RangeType *r2)
 		return false;
 
 	return true;
-}
-
-int
-range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull)
-{
-	regproc		cmpFn;
-	int			result;
-
-	if(b1->isnull || b2->isnull)
-		elog(ERROR, "NULL range boundaries are not supported");
-
-	*isnull = false;
-
-	if (b1->infinite && b2->infinite)
-	{
-		if (b1->lower == b2->lower)
-			return 0;
-		else
-			return (b1->lower) ? -1 : 1;
-	}
-	else if (b1->infinite && !b2->infinite)
-		return (b1->lower) ? -1 : 1;
-	else if (!b1->infinite && b2->infinite)
-		return (b2->lower) ? 1 : -1;
-
-	cmpFn = get_range_subtype_cmp(b1->rngtypid);
-	result = DatumGetInt32(OidFunctionCall2(cmpFn, b1->val, b2->val));
-
-	if (result == 0)
-	{
-		if (b1->inclusive && !b2->inclusive)
-			return (b2->lower) ? -1 : 1;
-		else if (!b1->inclusive && b2->inclusive)
-			return (b1->lower) ? 1 : -1;
-	}
-
-	return result;
 }
