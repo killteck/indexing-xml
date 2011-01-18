@@ -3,37 +3,82 @@ CREATE TYPE numrange AS RANGE (
   SUBTYPE_CMP = numeric_cmp
 );
 CREATE TABLE numrange_test (nr NUMRANGE);
-INSERT INTO numrange_test VALUES(range(1.1, 2.2));
-INSERT INTO numrange_test VALUES('-');
+-- negative test; should fail
 INSERT INTO numrange_test VALUES('-[1.1, 2.2)');
 ERROR:  syntax error on range input, character 1
 LINE 1: INSERT INTO numrange_test VALUES('-[1.1, 2.2)');
                                          ^
-INSERT INTO numrange_test VALUES('[-INF, INF)');
 INSERT INTO numrange_test VALUES('[1.1, NULL)');
+ERROR:  NULL range boundaries are not supported
+LINE 1: INSERT INTO numrange_test VALUES('[1.1, NULL)');
+                                         ^
 INSERT INTO numrange_test VALUES('[NULL, 2.2)');
+ERROR:  NULL range boundaries are not supported
+LINE 1: INSERT INTO numrange_test VALUES('[NULL, 2.2)');
+                                         ^
+INSERT INTO numrange_test VALUES('[NULL, NULL)');
+ERROR:  NULL range boundaries are not supported
+LINE 1: INSERT INTO numrange_test VALUES('[NULL, NULL)');
+                                         ^
+-- should succeed
+INSERT INTO numrange_test VALUES('[-INF, INF)');
+INSERT INTO numrange_test VALUES('[3, INF]');
+INSERT INTO numrange_test VALUES('[-INF, 5)');
+INSERT INTO numrange_test VALUES(range(1.1, 2.2));
+INSERT INTO numrange_test VALUES('-');
+INSERT INTO numrange_test VALUES(range(1.7));
+SELECT empty(nr) FROM numrange_test;
+ empty 
+-------
+ f
+ f
+ f
+ f
+ t
+ f
+(6 rows)
+
+SELECT lower_inc(nr), lower(nr), upper(nr), upper_inc(nr) FROM numrange_test
+  WHERE NOT empty(nr) AND NOT lower_inf(nr) AND NOT upper_inf(nr);
+ lower_inc | lower | upper | upper_inc 
+-----------+-------+-------+-----------
+ t         |   1.1 |   2.2 | f
+ t         |   1.7 |   1.7 | t
+(2 rows)
+
 SELECT * FROM numrange_test WHERE contains(nr, range(1.9,1.91));
-      nr      
---------------
+      nr       
+---------------
+ ( -INF, INF )
+ ( -INF, 5 )
  [ 1.1, 2.2 )
+(3 rows)
+
+SELECT * FROM numrange_test WHERE contains(nr, range(1.0,10000.1));
+      nr       
+---------------
+ ( -INF, INF )
+(1 row)
+
+SELECT * FROM numrange_test WHERE contained_by(range(-1e7,-10000.1), nr);
+ nr 
+----
+ -
 (1 row)
 
 SELECT * FROM numrange_test WHERE contains(nr, 1.9);
-      nr      
---------------
+      nr       
+---------------
+ ( -INF, INF )
+ ( -INF, 5 )
  [ 1.1, 2.2 )
-(1 row)
+(3 rows)
 
 SELECT * FROM numrange_test WHERE range_eq(nr, '-');
  nr 
 ----
  -
 (1 row)
-
-SELECT * FROM numrange_test WHERE range_eq(nr, '[NULL, 2.2)');
- nr 
-----
-(0 rows)
 
 SELECT * FROM numrange_test WHERE range_eq(nr, '(1.1, 2.2)');
  nr 

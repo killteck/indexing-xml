@@ -12,22 +12,15 @@
 
 typedef struct varlena RangeType;
 
-/* flags */
-#define RANGE_EMPTY		0x01
-#define RANGE_LB_INC	0x02
-#define RANGE_LB_NULL	0x04
-#define RANGE_LB_INF	0x08
-#define RANGE_UB_INC	0x10
-#define RANGE_UB_NULL	0x20
-#define RANGE_UB_INF	0x40
-
-#define RANGE_HAS_LBOUND(flags) (!(flags & (RANGE_EMPTY |   \
-											RANGE_LB_NULL |	\
-											RANGE_LB_INF)))
-
-#define RANGE_HAS_UBOUND(flags) (!(flags & (RANGE_EMPTY |	\
-											RANGE_UB_NULL |	\
-											RANGE_UB_INF)))
+typedef struct
+{
+	Datum		val;
+	Oid			rngtypid;
+	bool		infinite;
+	bool		isnull;
+	bool		lower;
+	bool		inclusive;
+} RangeBound;
 
 /*
  * fmgr macros for range type objects
@@ -64,13 +57,15 @@ extern Datum rangei_(PG_FUNCTION_ARGS);
 extern Datum rangeii(PG_FUNCTION_ARGS);
 
 /* range -> subtype */
-extern Datum range_lbound(PG_FUNCTION_ARGS);
-extern Datum range_ubound(PG_FUNCTION_ARGS);
+extern Datum range_lower(PG_FUNCTION_ARGS);
+extern Datum range_upper(PG_FUNCTION_ARGS);
 
 /* range -> bool */
 extern Datum range_empty(PG_FUNCTION_ARGS);
-extern Datum range_lb_inf(PG_FUNCTION_ARGS);
-extern Datum range_ub_inf(PG_FUNCTION_ARGS);
+extern Datum range_lower_inc(PG_FUNCTION_ARGS);
+extern Datum range_upper_inc(PG_FUNCTION_ARGS);
+extern Datum range_lower_inf(PG_FUNCTION_ARGS);
+extern Datum range_upper_inf(PG_FUNCTION_ARGS);
 
 /* range, point -> bool */
 extern Datum range_contains_elem(PG_FUNCTION_ARGS);
@@ -100,12 +95,12 @@ extern Datum range_gist_picksplit(PG_FUNCTION_ARGS);
 extern Datum range_gist_same(PG_FUNCTION_ARGS);
 
 /* for defining more generic functions */
-extern Datum make_range(Oid rngtypoid, char flags, Datum lbound, Datum ubound);
-extern void range_deserialize(RangeType *range, Oid *rngtypoid, char *flags,
-							  Datum *lbound, Datum *ubound);
+extern Datum make_range(RangeBound *lower, RangeBound *upper, bool empty);
+extern void range_deserialize(RangeType *range, RangeBound *lower,
+							  RangeBound *upper, bool *empty);
+extern int range_cmp_bounds(RangeBound *b1, RangeBound *b2, bool *isnull);
 
 /* for defining a range "canonicalize" function */
-extern Datum range_serialize(Oid rngtypoid, char flags, Datum lbound,
-							 Datum ubound);
+extern Datum range_serialize(RangeBound *lower, RangeBound *upper, bool empty);
 
 #endif   /* RANGETYPES_H */
