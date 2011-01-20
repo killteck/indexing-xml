@@ -494,7 +494,7 @@ range_eq(PG_FUNCTION_ARGS)
 }
 
 Datum
-range_neq(PG_FUNCTION_ARGS)
+range_ne(PG_FUNCTION_ARGS)
 {
 	bool eq = DatumGetBool(range_eq(fcinfo));
 
@@ -533,6 +533,33 @@ range_contains(PG_FUNCTION_ARGS)
 {
 	RangeType	*r1 = PG_GETARG_RANGE(0);
 	RangeType	*r2 = PG_GETARG_RANGE(1);
+
+	PG_RETURN_BOOL(range_contains_internal(r1, r2));
+}
+
+Datum
+elem_contained_by_range(PG_FUNCTION_ARGS)
+{
+	RangeType	*r1		  = PG_GETARG_RANGE(1);
+	RangeType	*r2;
+	Datum		 val	  = PG_GETARG_DATUM(0);
+	Oid			 rngtypid = get_fn_expr_argtype(fcinfo->flinfo,1);
+	RangeBound	 lower;
+	RangeBound	 upper;
+
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = true;
+	lower.infinite	= false;
+	lower.lower		= true;
+	lower.val		= val;
+
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = true;
+	upper.infinite	= false;
+	upper.lower		= false;
+	upper.val		= val;
+
+	r2 = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_BOOL(range_contains_internal(r1, r2));
 }
@@ -791,6 +818,69 @@ range_minus(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/* Btree support */
+
+Datum
+range_cmp(PG_FUNCTION_ARGS)
+{
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	int cmp;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (lower1.rngtypid != upper1.rngtypid ||
+		lower1.rngtypid != lower2.rngtypid ||
+		lower1.rngtypid != upper2.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty1 && empty2)
+		PG_RETURN_INT32(0);
+	else if (empty1)
+		PG_RETURN_INT32(-1);
+	else if (empty2)
+		PG_RETURN_INT32(1);
+
+	if ((cmp = range_cmp_bounds(&lower1, &lower2)) != 0)
+		PG_RETURN_INT32(cmp);
+
+	PG_RETURN_INT32(range_cmp_bounds(&upper1, &upper2));
+}
+
+Datum
+range_lt(PG_FUNCTION_ARGS)
+{
+	int cmp = range_cmp(fcinfo);
+	PG_RETURN_BOOL(cmp < 0);
+}
+
+Datum
+range_le(PG_FUNCTION_ARGS)
+{
+	int cmp = range_cmp(fcinfo);
+	PG_RETURN_BOOL(cmp <= 0);
+}
+
+Datum
+range_ge(PG_FUNCTION_ARGS)
+{
+	int cmp = range_cmp(fcinfo);
+	PG_RETURN_BOOL(cmp >= 0);
+}
+
+Datum
+range_gt(PG_FUNCTION_ARGS)
+{
+	int cmp = range_cmp(fcinfo);
+	PG_RETURN_BOOL(cmp > 0);
+}
+
 Datum
 range_union(PG_FUNCTION_ARGS)
 {
@@ -813,6 +903,18 @@ range_gist_consistent(PG_FUNCTION_ARGS)
 
 Datum
 range_gist_union(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+range_gist_compress(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID(); //TODO
+}
+
+Datum
+range_gist_decompress(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_VOID(); //TODO
 }

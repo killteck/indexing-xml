@@ -944,6 +944,26 @@ DATA(insert OID = 2991 (  ">"	   PGNSP PGUID b f f 2249 2249 16 2990 2992 record
 DATA(insert OID = 2992 (  "<="	   PGNSP PGUID b f f 2249 2249 16 2993 2991 record_le scalarltsel scalarltjoinsel ));
 DATA(insert OID = 2993 (  ">="	   PGNSP PGUID b f f 2249 2249 16 2992 2990 record_ge scalargtsel scalargtjoinsel ));
 
+/* generic range type operators */
+DATA(insert OID = 3882 (  "="	   PGNSP PGUID b f f 3831 3831 16 3882 3883 range_eq eqsel eqjoinsel ));
+DATA(insert OID = 3883 (  "<>"	   PGNSP PGUID b f f 3831 3831 16 3883 3882 range_ne neqsel neqjoinsel ));
+DATA(insert OID = 3884 (  "<"	   PGNSP PGUID b f f 3831 3831 16 3887 3886 range_lt eqsel eqjoinsel ));
+DATA(insert OID = 3885 (  "<="	   PGNSP PGUID b f f 3831 3831 16 3886 3887 range_le eqsel eqjoinsel ));
+DATA(insert OID = 3886 (  ">="	   PGNSP PGUID b f f 3831 3831 16 3885 3884 range_ge eqsel eqjoinsel ));
+DATA(insert OID = 3887 (  ">"	   PGNSP PGUID b f f 3831 3831 16 3884 3885 range_gt eqsel eqjoinsel ));
+DATA(insert OID = 3888 (  "&&"	   PGNSP PGUID b f f 3831 3831 16 3888 0 3857 scalarltsel scalarltjoinsel ));
+DATA(insert OID = 3889 (  "@>"	   PGNSP PGUID b f f 3831 2776 16 3891 0 3858 scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3890 (  "@>"	   PGNSP PGUID b f f 3831 3831 16 3892 0 3859 scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3891 (  "<@"	   PGNSP PGUID b f f 2776 3831 16 3889 0 3860 scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3892 (  "<@"	   PGNSP PGUID b f f 3831 3831 16 3890 0 3861 scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3893 (  "<<"	   PGNSP PGUID b f f 3831 3831 16 0 0 before scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3894 (  ">>"	   PGNSP PGUID b f f 3831 3831 16 0 0 after scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3895 (  "&<"	   PGNSP PGUID b f f 3831 3831 16 0 0 overleft scalarltsel scalarltjoinsel ));
+DATA(insert OID = 3896 (  "&>"	   PGNSP PGUID b f f 3831 3831 16 0 0 overright scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3897 (  "-|-"	   PGNSP PGUID b f f 3831 3831 16 3897 0 adjacent scalargtsel scalargtjoinsel ));
+DATA(insert OID = 3898 (  "+"	   PGNSP PGUID b f f 3831 3831 3831 3898 0 range_union - - ));
+DATA(insert OID = 3899 (  "-"	   PGNSP PGUID b f f 3831 3831 3831 0 0 minus - - ));
+DATA(insert OID = 3900 (  "*"	   PGNSP PGUID b f f 3831 3831 3831 3900 0 range_intersect - - ));
 
 /*
  * function prototypes

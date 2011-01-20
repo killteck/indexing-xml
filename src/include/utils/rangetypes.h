@@ -68,10 +68,11 @@ extern Datum range_upper_inf(PG_FUNCTION_ARGS);
 
 /* range, point -> bool */
 extern Datum range_contains_elem(PG_FUNCTION_ARGS);
+extern Datum elem_contained_by_range(PG_FUNCTION_ARGS);
 
 /* range, range -> bool */
 extern Datum range_eq(PG_FUNCTION_ARGS);
-extern Datum range_neq(PG_FUNCTION_ARGS);
+extern Datum range_ne(PG_FUNCTION_ARGS);
 extern Datum range_contains(PG_FUNCTION_ARGS);
 extern Datum range_contained_by(PG_FUNCTION_ARGS);
 extern Datum range_before(PG_FUNCTION_ARGS);
@@ -86,8 +87,17 @@ extern Datum range_minus(PG_FUNCTION_ARGS);
 extern Datum range_union(PG_FUNCTION_ARGS);
 extern Datum range_intersect(PG_FUNCTION_ARGS);
 
+/* BTree support */
+extern Datum range_cmp(PG_FUNCTION_ARGS);
+extern Datum range_lt(PG_FUNCTION_ARGS);
+extern Datum range_le(PG_FUNCTION_ARGS);
+extern Datum range_ge(PG_FUNCTION_ARGS);
+extern Datum range_gt(PG_FUNCTION_ARGS);
+
 /* GiST support */
 extern Datum range_gist_consistent(PG_FUNCTION_ARGS);
+extern Datum range_gist_compress(PG_FUNCTION_ARGS);
+extern Datum range_gist_decompress(PG_FUNCTION_ARGS);
 extern Datum range_gist_union(PG_FUNCTION_ARGS);
 extern Datum range_gist_penalty(PG_FUNCTION_ARGS);
 extern Datum range_gist_picksplit(PG_FUNCTION_ARGS);
