@@ -102,6 +102,7 @@ typedef int Py_ssize_t;
 #include "parser/parse_type.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
@@ -214,9 +215,15 @@ typedef struct PLyProcedure
 	PyObject   *code;			/* compiled procedure code */
 	PyObject   *statics;		/* data saved across calls, local scope */
 	PyObject   *globals;		/* data saved across calls, global scope */
-	PyObject   *me;				/* PyCObject containing pointer to this
-								 * PLyProcedure */
 } PLyProcedure;
+
+
+/* the procedure cache entry */
+typedef struct PLyProcedureEntry
+{
+	Oid			fn_oid;			/* hash key */
+	PLyProcedure *proc;
+} PLyProcedureEntry;
 
 
 /* Python objects */
@@ -311,11 +318,10 @@ static HeapTuple PLy_modify_tuple(PLyProcedure *, PyObject *,
 
 static PyObject *PLy_procedure_call(PLyProcedure *, char *, PyObject *);
 
-static PLyProcedure *PLy_procedure_get(FunctionCallInfo fcinfo,
-				  Oid tgreloid);
+static PLyProcedure *PLy_procedure_get(Oid fn_oid, bool is_trigger);
 
-static PLyProcedure *PLy_procedure_create(HeapTuple procTup, Oid tgreloid,
-					 char *key);
+static PLyProcedure *PLy_procedure_create(HeapTuple procTup,
+										  Oid fn_oid, bool is_trigger);
 
 static void PLy_procedure_compile(PLyProcedure *, const char *);
 static char *PLy_procedure_munge_source(const char *, const char *);
@@ -373,7 +379,8 @@ static ErrorData *PLy_error_in_progress = NULL;
 
 static PyObject *PLy_interp_globals = NULL;
 static PyObject *PLy_interp_safe_globals = NULL;
-static PyObject *PLy_procedure_cache = NULL;
+static HTAB *PLy_procedure_cache = NULL;
+static HTAB *PLy_trigger_cache = NULL;
 
 /* Python exceptions */
 static PyObject *PLy_exc_error = NULL;
@@ -444,7 +451,6 @@ plpython_call_handler(PG_FUNCTION_ARGS)
 {
 	Datum		retval;
 	PLyProcedure *save_curr_proc;
-	PLyProcedure *volatile proc = NULL;
 	ErrorContextCallback plerrcontext;
 
 	if (SPI_connect() != SPI_OK_CONNECT)
@@ -461,20 +467,20 @@ plpython_call_handler(PG_FUNCTION_ARGS)
 
 	PG_TRY();
 	{
+		PLyProcedure *proc;
+
 		if (CALLED_AS_TRIGGER(fcinfo))
 		{
-			TriggerData *tdata = (TriggerData *) fcinfo->context;
 			HeapTuple	trv;
 
-			proc = PLy_procedure_get(fcinfo,
-									 RelationGetRelid(tdata->tg_relation));
+			proc = PLy_procedure_get(fcinfo->flinfo->fn_oid, true);
 			PLy_curr_procedure = proc;
 			trv = PLy_trigger_handler(fcinfo, proc);
 			retval = PointerGetDatum(trv);
 		}
 		else
 		{
-			proc = PLy_procedure_get(fcinfo, InvalidOid);
+			proc = PLy_procedure_get(fcinfo->flinfo->fn_oid, false);
 			PLy_curr_procedure = proc;
 			retval = PLy_function_handler(fcinfo, proc);
 		}
@@ -482,11 +488,6 @@ plpython_call_handler(PG_FUNCTION_ARGS)
 	PG_CATCH();
 	{
 		PLy_curr_procedure = save_curr_proc;
-		if (proc)
-		{
-			/* note: Py_DECREF needs braces around it, as of 2003/08 */
-			Py_DECREF(proc->me);
-		}
 		PyErr_Clear();
 		PG_RE_THROW();
 	}
@@ -496,8 +497,6 @@ plpython_call_handler(PG_FUNCTION_ARGS)
 	error_context_stack = plerrcontext.previous;
 
 	PLy_curr_procedure = save_curr_proc;
-
-	Py_DECREF(proc->me);
 
 	return retval;
 }
@@ -575,6 +574,22 @@ PLy_trigger_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 	HeapTuple	rv = NULL;
 	PyObject   *volatile plargs = NULL;
 	PyObject   *volatile plrv = NULL;
+	TriggerData	*tdata;
+
+	Assert(CALLED_AS_TRIGGER(fcinfo));
+
+	/*
+	 * Input/output conversion for trigger tuples.  Use the result
+	 * TypeInfo variable to store the tuple conversion info.  We do
+	 * this over again on each call to cover the possibility that the
+	 * relation's tupdesc changed since the trigger was last called.
+	 * PLy_input_tuple_funcs and PLy_output_tuple_funcs are
+	 * responsible for not doing repetitive work.
+	 */
+	tdata = (TriggerData *) fcinfo->context;
+
+	PLy_input_tuple_funcs(&(proc->result), tdata->tg_relation->rd_att);
+	PLy_output_tuple_funcs(&(proc->result), tdata->tg_relation->rd_att);
 
 	PG_TRY();
 	{
@@ -992,12 +1007,13 @@ PLy_function_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 			plargs = PLy_function_build_args(fcinfo, proc);
 			plrv = PLy_procedure_call(proc, "args", plargs);
 			if (!proc->is_setof)
-
+			{
 				/*
 				 * SETOF function parameters will be deleted when last row is
 				 * returned
 				 */
 				PLy_function_delete_args(proc);
+			}
 			Assert(plrv != NULL);
 			Assert(!PLy_error_in_progress);
 		}
@@ -1149,6 +1165,14 @@ PLy_function_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 		Py_XDECREF(plargs);
 		Py_XDECREF(plrv);
 
+		/*
+		 * If there was an error the iterator might have not been exhausted
+		 * yet. Set it to NULL so the next invocation of the function will
+		 * start the iteration again.
+		 */
+		Py_XDECREF(proc->setof);
+		proc->setof = NULL;
+
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -1285,6 +1309,19 @@ PLy_function_delete_args(PLyProcedure *proc)
 			PyDict_DelItemString(proc->globals, proc->argnames[i]);
 }
 
+/*
+ * Decide whether a cached PLyProcedure struct is still valid
+ */
+static bool
+PLy_procedure_valid(PLyProcedure *proc, HeapTuple procTup)
+{
+	Assert(proc != NULL);
+
+	/* If the pg_proc tuple has changed, it's not valid */
+	return (proc->fn_xmin == HeapTupleHeaderGetXmin(procTup->t_data) &&
+			ItemPointerEquals(&proc->fn_tid, &procTup->t_self));
+}
+
 
 /*
  * PLyProcedure functions
@@ -1296,73 +1333,63 @@ PLy_function_delete_args(PLyProcedure *proc)
  * function calls.
  */
 static PLyProcedure *
-PLy_procedure_get(FunctionCallInfo fcinfo, Oid tgreloid)
+PLy_procedure_get(Oid fn_oid, bool is_trigger)
 {
-	Oid			fn_oid;
 	HeapTuple	procTup;
-	char		key[128];
-	PyObject   *plproc;
-	PLyProcedure *proc = NULL;
-	int			rv;
+	PLyProcedureEntry *entry;
+	bool		found;
 
-	fn_oid = fcinfo->flinfo->fn_oid;
 	procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fn_oid));
 	if (!HeapTupleIsValid(procTup))
 		elog(ERROR, "cache lookup failed for function %u", fn_oid);
 
-	rv = snprintf(key, sizeof(key), "%u_%u", fn_oid, tgreloid);
-	if (rv >= sizeof(key) || rv < 0)
-		elog(ERROR, "key too long");
+	/* Look for the function in the corresponding cache */
+	if (is_trigger)
+		entry = hash_search(PLy_trigger_cache,
+							&fn_oid, HASH_ENTER, &found);
+	else
+		entry = hash_search(PLy_procedure_cache,
+							&fn_oid, HASH_ENTER, &found);
 
-	plproc = PyDict_GetItemString(PLy_procedure_cache, key);
-
-	if (plproc != NULL)
+	PG_TRY();
 	{
-		Py_INCREF(plproc);
-		if (!PyCObject_Check(plproc))
-			elog(FATAL, "expected a PyCObject, didn't get one");
-
-		proc = PyCObject_AsVoidPtr(plproc);
-		if (!proc)
-			PLy_elog(ERROR, "PyCObject_AsVoidPtr() failed");
-		if (proc->me != plproc)
-			elog(FATAL, "proc->me != plproc");
-		/* did we find an up-to-date cache entry? */
-		if (proc->fn_xmin != HeapTupleHeaderGetXmin(procTup->t_data) ||
-			!ItemPointerEquals(&proc->fn_tid, &procTup->t_self))
+		if (!found)
 		{
-			Py_DECREF(plproc);
-			proc = NULL;
+			/* Haven't found it, create a new cache entry */
+			entry->proc = PLy_procedure_create(procTup, fn_oid, is_trigger);
 		}
+		else if (!PLy_procedure_valid(entry->proc, procTup))
+		{
+			/* Found it, but it's invalid, free and reuse the cache entry */
+			PLy_procedure_delete(entry->proc);
+			PLy_free(entry->proc);
+			entry->proc = PLy_procedure_create(procTup, fn_oid, is_trigger);
+		}
+		/* Found it and it's valid, it's fine to use it */
 	}
-
-	if (proc == NULL)
-		proc = PLy_procedure_create(procTup, tgreloid, key);
-
-	if (OidIsValid(tgreloid))
+	PG_CATCH();
 	{
-		/*
-		 * Input/output conversion for trigger tuples.	Use the result
-		 * TypeInfo variable to store the tuple conversion info.  We do this
-		 * over again on each call to cover the possibility that the
-		 * relation's tupdesc changed since the trigger was last called.
-		 * PLy_input_tuple_funcs and PLy_output_tuple_funcs are responsible
-		 * for not doing repetitive work.
-		 */
-		TriggerData *tdata = (TriggerData *) fcinfo->context;
-
-		Assert(CALLED_AS_TRIGGER(fcinfo));
-		PLy_input_tuple_funcs(&(proc->result), tdata->tg_relation->rd_att);
-		PLy_output_tuple_funcs(&(proc->result), tdata->tg_relation->rd_att);
+		/* Do not leave an uninitialised entry in the cache */
+		if (is_trigger)
+			hash_search(PLy_trigger_cache,
+						&fn_oid, HASH_REMOVE, NULL);
+		else
+			hash_search(PLy_procedure_cache,
+						&fn_oid, HASH_REMOVE, NULL);
+		PG_RE_THROW();
 	}
+	PG_END_TRY();
 
 	ReleaseSysCache(procTup);
 
-	return proc;
+	return entry->proc;
 }
 
+/*
+ * Create a new PLyProcedure structure
+ */
 static PLyProcedure *
-PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
+PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is_trigger)
 {
 	char		procName[NAMEDATALEN + 256];
 	Form_pg_proc procStruct;
@@ -1374,18 +1401,10 @@ PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
 				rv;
 
 	procStruct = (Form_pg_proc) GETSTRUCT(procTup);
-
-	if (OidIsValid(tgreloid))
-		rv = snprintf(procName, sizeof(procName),
-					  "__plpython_procedure_%s_%u_trigger_%u",
-					  NameStr(procStruct->proname),
-					  HeapTupleGetOid(procTup),
-					  tgreloid);
-	else
-		rv = snprintf(procName, sizeof(procName),
-					  "__plpython_procedure_%s_%u",
-					  NameStr(procStruct->proname),
-					  HeapTupleGetOid(procTup));
+	rv = snprintf(procName, sizeof(procName),
+				  "__plpython_procedure_%s_%u",
+				  NameStr(procStruct->proname),
+				  fn_oid);
 	if (rv >= sizeof(procName) || rv < 0)
 		elog(ERROR, "procedure name would overrun buffer");
 
@@ -1402,7 +1421,7 @@ PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
 		PLy_typeinfo_init(&proc->args[i]);
 	proc->nargs = 0;
 	proc->code = proc->statics = NULL;
-	proc->globals = proc->me = NULL;
+	proc->globals = NULL;
 	proc->is_setof = procStruct->proretset;
 	proc->setof = NULL;
 	proc->argnames = NULL;
@@ -1413,7 +1432,7 @@ PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
 		 * get information required for output conversion of the return value,
 		 * but only if this isn't a trigger.
 		 */
-		if (!OidIsValid(tgreloid))
+		if (!is_trigger)
 		{
 			HeapTuple	rvTypeTup;
 			Form_pg_type rvTypeStruct;
@@ -1550,11 +1569,6 @@ PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
 
 		pfree(procSource);
 		procSource = NULL;
-
-		proc->me = PyCObject_FromVoidPtr(proc, NULL);
-		if (!proc->me)
-			PLy_elog(ERROR, "PyCObject_FromVoidPtr() failed");
-		PyDict_SetItemString(PLy_procedure_cache, key, proc->me);
 	}
 	PG_CATCH();
 	{
@@ -1569,6 +1583,9 @@ PLy_procedure_create(HeapTuple procTup, Oid tgreloid, char *key)
 	return proc;
 }
 
+/*
+ * Insert the procedure into the Python interpreter
+ */
 static void
 PLy_procedure_compile(PLyProcedure *proc, const char *src)
 {
@@ -1589,9 +1606,9 @@ PLy_procedure_compile(PLyProcedure *proc, const char *src)
 	 */
 	msrc = PLy_procedure_munge_source(proc->pyname, src);
 	crv = PyRun_String(msrc, Py_file_input, proc->globals, NULL);
-	free(msrc);
+	pfree(msrc);
 
-	if (crv != NULL && (!PyErr_Occurred()))
+	if (crv != NULL)
 	{
 		int			clen;
 		char		call[NAMEDATALEN + 256];
@@ -1605,13 +1622,15 @@ PLy_procedure_compile(PLyProcedure *proc, const char *src)
 		if (clen < 0 || clen >= sizeof(call))
 			elog(ERROR, "string would overflow buffer");
 		proc->code = Py_CompileString(call, "<string>", Py_eval_input);
-		if (proc->code != NULL && (!PyErr_Occurred()))
+		if (proc->code != NULL)
 			return;
 	}
-	else
-		Py_XDECREF(crv);
 
-	PLy_elog(ERROR, "could not compile PL/Python function \"%s\"", proc->proname);
+	if (proc->proname)
+		PLy_elog(ERROR, "could not compile PL/Python function \"%s\"",
+				 proc->proname);
+	else
+		PLy_elog(ERROR, "could not compile anonymous PL/Python code block");
 }
 
 static char *
@@ -1628,7 +1647,7 @@ PLy_procedure_munge_source(const char *name, const char *src)
 	 */
 	mlen = (strlen(src) * 2) + strlen(name) + 16;
 
-	mrc = PLy_malloc(mlen);
+	mrc = palloc(mlen);
 	plen = snprintf(mrc, mlen, "def %s():\n\t", name);
 	Assert(plen >= 0 && plen < mlen);
 
@@ -1667,7 +1686,6 @@ PLy_procedure_delete(PLyProcedure *proc)
 	Py_XDECREF(proc->code);
 	Py_XDECREF(proc->statics);
 	Py_XDECREF(proc->globals);
-	Py_XDECREF(proc->me);
 	if (proc->proname)
 		PLy_free(proc->proname);
 	if (proc->pyname)
@@ -1686,7 +1704,6 @@ PLy_procedure_delete(PLyProcedure *proc)
 	}
 	if (proc->argnames)
 		PLy_free(proc->argnames);
-	PLy_free(proc);
 }
 
 /*
@@ -2043,7 +2060,10 @@ PLyList_FromArray(PLyDatumToOb *arg, Datum d)
 						 elm->typlen, elm->typbyval, elm->typalign,
 						 &isnull);
 		if (isnull)
+		{
+			Py_INCREF(Py_None);
 			PyList_SET_ITEM(list, i, Py_None);
+		}
 		else
 			PyList_SET_ITEM(list, i, elm->func(elm, elem));
 	}
@@ -2289,6 +2309,9 @@ PLyMapping_ToTuple(PLyTypeInfo *info, PyObject *mapping)
 		PyObject   *volatile value;
 		PLyObToDatum *att;
 
+		if (desc->attrs[i]->attisdropped)
+			continue;
+
 		key = NameStr(desc->attrs[i]->attname);
 		value = NULL;
 		att = &info->out.r.atts[i];
@@ -2339,6 +2362,7 @@ PLySequence_ToTuple(PLyTypeInfo *info, PyObject *sequence)
 	HeapTuple	tuple;
 	Datum	   *values;
 	bool	   *nulls;
+	volatile int idx;
 	volatile int i;
 
 	Assert(PySequence_Check(sequence));
@@ -2349,7 +2373,13 @@ PLySequence_ToTuple(PLyTypeInfo *info, PyObject *sequence)
 	 * plpython developer's errors we are strict here
 	 */
 	desc = lookup_rowtype_tupdesc(info->out.d.typoid, -1);
-	if (PySequence_Length(sequence) != desc->natts)
+	idx = 0;
+	for (i = 0; i < desc->natts; i++)
+	{
+		if (!desc->attrs[i]->attisdropped)
+			idx++;
+	}
+	if (PySequence_Length(sequence) != idx)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("length of returned sequence did not match number of columns in row")));
@@ -2361,16 +2391,20 @@ PLySequence_ToTuple(PLyTypeInfo *info, PyObject *sequence)
 	/* Build tuple */
 	values = palloc(sizeof(Datum) * desc->natts);
 	nulls = palloc(sizeof(bool) * desc->natts);
+	idx = 0;
 	for (i = 0; i < desc->natts; ++i)
 	{
 		PyObject   *volatile value;
 		PLyObToDatum *att;
 
+		if (desc->attrs[i]->attisdropped)
+			continue;
+
 		value = NULL;
 		att = &info->out.r.atts[i];
 		PG_TRY();
 		{
-			value = PySequence_GetItem(sequence, i);
+			value = PySequence_GetItem(sequence, idx);
 			Assert(value);
 			if (value == Py_None)
 			{
@@ -2392,6 +2426,8 @@ PLySequence_ToTuple(PLyTypeInfo *info, PyObject *sequence)
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
+
+		idx++;
 	}
 
 	tuple = heap_form_tuple(desc, values, nulls);
@@ -2425,6 +2461,9 @@ PLyObject_ToTuple(PLyTypeInfo *info, PyObject *object)
 		char	   *key;
 		PyObject   *volatile value;
 		PLyObToDatum *att;
+
+		if (desc->attrs[i]->attisdropped)
+			continue;
 
 		key = NameStr(desc->attrs[i]->attname);
 		value = NULL;
@@ -2637,12 +2676,13 @@ PLy_plan_new(void)
 {
 	PLyPlanObject *ob;
 
-	if ((ob = PyObject_NEW(PLyPlanObject, &PLy_PlanType)) == NULL)
+	if ((ob = PyObject_New(PLyPlanObject, &PLy_PlanType)) == NULL)
 		return NULL;
 
 	ob->plan = NULL;
 	ob->nargs = 0;
 	ob->types = NULL;
+	ob->values = NULL;
 	ob->args = NULL;
 
 	return (PyObject *) ob;
@@ -2658,6 +2698,8 @@ PLy_plan_dealloc(PyObject *arg)
 		SPI_freeplan(ob->plan);
 	if (ob->types)
 		PLy_free(ob->types);
+	if (ob->values)
+		PLy_free(ob->values);
 	if (ob->args)
 	{
 		int			i;
@@ -2693,7 +2735,7 @@ PLy_result_new(void)
 {
 	PLyResultObject *ob;
 
-	if ((ob = PyObject_NEW(PLyResultObject, &PLy_ResultType)) == NULL)
+	if ((ob = PyObject_New(PLyResultObject, &PLy_ResultType)) == NULL)
 		return NULL;
 
 	/* ob->tuples = NULL; */
@@ -3229,6 +3271,7 @@ _PG_init(void)
 	/* Be sure we do initialization only once (should be redundant now) */
 	static bool inited = false;
 	const int **version_ptr;
+	HASHCTL		hash_ctl;
 
 	if (inited)
 		return;
@@ -3260,9 +3303,20 @@ _PG_init(void)
 	PLy_init_plpy();
 	if (PyErr_Occurred())
 		PLy_elog(FATAL, "untrapped error in initialization");
-	PLy_procedure_cache = PyDict_New();
-	if (PLy_procedure_cache == NULL)
-		PLy_elog(ERROR, "could not create procedure cache");
+
+	memset(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = sizeof(Oid);
+	hash_ctl.entrysize = sizeof(PLyProcedureEntry);
+	hash_ctl.hash = oid_hash;
+	PLy_procedure_cache = hash_create("PL/Python procedures", 32, &hash_ctl,
+									  HASH_ELEM | HASH_FUNCTION);
+
+	memset(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = sizeof(Oid);
+	hash_ctl.entrysize = sizeof(PLyProcedureEntry);
+	hash_ctl.hash = oid_hash;
+	PLy_trigger_cache = hash_create("PL/Python triggers", 32, &hash_ctl,
+									HASH_ELEM | HASH_FUNCTION);
 
 	inited = true;
 }
@@ -3637,13 +3691,8 @@ PLy_traceback(int *xlevel)
 static void *
 PLy_malloc(size_t bytes)
 {
-	void	   *ptr = malloc(bytes);
-
-	if (ptr == NULL)
-		ereport(FATAL,
-				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("out of memory")));
-	return ptr;
+	/* We need our allocations to be long-lived, so use TopMemoryContext */
+	return MemoryContextAlloc(TopMemoryContext, bytes);
 }
 
 static void *
@@ -3672,7 +3721,7 @@ PLy_strdup(const char *str)
 static void
 PLy_free(void *ptr)
 {
-	free(ptr);
+	pfree(ptr);
 }
 
 /*
