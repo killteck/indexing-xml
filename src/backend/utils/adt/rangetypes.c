@@ -818,6 +818,74 @@ range_minus(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+Datum
+range_union(PG_FUNCTION_ARGS)
+{
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	 lower1, lower2;
+	RangeBound	 upper1, upper2;
+	bool		 empty1, empty2;
+	RangeBound	*result_lower;
+	RangeBound	*result_upper;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (empty1)
+		PG_RETURN_RANGE(r2);
+	if (empty2)
+		PG_RETURN_RANGE(r1);
+
+	if (!DatumGetBool(range_overlaps(fcinfo)) &&
+		!DatumGetBool(range_adjacent(fcinfo)))
+		elog(ERROR, "range union resulted in two ranges");
+
+	if (range_cmp_bounds(&lower1, &lower2) < 0)
+		result_lower = &lower1;
+	else
+		result_lower = &lower2;
+
+	if (range_cmp_bounds(&upper1, &upper2) > 0)
+		result_upper = &upper1;
+	else
+		result_upper = &upper2;
+
+	PG_RETURN_RANGE(make_range(result_lower, result_upper, false));
+}
+
+Datum
+range_intersect(PG_FUNCTION_ARGS)
+{
+	RangeType *r1 = PG_GETARG_RANGE(0);
+	RangeType *r2 = PG_GETARG_RANGE(1);
+
+	RangeBound	 lower1, lower2;
+	RangeBound	 upper1, upper2;
+	bool		 empty1, empty2;
+	RangeBound	*result_lower;
+	RangeBound	*result_upper;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (empty1 || empty2 || !DatumGetBool(range_overlaps(fcinfo)))
+		PG_RETURN_RANGE(make_empty_range(lower1.rngtypid));
+
+	if (range_cmp_bounds(&lower1, &lower2) >= 0)
+		result_lower = &lower1;
+	else
+		result_lower = &lower2;
+
+	if (range_cmp_bounds(&upper1, &upper2) <= 0)
+		result_upper = &upper1;
+	else
+		result_upper = &upper2;
+
+	PG_RETURN_RANGE(make_range(result_lower, result_upper, false));
+}
+
 /* Btree support */
 
 Datum
@@ -880,19 +948,6 @@ range_gt(PG_FUNCTION_ARGS)
 	int cmp = range_cmp(fcinfo);
 	PG_RETURN_BOOL(cmp > 0);
 }
-
-Datum
-range_union(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_intersect(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
 
 /* GiST support */
 Datum
@@ -967,6 +1022,8 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 
 	if (empty)
 		flags |= RANGE_EMPTY;
+	else if (range_cmp_bounds(lower, upper) > 0)
+		elog(ERROR, "range lower bound must be less than or equal to range upper bound");
 
 	flags |= (lower->inclusive) ? RANGE_LB_INC  : 0;
 	flags |= (lower->infinite)  ? RANGE_LB_INF  : 0;

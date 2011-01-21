@@ -32,6 +32,8 @@ SELECT * FROM numrange_test WHERE nr = '-';
 SELECT * FROM numrange_test WHERE range_eq(nr, '(1.1, 2.2)');
 SELECT * FROM numrange_test WHERE nr = '[1.1, 2.2)';
 
+select range(2.0, 1.0);
+
 select range(2.0, 3.0) -|- range(3.0, 4.0);
 select adjacent(range(2.0, 3.0), range(3.1, 4.0));
 select rangeii(2.0, 3.0) -|- range__(3.0, 4.0);
@@ -50,6 +52,14 @@ select range(1.0, 2.0) >> range(3.0, 4.0);
 select range(3.0, 70.0) &< range(6.6, 100.0);
 
 select range(1.1, 2.2) < range(1.0, 200.2);
-select range(1.1, 2.2) < range__(1.1, -100.1);
+select range(1.1, 2.2) < range__(1.1, 1.2);
+
+select range(1.0, 2.0) + range(2.0, 3.0);
+select range(1.0, 2.0) + range(1.5, 3.0);
+select range(1.0, 2.0) + range(2.5, 3.0);
+
+select range(1.0, 2.0) * range(2.0, 3.0);
+select range(1.0, 2.0) * range(1.5, 3.0);
+select range(1.0, 2.0) * range(2.5, 3.0);
 
 DROP TABLE numrange_test;

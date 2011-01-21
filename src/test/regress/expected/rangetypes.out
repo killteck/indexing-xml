@@ -91,6 +91,8 @@ SELECT * FROM numrange_test WHERE nr = '[1.1, 2.2)';
  [ 1.1, 2.2 )
 (1 row)
 
+select range(2.0, 1.0);
+ERROR:  range lower bound must be less than or equal to range upper bound
 select range(2.0, 3.0) -|- range(3.0, 4.0);
  ?column? 
 ----------
@@ -181,10 +183,42 @@ select range(1.1, 2.2) < range(1.0, 200.2);
  f
 (1 row)
 
-select range(1.1, 2.2) < range__(1.1, -100.1);
+select range(1.1, 2.2) < range__(1.1, 1.2);
  ?column? 
 ----------
  t
+(1 row)
+
+select range(1.0, 2.0) + range(2.0, 3.0);
+   ?column?   
+--------------
+ [ 1.0, 3.0 )
+(1 row)
+
+select range(1.0, 2.0) + range(1.5, 3.0);
+   ?column?   
+--------------
+ [ 1.0, 3.0 )
+(1 row)
+
+select range(1.0, 2.0) + range(2.5, 3.0);
+ERROR:  range union resulted in two ranges
+select range(1.0, 2.0) * range(2.0, 3.0);
+ ?column? 
+----------
+ -
+(1 row)
+
+select range(1.0, 2.0) * range(1.5, 3.0);
+   ?column?   
+--------------
+ [ 1.5, 2.0 )
+(1 row)
+
+select range(1.0, 2.0) * range(2.5, 3.0);
+ ?column? 
+----------
+ -
 (1 row)
 
 DROP TABLE numrange_test;
