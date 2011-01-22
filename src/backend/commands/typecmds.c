@@ -88,6 +88,7 @@ static Oid	findTypeTypmodoutFunction(List *procname);
 static Oid	findTypeAnalyzeFunction(List *procname, Oid typeOid);
 static Oid  findRangeCanonicalFunction(List *procname, Oid typeOid);
 static Oid	findRangeSubtypeCmpFunction(List *procname, Oid typeOid);
+static Oid findRangeSubtypeFloatFunction(List *procname, Oid typeOid);
 static List *get_rels_with_domain(Oid domainOid, LOCKMODE lockmode);
 static void checkDomainOwner(HeapTuple tup);
 static void checkEnumOwner(HeapTuple tup);
@@ -1220,11 +1221,13 @@ DefineRange(CreateRangeStmt *stmt)
 	List		*parameters = stmt->params;
 
 	ListCell	*lc;
-	List		*rangeSubtypeCmpName = NIL;
-	regproc		 rangeAnalyze		 = InvalidOid;
-	Oid			 rangeSubType		 = InvalidOid;
-	regproc		 rangeSubtypeCmp	 = InvalidOid;
-	regproc		 rangeCanonical		 = InvalidOid;
+	List		*rangeSubtypeCmpName   = NIL;
+	List		*rangeSubtypeFloatName = NIL;
+	regproc		 rangeAnalyze		   = InvalidOid;
+	Oid			 rangeSubtype		   = InvalidOid;
+	regproc		 rangeSubtypeCmp	   = InvalidOid;
+	regproc		 rangeCanonical		   = InvalidOid;
+	regproc		 rangeSubtypeFloat	   = InvalidOid;
 
 
 	/*
@@ -1307,11 +1310,11 @@ DefineRange(CreateRangeStmt *stmt)
 
 		if (pg_strcasecmp(defel->defname, "subtype") == 0)
 		{
-			if (OidIsValid(rangeSubType))
+			if (OidIsValid(rangeSubtype))
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
 						 errmsg("conflicting or redundant options")));
-			rangeSubType = typenameTypeId(NULL, defGetTypeName(defel));
+			rangeSubtype = typenameTypeId(NULL, defGetTypeName(defel));
 		}
 		else if (pg_strcasecmp(defel->defname, "canonical") == 0)
 		{
@@ -1339,6 +1342,14 @@ DefineRange(CreateRangeStmt *stmt)
 						 errmsg("conflicting or redundant options")));
 			rangeSubtypeCmpName = defGetQualifiedName(defel);
 		}
+		else if (pg_strcasecmp(defel->defname, "subtype_float") == 0)
+		{
+			if (rangeSubtypeFloatName != NIL)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("conflicting or redundant options")));
+			rangeSubtypeFloatName = defGetQualifiedName(defel);
+		}
 		else
 		{
 			ereport(ERROR,
@@ -1349,7 +1360,7 @@ DefineRange(CreateRangeStmt *stmt)
 		}
 	}
 
-	if (!OidIsValid(rangeSubType))
+	if (!OidIsValid(rangeSubtype))
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
 					 errmsg("type attribute \"subtype\" is required")));
@@ -1360,7 +1371,11 @@ DefineRange(CreateRangeStmt *stmt)
 					 errmsg("type attribute \"subtype_cmp\" is required")));
 
 	rangeSubtypeCmp = findRangeSubtypeCmpFunction(
-		rangeSubtypeCmpName, rangeSubType);
+		rangeSubtypeCmpName, rangeSubtype);
+
+	if (rangeSubtypeFloatName != NIL)
+		rangeSubtypeFloat = findRangeSubtypeFloatFunction(
+			rangeSubtypeFloatName, rangeSubtype);
 
 	rangeArrayOid = AssignTypeArrayOid();
 
@@ -1398,7 +1413,8 @@ DefineRange(CreateRangeStmt *stmt)
 				   false);		/* Type NOT NULL */
 
 	/* create the entry in pg_range */
-	RangeCreate(typoid, rangeSubType, rangeSubtypeCmp, rangeCanonical);
+	RangeCreate(typoid, rangeSubtype, rangeSubtypeCmp, rangeCanonical,
+				rangeSubtypeFloat);
 
 	/*
 	 * Create the array type that goes with it.
@@ -1799,6 +1815,40 @@ findRangeSubtypeCmpFunction(List *procname, Oid subType)
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("range subtype comparison function %s must be immutable",
 						func_signature_string(procname, 2, NIL, argList))));
+
+	return procOid;
+}
+
+/*
+ * Used to find a range's 'canonical' function.
+ */
+static Oid
+findRangeSubtypeFloatFunction(List *procname, Oid typeOid)
+{
+	Oid			argList[1];
+	Oid			procOid;
+
+	argList[0] = typeOid;
+
+	procOid = LookupFuncName(procname, 1, argList, true);
+
+	if (!OidIsValid(procOid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("function %s does not exist",
+						func_signature_string(procname, 1, NIL, argList))));
+
+	if (get_func_rettype(procOid) != FLOAT8OID)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype float function %s must return type \"float8\"",
+						func_signature_string(procname, 1, NIL, argList))));
+
+	if (func_volatile(procOid) != PROVOLATILE_IMMUTABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("range subtype float function %s must be immutable",
+						func_signature_string(procname, 1, NIL, argList))));
 
 	return procOid;
 }

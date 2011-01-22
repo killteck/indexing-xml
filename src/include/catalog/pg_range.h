@@ -36,6 +36,7 @@ CATALOG(pg_range,3541) BKI_WITHOUT_OIDS
 	Oid			rngsubtype;		/* OID of range's subtype */
 	regproc		rngsubcmp;		/* compare values of type 'subtype' */
 	regproc		rngcanonical;	/* canonicalize range, or 0 */
+	regproc		rngsubfloat;	/* represent subtype as a float8 (for GiST) */
 } FormData_pg_range;
 
 /* ----------------
@@ -49,23 +50,25 @@ typedef FormData_pg_range *Form_pg_range;
  *		compiler constants for pg_range
  * ----------------
  */
-#define Natts_pg_range					4
+#define Natts_pg_range					5
 #define Anum_pg_range_rngtypid			1
 #define Anum_pg_range_rngsubtype		2
 #define Anum_pg_range_rngsubcmp			3
 #define Anum_pg_range_rngcanonical		4
-
-/* ----------------
- *		pg_range has no initial contents
- * ----------------
- */
+#define Anum_pg_range_rngsubfloat		5
 
 /*
  * prototypes for functions in pg_range.c
  */
 
 void RangeCreate(Oid rangeTypeOid, Oid rangeSubType,
-				 regproc rangeSubtypeCmp, regproc rangeCanonical);
+				 regproc rangeSubtypeCmp, regproc rangeCanonical,
+				 regproc rangeSubFloat);
 void RangeDelete(Oid rangeTypeOid);
+
+/* ----------------
+ *		initial contents of pg_range
+ * ----------------
+ */
 
 #endif   /* PG_RANGE_H */

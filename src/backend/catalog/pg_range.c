@@ -29,7 +29,7 @@
  */
 void
 RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeSubtypeCmp,
-			regproc rangeCanonical)
+			regproc rangeCanonical, regproc rangeSubFloat)
 {
 	Relation			pg_range;
 	Datum				values[Natts_pg_range];
@@ -46,6 +46,7 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeSubtypeCmp,
 	values[Anum_pg_range_rngsubtype - 1]   = ObjectIdGetDatum(rangeSubType);
 	values[Anum_pg_range_rngsubcmp - 1]	   = ObjectIdGetDatum(rangeSubtypeCmp);
 	values[Anum_pg_range_rngcanonical - 1] = ObjectIdGetDatum(rangeCanonical);
+	values[Anum_pg_range_rngsubfloat - 1]  = ObjectIdGetDatum(rangeSubFloat);
 
 	tup = heap_form_tuple(RelationGetDescr(pg_range), values, nulls);
 	simple_heap_insert(pg_range, tup);
@@ -72,6 +73,14 @@ RangeCreate(Oid rangeTypeOid, Oid rangeSubType, regproc rangeSubtypeCmp,
 	{
 		referenced.classId	   = ProcedureRelationId;
 		referenced.objectId	   = rangeCanonical;
+		referenced.objectSubId = 0;
+		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+	}
+
+	if (OidIsValid(rangeSubFloat))
+	{
+		referenced.classId	   = ProcedureRelationId;
+		referenced.objectId	   = rangeSubFloat;
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
