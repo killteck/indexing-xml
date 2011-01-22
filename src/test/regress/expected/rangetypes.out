@@ -3,6 +3,8 @@ CREATE TYPE numrange AS RANGE (
   SUBTYPE_CMP = numeric_cmp
 );
 CREATE TABLE numrange_test (nr NUMRANGE);
+create index numrange_test_btree on numrange_test(nr);
+SET enable_seqscan = f;
 -- negative test; should fail
 INSERT INTO numrange_test VALUES('-[1.1, 2.2)');
 ERROR:  syntax error on range input, character 1
@@ -221,4 +223,53 @@ select range(1.0, 2.0) * range(2.5, 3.0);
  -
 (1 row)
 
+select * from numrange_test where nr < rangeii(-1000.0, -1000.0);
+      nr       
+---------------
+ ( -INF, INF )
+ ( -INF, 5 )
+ -
+(3 rows)
+
+select * from numrange_test where nr < rangeii(0.0, 1.0);
+      nr       
+---------------
+ ( -INF, INF )
+ ( -INF, 5 )
+ -
+(3 rows)
+
+select * from numrange_test where nr < rangeii(1000.0, 1001.0);
+      nr       
+---------------
+ ( -INF, INF )
+ [ 3, INF )
+ ( -INF, 5 )
+ [ 1.1, 2.2 )
+ -
+ [ 1.7, 1.7 ]
+(6 rows)
+
+select * from numrange_test where nr > rangeii(-1001.0, -1000.0);
+      nr      
+--------------
+ [ 3, INF )
+ [ 1.1, 2.2 )
+ [ 1.7, 1.7 ]
+(3 rows)
+
+select * from numrange_test where nr > rangeii(0.0, 1.0);
+      nr      
+--------------
+ [ 3, INF )
+ [ 1.1, 2.2 )
+ [ 1.7, 1.7 ]
+(3 rows)
+
+select * from numrange_test where nr > rangeii(1000.0, 1000.0);
+ nr 
+----
+(0 rows)
+
+SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;

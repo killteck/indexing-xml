@@ -336,5 +336,6 @@ DATA(insert (	3659   3614 3614 4 3658 ));
 DATA(insert (	3659   3614 3614 5 2700 ));
 DATA(insert (	3626   3614 3614 1 3622 ));
 DATA(insert (	3683   3615 3615 1 3668 ));
+DATA(insert (	3901   3831 3831 1 3870 ));
 
 #endif   /* PG_AMPROC_H */

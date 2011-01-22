@@ -213,5 +213,6 @@ DATA(insert (	783		tsvector_ops		PGNSP PGUID 3655  3614 t 3642 ));
 DATA(insert (	2742	tsvector_ops		PGNSP PGUID 3659  3614 t 25 ));
 DATA(insert (	403		tsquery_ops			PGNSP PGUID 3683  3615 t 0 ));
 DATA(insert (	783		tsquery_ops			PGNSP PGUID 3702  3615 t 20 ));
+DATA(insert (	403		range_ops			PGNSP PGUID 3901  3831 t 0 ));
 
 #endif   /* PG_OPCLASS_H */

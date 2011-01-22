@@ -5,6 +5,8 @@ CREATE TYPE numrange AS RANGE (
 );
 
 CREATE TABLE numrange_test (nr NUMRANGE);
+create index numrange_test_btree on numrange_test(nr);
+SET enable_seqscan = f;
 
 -- negative test; should fail
 INSERT INTO numrange_test VALUES('-[1.1, 2.2)');
@@ -62,4 +64,12 @@ select range(1.0, 2.0) * range(2.0, 3.0);
 select range(1.0, 2.0) * range(1.5, 3.0);
 select range(1.0, 2.0) * range(2.5, 3.0);
 
+select * from numrange_test where nr < rangeii(-1000.0, -1000.0);
+select * from numrange_test where nr < rangeii(0.0, 1.0);
+select * from numrange_test where nr < rangeii(1000.0, 1001.0);
+select * from numrange_test where nr > rangeii(-1001.0, -1000.0);
+select * from numrange_test where nr > rangeii(0.0, 1.0);
+select * from numrange_test where nr > rangeii(1000.0, 1000.0);
+
+SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;

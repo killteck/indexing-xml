@@ -709,4 +709,13 @@ DATA(insert (	3683   3615 3615 5 s	3679 403 0 ));
 DATA(insert (	3702   3615 3615 7 s	3693 783 0 ));
 DATA(insert (	3702   3615 3615 8 s	3694 783 0 ));
 
+/*
+ * btree range_ops
+ */
+DATA(insert (	3901   3831 3831 1 s	3884 403 0 ));
+DATA(insert (	3901   3831 3831 2 s	3885 403 0 ));
+DATA(insert (	3901   3831 3831 3 s	3882 403 0 ));
+DATA(insert (	3901   3831 3831 4 s	3886 403 0 ));
+DATA(insert (	3901   3831 3831 5 s	3887 403 0 ));
+
 #endif   /* PG_AMOP_H */
