@@ -71,5 +71,34 @@ select * from numrange_test where nr > rangeii(-1001.0, -1000.0);
 select * from numrange_test where nr > rangeii(0.0, 1.0);
 select * from numrange_test where nr > rangeii(1000.0, 1000.0);
 
+create table numrange_test2(nr numrange);
+create index numrange_test2_hash_idx on numrange_test2 (nr);
+INSERT INTO numrange_test2 VALUES('[-INF, 5)');
+INSERT INTO numrange_test2 VALUES(range(1.1, 2.2));
+INSERT INTO numrange_test2 VALUES(range(1.1, 2.2));
+INSERT INTO numrange_test2 VALUES(range__(1.1, 2.2));
+INSERT INTO numrange_test2 VALUES('-');
+
+select * from numrange_test2 where nr = '-'::numrange;
+select * from numrange_test2 where nr = range(1.1, 2.2);
+select * from numrange_test2 where nr = range(1.1, 2.3);
+
+set enable_nestloop=t;
+set enable_hashjoin=f;
+set enable_mergejoin=f;
+select * from numrange_test natural join numrange_test2 order by nr;
+set enable_nestloop=f;
+set enable_hashjoin=t;
+set enable_mergejoin=f;
+select * from numrange_test natural join numrange_test2 order by nr;
+set enable_nestloop=f;
+set enable_hashjoin=f;
+set enable_mergejoin=t;
+select * from numrange_test natural join numrange_test2 order by nr;
+
+set enable_nestloop to default;
+set enable_hashjoin to default;
+set enable_mergejoin to default;
 SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;
+DROP TABLE numrange_test2;

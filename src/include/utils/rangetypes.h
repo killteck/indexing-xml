@@ -94,6 +94,9 @@ extern Datum range_le(PG_FUNCTION_ARGS);
 extern Datum range_ge(PG_FUNCTION_ARGS);
 extern Datum range_gt(PG_FUNCTION_ARGS);
 
+/* Hash support */
+extern Datum hash_range(PG_FUNCTION_ARGS);
+
 /* GiST support */
 extern Datum range_gist_consistent(PG_FUNCTION_ARGS);
 extern Datum range_gist_compress(PG_FUNCTION_ARGS);

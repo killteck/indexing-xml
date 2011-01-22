@@ -13,6 +13,7 @@
  */
 #include "postgres.h"
 
+#include "access/hash.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_type.h"
 #include "fmgr.h"
@@ -21,6 +22,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rangetypes.h"
+#include "utils/typcache.h"
 
 /* flags */
 #define RANGE_EMPTY		0x01
@@ -947,6 +949,87 @@ range_gt(PG_FUNCTION_ARGS)
 {
 	int cmp = range_cmp(fcinfo);
 	PG_RETURN_BOOL(cmp > 0);
+}
+
+/* Hash support */
+Datum
+hash_range(PG_FUNCTION_ARGS)
+{
+	RangeType	*r			= PG_GETARG_RANGE(0);
+	RangeBound	 lower;
+	RangeBound	 upper;
+	bool		 empty;
+	char		 flags		= 0;
+	uint32		 lower_hash = 0;
+	uint32		 upper_hash = 0;
+	uint32		 result		= 0;
+
+	TypeCacheEntry *typentry;
+	Oid subtype;
+	FunctionCallInfoData locfcinfo;
+
+
+	range_deserialize(r, &lower, &upper, &empty);
+
+	if (lower.rngtypid != upper.rngtypid)
+		elog(ERROR, "range types do not match");
+
+	if (empty)
+		flags |= RANGE_EMPTY;
+
+	flags |= (lower.inclusive)	? RANGE_LB_INC  : 0;
+	flags |= (lower.infinite)	? RANGE_LB_INF  : 0;
+	flags |= (upper.inclusive)	? RANGE_UB_INC  : 0;
+	flags |= (upper.infinite)	? RANGE_UB_INF  : 0;
+
+	subtype = get_range_subtype(lower.rngtypid);
+
+	/*
+	 * We arrange to look up the hash function only once per series of
+	 * calls, assuming the subtype doesn't change underneath us.  The
+	 * typcache is used so that we have no memory leakage when being
+	 * used as an index support function.
+	 */
+	typentry = (TypeCacheEntry *) fcinfo->flinfo->fn_extra;
+	if (typentry == NULL || typentry->type_id != subtype)
+	{
+		typentry = lookup_type_cache(subtype, TYPECACHE_HASH_PROC_FINFO);
+		if (!OidIsValid(typentry->hash_proc_finfo.fn_oid))
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_FUNCTION),
+					 errmsg("could not identify a hash function for type %s",
+							format_type_be(subtype))));
+		fcinfo->flinfo->fn_extra = (void *) typentry;
+	}
+
+	/*
+	 * apply the hash function to each array element.
+	 */
+	InitFunctionCallInfoData(locfcinfo, &typentry->hash_proc_finfo, 1,
+							 NULL, NULL);
+
+	if (RANGE_HAS_LBOUND(flags))
+	{
+		locfcinfo.arg[0]	 = lower.val;
+		locfcinfo.argnull[0] = false;
+		locfcinfo.isnull	 = false;
+		lower_hash = DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
+	}
+	if (RANGE_HAS_UBOUND(flags))
+	{
+		locfcinfo.arg[0]	 = upper.val;
+		locfcinfo.argnull[0] = false;
+		locfcinfo.isnull	 = false;
+		upper_hash = DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
+	}
+
+	result	= hash_uint32((uint32) flags);
+	result	= (result << 1) | (result >> 31);
+	result ^= lower_hash;
+	result	= (result << 1) | (result >> 31);
+	result ^= upper_hash;
+
+	PG_RETURN_INT32(result);
 }
 
 /* GiST support */

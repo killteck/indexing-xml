@@ -718,4 +718,9 @@ DATA(insert (	3901   3831 3831 3 s	3882 403 0 ));
 DATA(insert (	3901   3831 3831 4 s	3886 403 0 ));
 DATA(insert (	3901   3831 3831 5 s	3887 403 0 ));
 
+/*
+ * hash range_ops
+ */
+DATA(insert (	3903   3831 3831 1 s	3882 405 0 ));
+
 #endif   /* PG_AMOP_H */

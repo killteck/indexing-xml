@@ -945,7 +945,7 @@ DATA(insert OID = 2992 (  "<="	   PGNSP PGUID b f f 2249 2249 16 2993 2991 recor
 DATA(insert OID = 2993 (  ">="	   PGNSP PGUID b f f 2249 2249 16 2992 2990 record_ge scalargtsel scalargtjoinsel ));
 
 /* generic range type operators */
-DATA(insert OID = 3882 (  "="	   PGNSP PGUID b f f 3831 3831 16 3882 3883 range_eq eqsel eqjoinsel ));
+DATA(insert OID = 3882 (  "="	   PGNSP PGUID b t t 3831 3831 16 3882 3883 range_eq eqsel eqjoinsel ));
 DATA(insert OID = 3883 (  "<>"	   PGNSP PGUID b f f 3831 3831 16 3883 3882 range_ne neqsel neqjoinsel ));
 DATA(insert OID = 3884 (  "<"	   PGNSP PGUID b f f 3831 3831 16 3887 3886 range_lt eqsel eqjoinsel ));
 DATA(insert OID = 3885 (  "<="	   PGNSP PGUID b f f 3831 3831 16 3886 3887 range_le eqsel eqjoinsel ));
