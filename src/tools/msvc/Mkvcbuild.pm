@@ -26,8 +26,10 @@ my $libpq;
 
 my $contrib_defines = {'refint' => 'REFINT_VERBOSE'};
 my @contrib_uselibpq = ('dblink', 'oid2name', 'pgbench', 'pg_upgrade','vacuumlo');
-my @contrib_uselibpgport =
-  ('oid2name', 'pgbench', 'pg_standby','pg_archivecleanup', 'pg_upgrade', 'vacuumlo');
+my @contrib_uselibpgport =(
+    'oid2name', 'pgbench', 'pg_standby','pg_archivecleanup',
+    'pg_test_fsync', 'pg_upgrade', 'vacuumlo'
+);
 my $contrib_extralibs = {'pgbench' => ['wsock32.lib']};
 my $contrib_extraincludes = {'tsearch2' => ['contrib/tsearch2'], 'dblink' => ['src/backend']};
 my $contrib_extrasource = {
@@ -272,6 +274,8 @@ sub mkvcbuild
     $initdb->AddDefine('FRONTEND');
     $initdb->AddLibrary('wsock32.lib');
     $initdb->AddLibrary('ws2_32.lib');
+
+    my $pgbasebackup = AddSimpleFrontend('pg_basebackup', 1);
 
     my $pgconfig = AddSimpleFrontend('pg_config');
 

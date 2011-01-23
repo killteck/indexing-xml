@@ -182,7 +182,7 @@ typedef union PLyTypeOutput
 } PLyTypeOutput;
 
 /* all we need to move Postgresql data to Python objects,
- * and vis versa
+ * and vice versa
  */
 typedef struct PLyTypeInfo
 {
@@ -265,9 +265,9 @@ PG_FUNCTION_INFO_V1(plpython_inline_handler);
 
 /* most of the remaining of the declarations, all static */
 
-/* these should only be called once at the first call
- * of plpython_call_handler.  initialize the python interpreter
- * and global data.
+/*
+ * These should only be called once from _PG_init.  Initialize the
+ * Python interpreter and global data.
  */
 static void PLy_init_interp(void);
 static void PLy_init_plpy(void);
@@ -284,6 +284,9 @@ PLy_exception_set_plural(PyObject *, const char *, const char *,
 __attribute__((format(printf, 2, 5)))
 __attribute__((format(printf, 3, 5)));
 
+/* like PLy_exception_set, but conserve more fields from ErrorData */
+static void PLy_spi_exception_set(ErrorData *edata);
+
 /* Get the innermost python procedure called from the backend */
 static char *PLy_procedure_name(PLyProcedure *);
 
@@ -291,6 +294,7 @@ static char *PLy_procedure_name(PLyProcedure *);
 static void
 PLy_elog(int, const char *,...)
 __attribute__((format(printf, 2, 3)));
+static void PLy_get_spi_error_data(PyObject *exc, char **hint, char **query, int *position);
 static char *PLy_traceback(int *);
 
 static void *PLy_malloc(size_t);
@@ -363,19 +367,6 @@ static HeapTuple PLyObject_ToTuple(PLyTypeInfo *, PyObject *);
  * Currently active plpython function
  */
 static PLyProcedure *PLy_curr_procedure = NULL;
-
-/*
- * When a callback from Python into PG incurs an error, we temporarily store
- * the error information here, and return NULL to the Python interpreter.
- * Any further callback attempts immediately fail, and when the Python
- * interpreter returns to the calling function, we re-throw the error (even if
- * Python thinks it trapped the error and doesn't return NULL).  Eventually
- * this ought to be improved to let Python code really truly trap the error,
- * but that's more of a change from the pre-8.0 semantics than I have time for
- * now --- it will only be possible if the callback query is executed inside a
- * subtransaction.
- */
-static ErrorData *PLy_error_in_progress = NULL;
 
 static PyObject *PLy_interp_globals = NULL;
 static PyObject *PLy_interp_safe_globals = NULL;
@@ -597,7 +588,6 @@ PLy_trigger_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 		plrv = PLy_procedure_call(proc, "TD", plargs);
 
 		Assert(plrv != NULL);
-		Assert(!PLy_error_in_progress);
 
 		/*
 		 * Disconnect from SPI manager
@@ -1015,7 +1005,6 @@ PLy_function_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 				PLy_function_delete_args(proc);
 			}
 			Assert(plrv != NULL);
-			Assert(!PLy_error_in_progress);
 		}
 
 		/*
@@ -1194,23 +1183,9 @@ PLy_procedure_call(PLyProcedure *proc, char *kargs, PyObject *vargs)
 	rv = PyEval_EvalCode((PyCodeObject *) proc->code,
 						 proc->globals, proc->globals);
 
-	/*
-	 * If there was an error in a PG callback, propagate that no matter what
-	 * Python claims about its success.
-	 */
-	if (PLy_error_in_progress)
-	{
-		ErrorData  *edata = PLy_error_in_progress;
-
-		PLy_error_in_progress = NULL;
-		ReThrowError(edata);
-	}
-
-	if (rv == NULL || PyErr_Occurred())
-	{
-		Py_XDECREF(rv);
+	/* If the Python code returned an error, propagate it */
+	if (rv == NULL)
 		PLy_elog(ERROR, NULL);
-	}
 
 	return rv;
 }
@@ -1386,6 +1361,136 @@ PLy_procedure_get(Oid fn_oid, bool is_trigger)
 }
 
 /*
+ * Set up output conversion functions for a procedure
+ */
+static void
+PLy_procedure_output_conversion(PLyProcedure *proc, Form_pg_proc procStruct)
+{
+	HeapTuple	rvTypeTup;
+	Form_pg_type rvTypeStruct;
+
+	/* Get the return type */
+	rvTypeTup = SearchSysCache1(TYPEOID,
+								ObjectIdGetDatum(procStruct->prorettype));
+	if (!HeapTupleIsValid(rvTypeTup))
+		elog(ERROR, "cache lookup failed for type %u",
+			 procStruct->prorettype);
+	rvTypeStruct = (Form_pg_type) GETSTRUCT(rvTypeTup);
+
+	/* Disallow pseudotype result, except for void */
+	if (rvTypeStruct->typtype == TYPTYPE_PSEUDO &&
+		procStruct->prorettype != VOIDOID)
+	{
+		if (procStruct->prorettype == TRIGGEROID)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("trigger functions can only be called as triggers")));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("PL/Python functions cannot return type %s",
+							format_type_be(procStruct->prorettype))));
+	}
+
+	if (rvTypeStruct->typtype == TYPTYPE_COMPOSITE)
+	{
+		/*
+		 * Tuple: set up later, during first call to
+		 * PLy_function_handler
+		 */
+		proc->result.out.d.typoid = procStruct->prorettype;
+		proc->result.is_rowtype = 2;
+	}
+	else
+	{
+		/* Do the real work */
+		PLy_output_datum_func(&proc->result, rvTypeTup);
+	}
+
+	ReleaseSysCache(rvTypeTup);
+}
+
+/*
+ * Set up output conversion functions for a procedure
+ */
+static void
+PLy_procedure_input_conversion(PLyProcedure *proc, HeapTuple procTup,
+							   Form_pg_proc procStruct)
+{
+	Oid		*types;
+	char	**names,
+			*modes;
+	int		i,
+			pos,
+			total;
+
+	/* Extract argument type info from the pg_proc tuple */
+	total = get_func_arg_info(procTup, &types, &names, &modes);
+
+	/* Count number of in+inout args into proc->nargs */
+	if (modes == NULL)
+		proc->nargs = total;
+	else
+	{
+		/* proc->nargs was initialized to 0 above */
+		for (i = 0; i < total; i++)
+		{
+			if (modes[i] != PROARGMODE_OUT &&
+				modes[i] != PROARGMODE_TABLE)
+				(proc->nargs)++;
+		}
+	}
+
+	proc->argnames = (char **) PLy_malloc0(sizeof(char *) * proc->nargs);
+	for (i = pos = 0; i < total; i++)
+	{
+		HeapTuple	argTypeTup;
+		Form_pg_type argTypeStruct;
+
+		if (modes &&
+			(modes[i] == PROARGMODE_OUT ||
+			 modes[i] == PROARGMODE_TABLE))
+			continue;	/* skip OUT arguments */
+
+		Assert(types[i] == procStruct->proargtypes.values[pos]);
+
+		argTypeTup = SearchSysCache1(TYPEOID,
+									 ObjectIdGetDatum(types[i]));
+		if (!HeapTupleIsValid(argTypeTup))
+			elog(ERROR, "cache lookup failed for type %u", types[i]);
+		argTypeStruct = (Form_pg_type) GETSTRUCT(argTypeTup);
+
+		/* Check argument type is OK, set up I/O function info */
+		switch (argTypeStruct->typtype)
+		{
+			case TYPTYPE_PSEUDO:
+				/* Disallow pseudotype argument */
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("PL/Python functions cannot accept type %s",
+								format_type_be(types[i]))));
+				break;
+			case TYPTYPE_COMPOSITE:
+				/* We'll set IO funcs at first call */
+				proc->args[pos].is_rowtype = 2;
+				break;
+			default:
+				PLy_input_datum_func(&(proc->args[pos]),
+									 types[i],
+									 argTypeTup);
+				break;
+		}
+
+		/* Get argument name */
+		proc->argnames[pos] = names ? PLy_strdup(names[i]) : NULL;
+
+		ReleaseSysCache(argTypeTup);
+
+		pos++;
+	}
+}
+
+/*
  * Create a new PLyProcedure structure
  */
 static PLyProcedure *
@@ -1433,46 +1538,7 @@ PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is_trigger)
 		 * but only if this isn't a trigger.
 		 */
 		if (!is_trigger)
-		{
-			HeapTuple	rvTypeTup;
-			Form_pg_type rvTypeStruct;
-
-			rvTypeTup = SearchSysCache1(TYPEOID,
-								   ObjectIdGetDatum(procStruct->prorettype));
-			if (!HeapTupleIsValid(rvTypeTup))
-				elog(ERROR, "cache lookup failed for type %u",
-					 procStruct->prorettype);
-			rvTypeStruct = (Form_pg_type) GETSTRUCT(rvTypeTup);
-
-			/* Disallow pseudotype result, except for void */
-			if (rvTypeStruct->typtype == TYPTYPE_PSEUDO &&
-				procStruct->prorettype != VOIDOID)
-			{
-				if (procStruct->prorettype == TRIGGEROID)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("trigger functions can only be called as triggers")));
-				else
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						  errmsg("PL/Python functions cannot return type %s",
-								 format_type_be(procStruct->prorettype))));
-			}
-
-			if (rvTypeStruct->typtype == TYPTYPE_COMPOSITE)
-			{
-				/*
-				 * Tuple: set up later, during first call to
-				 * PLy_function_handler
-				 */
-				proc->result.out.d.typoid = procStruct->prorettype;
-				proc->result.is_rowtype = 2;
-			}
-			else
-				PLy_output_datum_func(&proc->result, rvTypeTup);
-
-			ReleaseSysCache(rvTypeTup);
-		}
+			PLy_procedure_output_conversion(proc, procStruct);
 
 		/*
 		 * Now get information required for input conversion of the
@@ -1482,79 +1548,7 @@ PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is_trigger)
 		 * arguments.
 		 */
 		if (procStruct->pronargs)
-		{
-			Oid		   *types;
-			char	  **names,
-					   *modes;
-			int			i,
-						pos,
-						total;
-
-			/* extract argument type info from the pg_proc tuple */
-			total = get_func_arg_info(procTup, &types, &names, &modes);
-
-			/* count number of in+inout args into proc->nargs */
-			if (modes == NULL)
-				proc->nargs = total;
-			else
-			{
-				/* proc->nargs was initialized to 0 above */
-				for (i = 0; i < total; i++)
-				{
-					if (modes[i] != PROARGMODE_OUT &&
-						modes[i] != PROARGMODE_TABLE)
-						(proc->nargs)++;
-				}
-			}
-
-			proc->argnames = (char **) PLy_malloc0(sizeof(char *) * proc->nargs);
-			for (i = pos = 0; i < total; i++)
-			{
-				HeapTuple	argTypeTup;
-				Form_pg_type argTypeStruct;
-
-				if (modes &&
-					(modes[i] == PROARGMODE_OUT ||
-					 modes[i] == PROARGMODE_TABLE))
-					continue;	/* skip OUT arguments */
-
-				Assert(types[i] == procStruct->proargtypes.values[pos]);
-
-				argTypeTup = SearchSysCache1(TYPEOID,
-											 ObjectIdGetDatum(types[i]));
-				if (!HeapTupleIsValid(argTypeTup))
-					elog(ERROR, "cache lookup failed for type %u", types[i]);
-				argTypeStruct = (Form_pg_type) GETSTRUCT(argTypeTup);
-
-				/* check argument type is OK, set up I/O function info */
-				switch (argTypeStruct->typtype)
-				{
-					case TYPTYPE_PSEUDO:
-						/* Disallow pseudotype argument */
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						  errmsg("PL/Python functions cannot accept type %s",
-								 format_type_be(types[i]))));
-						break;
-					case TYPTYPE_COMPOSITE:
-						/* we'll set IO funcs at first call */
-						proc->args[pos].is_rowtype = 2;
-						break;
-					default:
-						PLy_input_datum_func(&(proc->args[pos]),
-											 types[i],
-											 argTypeTup);
-						break;
-				}
-
-				/* get argument name */
-				proc->argnames[pos] = names ? PLy_strdup(names[i]) : NULL;
-
-				ReleaseSysCache(argTypeTup);
-
-				pos++;
-			}
-		}
+			PLy_procedure_input_conversion(proc, procTup, procStruct);
 
 		/*
 		 * get the text of the function.
@@ -2843,13 +2837,6 @@ PLy_spi_prepare(PyObject *self, PyObject *args)
 	void	   *tmpplan;
 	volatile MemoryContext oldcontext;
 
-	/* Can't execute more if we have an unhandled error */
-	if (PLy_error_in_progress)
-	{
-		PLy_exception_set(PLy_exc_error, "transaction aborted");
-		return NULL;
-	}
-
 	if (!PyArg_ParseTuple(args, "s|O", &query, &list))
 	{
 		PLy_exception_set(PLy_exc_spi_error,
@@ -2959,8 +2946,10 @@ PLy_spi_prepare(PyObject *self, PyObject *args)
 	}
 	PG_CATCH();
 	{
+		ErrorData	*edata;
+
 		MemoryContextSwitchTo(oldcontext);
-		PLy_error_in_progress = CopyErrorData();
+		edata = CopyErrorData();
 		FlushErrorState();
 		Py_DECREF(plan);
 		Py_XDECREF(optr);
@@ -2968,6 +2957,7 @@ PLy_spi_prepare(PyObject *self, PyObject *args)
 			PLy_exception_set(PLy_exc_spi_error,
 							  "unrecognized error in PLy_spi_prepare");
 		PLy_elog(WARNING, NULL);
+		PLy_spi_exception_set(edata);
 		return NULL;
 	}
 	PG_END_TRY();
@@ -2985,13 +2975,6 @@ PLy_spi_execute(PyObject *self, PyObject *args)
 	PyObject   *plan;
 	PyObject   *list = NULL;
 	long		limit = 0;
-
-	/* Can't execute more if we have an unhandled error */
-	if (PLy_error_in_progress)
-	{
-		PLy_exception_set(PLy_exc_error, "transaction aborted");
-		return NULL;
-	}
 
 	if (PyArg_ParseTuple(args, "s|l", &query, &limit))
 		return PLy_spi_execute_query(query, limit);
@@ -3097,9 +3080,10 @@ PLy_spi_execute_plan(PyObject *ob, PyObject *list, long limit)
 	PG_CATCH();
 	{
 		int			k;
+		ErrorData	*edata;
 
 		MemoryContextSwitchTo(oldcontext);
-		PLy_error_in_progress = CopyErrorData();
+		edata = CopyErrorData();
 		FlushErrorState();
 
 		/*
@@ -3119,6 +3103,7 @@ PLy_spi_execute_plan(PyObject *ob, PyObject *list, long limit)
 			PLy_exception_set(PLy_exc_error,
 							  "unrecognized error in PLy_spi_execute_plan");
 		PLy_elog(WARNING, NULL);
+		PLy_spi_exception_set(edata);
 		return NULL;
 	}
 	PG_END_TRY();
@@ -3131,14 +3116,6 @@ PLy_spi_execute_plan(PyObject *ob, PyObject *list, long limit)
 			pfree(DatumGetPointer(plan->values[i]));
 			plan->values[i] = PointerGetDatum(NULL);
 		}
-	}
-
-	if (rv < 0)
-	{
-		PLy_exception_set(PLy_exc_spi_error,
-						  "SPI_execute_plan failed: %s",
-						  SPI_result_code_string(rv));
-		return NULL;
 	}
 
 	return PLy_spi_execute_fetch_result(SPI_tuptable, SPI_processed, rv);
@@ -3158,13 +3135,16 @@ PLy_spi_execute_query(char *query, long limit)
 	}
 	PG_CATCH();
 	{
+		ErrorData	*edata;
+
 		MemoryContextSwitchTo(oldcontext);
-		PLy_error_in_progress = CopyErrorData();
+		edata = CopyErrorData();
 		FlushErrorState();
 		if (!PyErr_Occurred())
 			PLy_exception_set(PLy_exc_spi_error,
 							  "unrecognized error in PLy_spi_execute_query");
 		PLy_elog(WARNING, NULL);
+		PLy_spi_exception_set(edata);
 		return NULL;
 	}
 	PG_END_TRY();
@@ -3225,8 +3205,6 @@ PLy_spi_execute_fetch_result(SPITupleTable *tuptable, int rows, int status)
 		PG_CATCH();
 		{
 			MemoryContextSwitchTo(oldcontext);
-			PLy_error_in_progress = CopyErrorData();
-			FlushErrorState();
 			if (!PyErr_Occurred())
 				PLy_exception_set(PLy_exc_error,
 					   "unrecognized error in PLy_spi_execute_fetch_result");
@@ -3249,11 +3227,37 @@ PLy_spi_execute_fetch_result(SPITupleTable *tuptable, int rows, int status)
  * language handler and interpreter initialization
  */
 
+/*
+ * Add exceptions to the plpy module
+ */
+static void
+PLy_add_exceptions(PyObject *plpy)
+{
+	PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
+	PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
+	PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
+
+	Py_INCREF(PLy_exc_error);
+	PyModule_AddObject(plpy, "Error", PLy_exc_error);
+	Py_INCREF(PLy_exc_fatal);
+	PyModule_AddObject(plpy, "Fatal", PLy_exc_fatal);
+	Py_INCREF(PLy_exc_spi_error);
+	PyModule_AddObject(plpy, "SPIError", PLy_exc_spi_error);
+}
+
 #if PY_MAJOR_VERSION >= 3
 static PyMODINIT_FUNC
 PyInit_plpy(void)
 {
-	return PyModule_Create(&PLy_module);
+	PyObject   *m;
+
+	m = PyModule_Create(&PLy_module);
+	if (m == NULL)
+		return NULL;
+
+	PLy_add_exceptions(m);
+
+	return m;
 }
 #endif
 
@@ -3344,8 +3348,7 @@ PLy_init_plpy(void)
 	PyObject   *main_mod,
 			   *main_dict,
 			   *plpy_mod;
-	PyObject   *plpy,
-			   *plpy_dict;
+	PyObject   *plpy;
 
 	/*
 	 * initialize plpy module
@@ -3357,19 +3360,13 @@ PLy_init_plpy(void)
 
 #if PY_MAJOR_VERSION >= 3
 	plpy = PyModule_Create(&PLy_module);
+	/* for Python 3 we initialized the exceptions in PyInit_plpy */
 #else
 	plpy = Py_InitModule("plpy", PLy_methods);
+	PLy_add_exceptions(plpy);
 #endif
-	plpy_dict = PyModule_GetDict(plpy);
 
 	/* PyDict_SetItemString(plpy, "PlanType", (PyObject *) &PLy_PlanType); */
-
-	PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
-	PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
-	PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
-	PyDict_SetItemString(plpy_dict, "Error", PLy_exc_error);
-	PyDict_SetItemString(plpy_dict, "Fatal", PLy_exc_fatal);
-	PyDict_SetItemString(plpy_dict, "SPIError", PLy_exc_spi_error);
 
 	/*
 	 * initialize main module, and add plpy
@@ -3464,11 +3461,11 @@ PLy_output(volatile int level, PyObject *self, PyObject *args)
 	}
 	PG_CATCH();
 	{
-		MemoryContextSwitchTo(oldcontext);
-		PLy_error_in_progress = CopyErrorData();
-		FlushErrorState();
+		ErrorData  *edata;
 
-		PyErr_SetString(PLy_exc_error, sv);
+		MemoryContextSwitchTo(oldcontext);
+		edata = CopyErrorData();
+		FlushErrorState();
 
 		/*
 		 * Note: If sv came from PyString_AsString(), it points into storage
@@ -3476,11 +3473,8 @@ PLy_output(volatile int level, PyObject *self, PyObject *args)
 		 */
 		Py_XDECREF(so);
 
-		/*
-		 * returning NULL here causes the python interpreter to bail. when
-		 * control passes back to PLy_procedure_call, we check for PG
-		 * exceptions and re-throw the error.
-		 */
+		/* Make Python raise the exception */
+		PLy_exception_set(PLy_exc_error, edata->message);
 		return NULL;
 	}
 	PG_END_TRY();
@@ -3546,6 +3540,48 @@ PLy_exception_set_plural(PyObject *exc,
 	PyErr_SetString(exc, buf);
 }
 
+/*
+ * Raise a SPIError, passing in it more error details, like the
+ * internal query and error position.
+ */
+static void
+PLy_spi_exception_set(ErrorData *edata)
+{
+	PyObject	*args = NULL;
+	PyObject	*spierror = NULL;
+	PyObject	*spidata = NULL;
+
+	args = Py_BuildValue("(s)", edata->message);
+	if (!args)
+		goto failure;
+
+	/* create a new SPIError with the error message as the parameter */
+	spierror = PyObject_CallObject(PLy_exc_spi_error, args);
+	if (!spierror)
+		goto failure;
+
+	spidata = Py_BuildValue("(zzi)", edata->hint,
+							edata->internalquery, edata->internalpos);
+	if (!spidata)
+		goto failure;
+
+	if (PyObject_SetAttrString(spierror, "spidata", spidata) == -1)
+		goto failure;
+
+	PyErr_SetObject(PLy_exc_spi_error, spierror);
+
+	Py_DECREF(args);
+	Py_DECREF(spierror);
+	Py_DECREF(spidata);
+	return;
+
+failure:
+	Py_XDECREF(args);
+	Py_XDECREF(spierror);
+	Py_XDECREF(spidata);
+	elog(ERROR, "could not convert SPI error to Python exception");
+}
+
 /* Emit a PG error or notice, together with any available info about
  * the current Python error, previously set by PLy_exception_set().
  * This should be used to propagate Python errors into PG.	If fmt is
@@ -3558,6 +3594,15 @@ PLy_elog(int elevel, const char *fmt,...)
 	char	   *xmsg;
 	int			xlevel;
 	StringInfoData emsg;
+	PyObject	*exc, *val, *tb;
+	char		*hint = NULL;
+	char		*query = NULL;
+	int			position = 0;
+
+	PyErr_Fetch(&exc, &val, &tb);
+	if (exc != NULL && PyErr_GivenExceptionMatches(val, PLy_exc_spi_error))
+		PLy_get_spi_error_data(val, &hint, &query, &position);
+	PyErr_Restore(exc, val, tb);
 
 	xmsg = PLy_traceback(&xlevel);
 
@@ -3583,10 +3628,16 @@ PLy_elog(int elevel, const char *fmt,...)
 		if (fmt)
 			ereport(elevel,
 					(errmsg("PL/Python: %s", emsg.data),
-					 (xmsg) ? errdetail("%s", xmsg) : 0));
+					 (xmsg) ? errdetail("%s", xmsg) : 0,
+					 (hint) ? errhint(hint) : 0,
+					 (query) ? internalerrquery(query) : 0,
+					 (position) ? internalerrposition(position) : 0));
 		else
 			ereport(elevel,
-					(errmsg("PL/Python: %s", xmsg)));
+					(errmsg("PL/Python: %s", xmsg),
+					 (hint) ? errhint(hint) : 0,
+					 (query) ? internalerrquery(query) : 0,
+					 (position) ? internalerrposition(position) : 0));
 	}
 	PG_CATCH();
 	{
@@ -3603,6 +3654,28 @@ PLy_elog(int elevel, const char *fmt,...)
 	if (xmsg)
 		pfree(xmsg);
 }
+
+/*
+ * Extract the error data from a SPIError
+ */
+static void
+PLy_get_spi_error_data(PyObject *exc, char **hint, char **query, int *position)
+{
+	PyObject	*spidata = NULL;
+
+	spidata = PyObject_GetAttrString(exc, "spidata");
+	if (!spidata)
+		goto cleanup;
+
+	if (!PyArg_ParseTuple(spidata, "zzi", hint, query, position))
+		goto cleanup;
+
+cleanup:
+	PyErr_Clear();
+	/* no elog here, we simply won't report the errhint, errposition etc */
+	Py_XDECREF(spidata);
+}
+
 
 static char *
 PLy_traceback(int *xlevel)

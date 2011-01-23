@@ -1,34 +1,24 @@
 /*
- * src/tools/fsync/test_fsync.c
- *
- *
- *	test_fsync.c
+ *	pg_test_fsync.c
  *		tests all supported fsync() methods
  */
 
-#include "postgres.h"
+#include "postgres_fe.h"
+
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "getopt_long.h"
-#include "access/xlog_internal.h"
-#include "access/xlog.h"
 #include "access/xlogdefs.h"
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <string.h>
 
-
-/* 
+/*
  * put the temp files in the local directory
- * unless the user specifies otherwise 
+ * unless the user specifies otherwise
  */
-#define FSYNC_FILENAME	"./test_fsync.out"
+#define FSYNC_FILENAME	"./pg_test_fsync.out"
 
 #define WRITE_SIZE	(8 * 1024)	/* 8k */
 
@@ -36,50 +26,57 @@
 #define NA_FORMAT			LABEL_FORMAT "%18s"
 #define OPS_FORMAT			"%9.3f ops/sec"
 
-int			ops_per_test = 2000;
-char	    full_buf[XLOG_SEG_SIZE], *buf, *filename = FSYNC_FILENAME;
-struct timeval start_t, stop_t;
+static const char *progname;
+
+static int		ops_per_test = 2000;
+static char	    full_buf[XLOG_SEG_SIZE], *buf, *filename = FSYNC_FILENAME;
+static struct timeval start_t, stop_t;
 
 
-void		handle_args(int argc, char *argv[]);
-void		prepare_buf(void);
-void		test_open(void);
-void		test_non_sync(void);
-void		test_sync(int writes_per_op);
-void		test_open_syncs(void);
-void		test_open_sync(const char *msg, int writes_size);
-void		test_file_descriptor_sync(void);
-void		print_elapse(struct timeval start_t, struct timeval stop_t);
-void		die(char *str);
+static void	handle_args(int argc, char *argv[]);
+static void	prepare_buf(void);
+static void	test_open(void);
+static void	test_non_sync(void);
+static void	test_sync(int writes_per_op);
+static void	test_open_syncs(void);
+static void	test_open_sync(const char *msg, int writes_size);
+static void	test_file_descriptor_sync(void);
+#ifdef HAVE_FSYNC_WRITETHROUGH
+static int	pg_fsync_writethrough(int fd);
+#endif
+static void	print_elapse(struct timeval start_t, struct timeval stop_t);
+static void	die(const char *str);
 
 
 int
 main(int argc, char *argv[])
 {
+	progname = get_progname(argv[0]);
+
 	handle_args(argc, argv);
-	
+
 	prepare_buf();
 
 	test_open();
-	
+
 	/* Test using 1 8k write */
 	test_sync(1);
 
 	/* Test using 2 8k writes */
 	test_sync(2);
-	
+
 	test_open_syncs();
 
 	test_file_descriptor_sync();
-	
+
 	test_non_sync();
-	
+
 	unlink(filename);
 
 	return 0;
 }
 
-void
+static void
 handle_args(int argc, char *argv[])
 {
 	static struct option long_options[] = {
@@ -95,12 +92,12 @@ handle_args(int argc, char *argv[])
 		if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 ||
 			strcmp(argv[1], "-?") == 0)
 		{
-			fprintf(stderr, "test_fsync [-f filename] [ops-per-test]\n");
+			fprintf(stderr, "%s [-f filename] [-o ops-per-test]\n", progname);
 			exit(0);
 		}
 		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
 		{
-			fprintf(stderr,"test_fsync " PG_VERSION "\n");
+			fprintf(stderr, "%s %s\n", progname, PG_VERSION);
 			exit(0);
 		}
 	}
@@ -117,20 +114,29 @@ handle_args(int argc, char *argv[])
 			case 'o':
 				ops_per_test = atoi(optarg);
 				break;
-				
+
 			default:
-				fprintf(stderr,
-					   "Try \"%s --help\" for more information.\n",
-					   "test_fsync");
+				fprintf(stderr, "Try \"%s --help\" for more information.\n",
+						progname);
 				exit(1);
 				break;
 		}
 	}
 
+	if (argc > optind)
+	{
+		fprintf(stderr,
+				"%s: too many command-line arguments (first is \"%s\")\n",
+				progname, argv[optind]);
+		fprintf(stderr, "Try \"%s --help\" for more information.\n",
+				progname);
+		exit(1);
+	}
+
 	printf("%d operations per test\n", ops_per_test);
 }
 
-void
+static void
 prepare_buf(void)
 {
 	int			ops;
@@ -142,16 +148,16 @@ prepare_buf(void)
 	buf = (char *) TYPEALIGN(ALIGNOF_XLOG_BUFFER, full_buf);
 }
 
-void
+static void
 test_open(void)
 {
 	int			tmpfile;
 
-	/* 
-	 * test if we can open the target file 
+	/*
+	 * test if we can open the target file
 	 */
 	if ((tmpfile = open(filename, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	if (write(tmpfile, full_buf, XLOG_SEG_SIZE) != XLOG_SEG_SIZE)
 		die("write failed");
 
@@ -162,12 +168,12 @@ test_open(void)
 	close(tmpfile);
 }
 
-void
+static void
 test_sync(int writes_per_op)
 {
 	int			tmpfile, ops, writes;
 	bool		fs_warning = false;
-	
+
 	if (writes_per_op == 1)
 		printf("\nCompare file sync methods using one 8k write:\n");
 	else
@@ -187,7 +193,7 @@ test_sync(int writes_per_op)
 	fflush(stdout);
 
 	if ((tmpfile = open(filename, O_RDWR | O_DSYNC, 0)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
@@ -242,7 +248,7 @@ test_sync(int writes_per_op)
 	fflush(stdout);
 
 	if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
@@ -267,7 +273,7 @@ test_sync(int writes_per_op)
 	fflush(stdout);
 
 	if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
@@ -282,23 +288,23 @@ test_sync(int writes_per_op)
 	gettimeofday(&stop_t, NULL);
 	close(tmpfile);
 	print_elapse(start_t, stop_t);
-	
+
 /*
  * If fsync_writethrough is available, test as well
- */	
+ */
 #ifdef HAVE_FSYNC_WRITETHROUGH
 	printf(LABEL_FORMAT, "fsync_writethrough");
 	fflush(stdout);
 
 	if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
 		for (writes = 0; writes < writes_per_op; writes++)
 			if (write(tmpfile, buf, WRITE_SIZE) != WRITE_SIZE)
 				die("write failed");
-		if (fcntl(tmpfile, F_FULLFSYNC ) != 0)
+		if (pg_fsync_writethrough(tmpfile) != 0)
 			die("fsync failed");
 		if (lseek(tmpfile, 0, SEEK_SET) == -1)
 			die("seek failed");
@@ -322,7 +328,7 @@ test_sync(int writes_per_op)
 	fflush(stdout);
 
 	if ((tmpfile = open(filename, O_RDWR | OPEN_SYNC_FLAG, 0)) == -1)
-		die("Cannot open output file.");
+		die("could not open output file");
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
@@ -381,7 +387,7 @@ test_sync(int writes_per_op)
 	}
 }
 
-void
+static void
 test_open_syncs(void)
 {
 	printf("\nCompare open_sync with different write sizes:\n");
@@ -395,16 +401,15 @@ test_open_syncs(void)
 	test_open_sync("16  1k open_sync writes", 1);
 }
 
-
-void
-test_open_sync(const char *msg, int writes_size)
-{
-	int		tmpfile, ops, writes;
-
 /*
  * Test open_sync with different size files
  */
+static void
+test_open_sync(const char *msg, int writes_size)
+{
 #ifdef OPEN_SYNC_FLAG
+	int		tmpfile, ops, writes;
+
 	if ((tmpfile = open(filename, O_RDWR | OPEN_SYNC_FLAG | PG_O_DIRECT, 0)) == -1)
 		printf(NA_FORMAT, "o_direct", "n/a**\n");
 	else
@@ -425,13 +430,13 @@ test_open_sync(const char *msg, int writes_size)
 		close(tmpfile);
 		print_elapse(start_t, stop_t);
 	}
-	
+
 #else
 	printf(NA_FORMAT, "open_sync", "n/a\n");
 #endif
 }
 
-void
+static void
 test_file_descriptor_sync(void)
 {
 	int			tmpfile, ops;
@@ -447,8 +452,8 @@ test_file_descriptor_sync(void)
 	printf("(If the times are similar, fsync() can sync data written\n");
 	printf("on a different descriptor.)\n");
 
-	/* 
-	 * first write, fsync and close, which is the 
+	/*
+	 * first write, fsync and close, which is the
 	 * normal behavior without multiple descriptors
 	 */
 	printf(LABEL_FORMAT, "write, fsync, close");
@@ -458,7 +463,7 @@ test_file_descriptor_sync(void)
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
 		if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-			die("Cannot open output file.");
+			die("could not open output file");
 		if (write(tmpfile, buf, WRITE_SIZE) != WRITE_SIZE)
 			die("write failed");
 		if (fsync(tmpfile) != 0)
@@ -469,7 +474,7 @@ test_file_descriptor_sync(void)
 		 * with the following test
 		 */
 		if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-			die("Cannot open output file.");
+			die("could not open output file");
 		close(tmpfile);
 	}
 	gettimeofday(&stop_t, NULL);
@@ -480,20 +485,20 @@ test_file_descriptor_sync(void)
 	 * This simulates processes fsyncing each other's
 	 * writes.
 	 */
- 	printf(LABEL_FORMAT, "write, close, fsync");
- 	fflush(stdout);
+	printf(LABEL_FORMAT, "write, close, fsync");
+	fflush(stdout);
 
 	gettimeofday(&start_t, NULL);
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
 		if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-			die("Cannot open output file.");
+			die("could not open output file");
 		if (write(tmpfile, buf, WRITE_SIZE) != WRITE_SIZE)
 			die("write failed");
 		close(tmpfile);
 		/* reopen file */
 		if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-			die("Cannot open output file.");
+			die("could not open output file");
 		if (fsync(tmpfile) != 0)
 			die("fsync failed");
 		close(tmpfile);
@@ -503,7 +508,7 @@ test_file_descriptor_sync(void)
 
 }
 
-void
+static void
 test_non_sync(void)
 {
 	int			tmpfile, ops;
@@ -519,7 +524,7 @@ test_non_sync(void)
 	for (ops = 0; ops < ops_per_test; ops++)
 	{
 		if ((tmpfile = open(filename, O_RDWR, 0)) == -1)
-			die("Cannot open output file.");
+			die("could not open output file");
 		if (write(tmpfile, buf, WRITE_SIZE) != WRITE_SIZE)
 			die("write failed");
 		close(tmpfile);
@@ -528,10 +533,27 @@ test_non_sync(void)
 	print_elapse(start_t, stop_t);
 }
 
-/* 
+#ifdef HAVE_FSYNC_WRITETHROUGH
+
+static int
+pg_fsync_writethrough(int fd)
+{
+#ifdef WIN32
+	return _commit(fd);
+#elif defined(F_FULLFSYNC)
+	return (fcntl(fd, F_FULLFSYNC, 0) == -1) ? -1 : 0;
+#else
+	errno = ENOSYS;
+	return -1;
+#endif
+}
+
+#endif
+
+/*
  * print out the writes per second for tests
  */
-void
+static void
 print_elapse(struct timeval start_t, struct timeval stop_t)
 {
 	double		total_time = (stop_t.tv_sec - start_t.tv_sec) +
@@ -541,9 +563,9 @@ print_elapse(struct timeval start_t, struct timeval stop_t)
 	printf(OPS_FORMAT "\n", per_second);
 }
 
-void
-die(char *str)
+static void
+die(const char *str)
 {
-	fprintf(stderr, "%s\n", str);
+	fprintf(stderr, "%s: %s\n", str, strerror(errno));
 	exit(1);
 }
