@@ -1796,13 +1796,13 @@ findRangeSubtypeCmpFunction(List *procname, Oid subType)
 	func_match_argtypes(2, argList, raw_candidates, &cur_candidates);
 	best_candidate = func_select_candidate(2, argList, cur_candidates);
 
-	procOid = best_candidate->oid;
-
-	if (!OidIsValid(procOid))
+	if (best_candidate == NULL || !OidIsValid(best_candidate->oid))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_FUNCTION),
 				 errmsg("function %s does not exist",
 						func_signature_string(procname, 2, NIL, argList))));
+
+	procOid = best_candidate->oid;
 
 	if (get_func_rettype(procOid) != INT4OID)
 		ereport(ERROR,
