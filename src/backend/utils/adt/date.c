@@ -888,6 +888,13 @@ date_timestamp(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMP(result);
 }
 
+Datum
+date_float8(PG_FUNCTION_ARGS)
+{
+	DateADT dateVal = PG_GETARG_DATEADT(0);
+
+	PG_RETURN_FLOAT8((float8) dateVal);
+}
 
 /* timestamp_date()
  * Convert timestamp to date data type.

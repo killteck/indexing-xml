@@ -4630,6 +4630,21 @@ timestamptz_zone(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMP(result);
 }
 
+Datum
+timestamp_float8(PG_FUNCTION_ARGS)
+{
+	Timestamp	timestamp = PG_GETARG_TIMESTAMP(0);
+	float8		result;
+
+#ifdef HAVE_INT64_TIMESTAMP
+	result = ((float8) timestamp) / USECS_PER_SEC;
+#else
+	result = timestamp;
+#endif
+
+	PG_RETURN_FLOAT8(result);
+}
+
 /* timestamptz_izone()
  * Encode timestamp with time zone type with specified time interval as time zone.
  * Returns a timestamp without time zone.

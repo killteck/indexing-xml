@@ -1528,6 +1528,12 @@ DATA(insert OID = 1180 (  abstime		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 702 "
 DESCR("convert timestamp with time zone to abstime");
 DATA(insert OID = 1181 (  age			   PGNSP PGUID 12 1 0 0 f f f t f s 1 0 23 "28" _null_ _null_ _null_ _null_ xid_age _null_ _null_ _null_ ));
 DESCR("age of a transaction ID, in transactions before current transaction");
+DATA(insert OID = 3916 (  float8		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 701 "1114" _null_ _null_ _null_ _null_ timestamp_float8 _null_ _null_ _null_ ));
+DESCR("convert timestamp to float8");
+DATA(insert OID = 3917 (  float8		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 701 "1184" _null_ _null_ _null_ _null_ timestamp_float8 _null_ _null_ _null_ ));
+DESCR("convert timestamp with time zone to float8");
+DATA(insert OID = 3918 (  float8		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 701 "1082" _null_ _null_ _null_ _null_ date_float8 _null_ _null_ _null_ ));
+DESCR("convert date to float8");
 
 DATA(insert OID = 1188 (  timestamptz_mi   PGNSP PGUID 12 1 0 0 f f f t f i 2 0 1186 "1184 1184" _null_ _null_ _null_ _null_ timestamp_mi _null_ _null_ _null_ ));
 DESCR("subtract");

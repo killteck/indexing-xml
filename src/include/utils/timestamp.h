@@ -266,6 +266,7 @@ extern Datum interval_part(PG_FUNCTION_ARGS);
 extern Datum timestamp_zone(PG_FUNCTION_ARGS);
 extern Datum timestamp_izone(PG_FUNCTION_ARGS);
 extern Datum timestamp_timestamptz(PG_FUNCTION_ARGS);
+extern Datum timestamp_float8(PG_FUNCTION_ARGS);
 
 extern Datum timestamptz_in(PG_FUNCTION_ARGS);
 extern Datum timestamptz_out(PG_FUNCTION_ARGS);

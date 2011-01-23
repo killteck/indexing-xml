@@ -146,6 +146,7 @@ extern Datum date_timestamptz(PG_FUNCTION_ARGS);
 extern Datum timestamptz_date(PG_FUNCTION_ARGS);
 extern Datum datetime_timestamp(PG_FUNCTION_ARGS);
 extern Datum abstime_date(PG_FUNCTION_ARGS);
+extern Datum date_float8(PG_FUNCTION_ARGS);
 
 extern Datum time_in(PG_FUNCTION_ARGS);
 extern Datum time_out(PG_FUNCTION_ARGS);
