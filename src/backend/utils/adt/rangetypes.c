@@ -1,13 +1,13 @@
 /*-------------------------------------------------------------------------
  *
- * enum.c
- *	  I/O functions, operators, aggregates etc for enum types
+ * rangetypes.c
+ *	  I/O functions, operators, and support functions for range types
  *
- * Copyright (c) 2006-2010, PostgreSQL Global Development Group
+ * Copyright (c) 2006-2011, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
- *	  src/backend/utils/adt/enum.c
+ *	  src/backend/utils/adt/rangetypes.c
  *
  *-------------------------------------------------------------------------
  */
@@ -1045,50 +1045,6 @@ hash_range(PG_FUNCTION_ARGS)
 
 	PG_RETURN_INT32(result);
 }
-
-/* GiST support */
-Datum
-range_gist_consistent(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_union(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_compress(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_decompress(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_penalty(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_picksplit(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
-Datum
-range_gist_same(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_VOID(); //TODO
-}
-
 
 /*
  *----------------------------------------------------------

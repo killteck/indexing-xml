@@ -98,7 +98,7 @@ extern Datum range_gt(PG_FUNCTION_ARGS);
 /* Hash support */
 extern Datum hash_range(PG_FUNCTION_ARGS);
 
-/* GiST support */
+/* GiST support (rangetypes_gist.c) */
 extern Datum range_gist_consistent(PG_FUNCTION_ARGS);
 extern Datum range_gist_compress(PG_FUNCTION_ARGS);
 extern Datum range_gist_decompress(PG_FUNCTION_ARGS);
