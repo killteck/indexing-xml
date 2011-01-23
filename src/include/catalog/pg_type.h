@@ -623,9 +623,32 @@ DATA(insert OID = 2776 ( anynonarray	PGNSP PGUID  4 t p P f t \054 0 0 0 anynona
 #define ANYNONARRAYOID	2776
 DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in anyenum_out - - - - - i p f 0 -1 0 _null_ _null_ ));
 #define ANYENUMOID		3500
-
 DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  4 t p P f t \054 0 0 0 anyrange_in anyrange_out - - - - - i p f 0 -1 0 _null_ _null_ ));
 #define ANYRANGEOID		3831
+
+
+
+
+DATA(insert OID = 3904 ( intrange		PGNSP PGUID  -1 f r R f t \054 0 0 3905 range_in range_out range_recv range_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define INTRANGEOID		3904
+DATA(insert OID = 3905 ( _intrange		PGNSP PGUID  -1 f b A f t \054 0 3904 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define INTRANGEARRAYOID		3905
+DATA(insert OID = 3906 ( numrange		PGNSP PGUID  -1 f r R f t \054 0 0 3907 range_in range_out range_recv range_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define NUMRANGEOID		3906
+DATA(insert OID = 3907 ( _numrange		PGNSP PGUID  -1 f b A f t \054 0 3906 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define NUMRANGEARRAYOID		3907
+DATA(insert OID = 3908 ( period		PGNSP PGUID  -1 f r R f t \054 0 0 3909 range_in range_out range_recv range_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define PERIODOID		3908
+DATA(insert OID = 3909 ( _period		PGNSP PGUID  -1 f b A f t \054 0 3908 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define PERIODARRAYOID		3909
+DATA(insert OID = 3910 ( periodtz		PGNSP PGUID  -1 f r R f t \054 0 0 3911 range_in range_out range_recv range_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define PERIODTZOID		3910
+DATA(insert OID = 3911 ( _periodtz		PGNSP PGUID  -1 f b A f t \054 0 3910 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define PERIODTZARRAYOID		3911
+DATA(insert OID = 3912 ( daterange		PGNSP PGUID  -1 f r R f t \054 0 0 3913 range_in range_out range_recv range_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define DATERANGEOID		3912
+DATA(insert OID = 3913 ( _daterange		PGNSP PGUID  -1 f b A f t \054 0 3912 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 _null_ _null_ ));
+#define DATERANGEARRAYOID		3913
 
 /*
  * macros

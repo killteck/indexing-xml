@@ -107,9 +107,7 @@ extern Datum range_gist_picksplit(PG_FUNCTION_ARGS);
 extern Datum range_gist_same(PG_FUNCTION_ARGS);
 
 /* Canonical functions */
-Datum int2range_canonical(PG_FUNCTION_ARGS);
-Datum int4range_canonical(PG_FUNCTION_ARGS);
-Datum int8range_canonical(PG_FUNCTION_ARGS);
+Datum intrange_canonical(PG_FUNCTION_ARGS);
 Datum daterange_canonical(PG_FUNCTION_ARGS);
 
 

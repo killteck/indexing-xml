@@ -1,7 +1,3 @@
-CREATE TYPE numrange AS RANGE (
-  SUBTYPE = NUMERIC,
-  SUBTYPE_CMP = numeric_cmp
-);
 CREATE TABLE numrange_test (nr NUMRANGE);
 create index numrange_test_btree on numrange_test(nr);
 SET enable_seqscan = f;
@@ -338,3 +334,53 @@ set enable_mergejoin to default;
 SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;
 DROP TABLE numrange_test2;
+-- test canonical form for intrange
+select range__(1,10);
+  range__  
+-----------
+ [ 2, 10 )
+(1 row)
+
+select rangei_(1,10);
+  rangei_  
+-----------
+ [ 1, 10 )
+(1 row)
+
+select range_i(1,10);
+  range_i  
+-----------
+ [ 2, 11 )
+(1 row)
+
+select rangeii(1,10);
+  rangeii  
+-----------
+ [ 1, 11 )
+(1 row)
+
+-- test canonical form for daterange
+select range__('2000-01-10'::date, '2000-01-20'::date);
+          range__           
+----------------------------
+ [ 01-11-2000, 01-20-2000 )
+(1 row)
+
+select rangei_('2000-01-10'::date, '2000-01-20'::date);
+          rangei_           
+----------------------------
+ [ 01-10-2000, 01-20-2000 )
+(1 row)
+
+select range_i('2000-01-10'::date, '2000-01-20'::date);
+          range_i           
+----------------------------
+ [ 01-11-2000, 01-21-2000 )
+(1 row)
+
+select rangeii('2000-01-10'::date, '2000-01-20'::date);
+          rangeii           
+----------------------------
+ [ 01-10-2000, 01-21-2000 )
+(1 row)
+
