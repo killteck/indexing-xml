@@ -411,6 +411,19 @@ range_empty(PG_FUNCTION_ARGS)
 }
 
 Datum
+range_non_empty(PG_FUNCTION_ARGS)
+{
+	RangeType	*r1 = PG_GETARG_RANGE(0);
+	RangeBound	 lower;
+	RangeBound	 upper;
+	bool		 empty;
+
+	range_deserialize(r1, &lower, &upper, &empty);
+
+	PG_RETURN_BOOL(!empty);
+}
+
+Datum
 range_lower_inc(PG_FUNCTION_ARGS)
 {
 	RangeType	*r1 = PG_GETARG_RANGE(0);

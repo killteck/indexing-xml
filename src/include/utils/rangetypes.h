@@ -61,6 +61,7 @@ extern Datum range_upper(PG_FUNCTION_ARGS);
 
 /* range -> bool */
 extern Datum range_empty(PG_FUNCTION_ARGS);
+extern Datum range_non_empty(PG_FUNCTION_ARGS);
 extern Datum range_lower_inc(PG_FUNCTION_ARGS);
 extern Datum range_upper_inc(PG_FUNCTION_ARGS);
 extern Datum range_lower_inf(PG_FUNCTION_ARGS);

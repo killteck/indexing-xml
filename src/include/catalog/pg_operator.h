@@ -964,6 +964,8 @@ DATA(insert OID = 3897 (  "-|-"	   PGNSP PGUID b f f 3831 3831 16 3897 0 adjacen
 DATA(insert OID = 3898 (  "+"	   PGNSP PGUID b f f 3831 3831 3831 3898 0 range_union - - ));
 DATA(insert OID = 3899 (  "-"	   PGNSP PGUID b f f 3831 3831 3831 0 0 minus - - ));
 DATA(insert OID = 3900 (  "*"	   PGNSP PGUID b f f 3831 3831 3831 3900 0 range_intersect - - ));
+DATA(insert OID = 3920 (  "!?"	   PGNSP PGUID r f f 3831 0 16 0 3921 3850 - - ));
+DATA(insert OID = 3921 (  "?"	   PGNSP PGUID r f f 3831 0 16 0 3920 3829 - - ));
 
 /*
  * function prototypes
