@@ -19,6 +19,7 @@
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"
+#include "utils/date.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rangetypes.h"
@@ -1075,6 +1076,127 @@ range_gist_same(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID(); //TODO
 }
 
+
+/*
+ *----------------------------------------------------------
+ * CANONICAL FUNCTIONS
+ *----------------------------------------------------------
+ */
+Datum
+int2range_canonical(PG_FUNCTION_ARGS)
+{
+	RangeType	*r = PG_GETARG_RANGE(0);
+
+	RangeBound	lower;
+	RangeBound	upper;
+	bool		empty;
+
+	range_deserialize(r, &lower, &upper, &empty);
+
+	if (empty)
+		PG_RETURN_RANGE(r);
+
+	if (!lower.infinite && !lower.inclusive)
+	{
+		lower.val = DirectFunctionCall2(int2pl, lower.val, Int16GetDatum(1));
+		lower.inclusive = true;
+	}
+
+	if (!upper.infinite && upper.inclusive)
+	{
+		upper.val = DirectFunctionCall2(int2pl, upper.val, Int16GetDatum(1));
+		upper.inclusive = false;
+	}
+
+	PG_RETURN_RANGE(range_serialize(&lower, &upper, false));
+}
+
+Datum
+int4range_canonical(PG_FUNCTION_ARGS)
+{
+	RangeType	*r = PG_GETARG_RANGE(0);
+
+	RangeBound	lower;
+	RangeBound	upper;
+	bool		empty;
+
+	range_deserialize(r, &lower, &upper, &empty);
+
+	if (empty)
+		PG_RETURN_RANGE(r);
+
+	if (!lower.infinite && !lower.inclusive)
+	{
+		lower.val = DirectFunctionCall2(int4pl, lower.val, Int32GetDatum(1));
+		lower.inclusive = true;
+	}
+
+	if (!upper.infinite && upper.inclusive)
+	{
+		upper.val = DirectFunctionCall2(int4pl, upper.val, Int32GetDatum(1));
+		upper.inclusive = false;
+	}
+
+	PG_RETURN_RANGE(range_serialize(&lower, &upper, false));
+}
+
+Datum
+int8range_canonical(PG_FUNCTION_ARGS)
+{
+	RangeType	*r = PG_GETARG_RANGE(0);
+
+	RangeBound	lower;
+	RangeBound	upper;
+	bool		empty;
+
+	range_deserialize(r, &lower, &upper, &empty);
+
+	if (empty)
+		PG_RETURN_RANGE(r);
+
+	if (!lower.infinite && !lower.inclusive)
+	{
+		lower.val = DirectFunctionCall2(int8pl, lower.val, Int64GetDatum(1));
+		lower.inclusive = true;
+	}
+
+	if (!upper.infinite && upper.inclusive)
+	{
+		upper.val = DirectFunctionCall2(int8pl, upper.val, Int64GetDatum(1));
+		upper.inclusive = false;
+	}
+
+	PG_RETURN_RANGE(range_serialize(&lower, &upper, false));
+}
+
+Datum
+daterange_canonical(PG_FUNCTION_ARGS)
+{
+	RangeType	*r = PG_GETARG_RANGE(0);
+
+	RangeBound	lower;
+	RangeBound	upper;
+	bool		empty;
+
+	range_deserialize(r, &lower, &upper, &empty);
+
+	if (empty)
+		PG_RETURN_RANGE(r);
+
+	if (!lower.infinite && !lower.inclusive)
+	{
+		lower.val = DirectFunctionCall2(date_pli, lower.val, Int32GetDatum(1));
+		lower.inclusive = true;
+	}
+
+	if (!upper.infinite && upper.inclusive)
+	{
+		upper.val = DirectFunctionCall2(date_pli, upper.val, Int32GetDatum(1));
+		upper.inclusive = false;
+	}
+
+	PG_RETURN_RANGE(range_serialize(&lower, &upper, false));
+}
 
 /*
  *----------------------------------------------------------
