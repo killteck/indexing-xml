@@ -397,3 +397,28 @@ select rangeii('2000-01-10'::date, '2000-01-20'::date);
  [ 01-10-2000, 01-21-2000 )
 (1 row)
 
+-- test length()
+select length(range(10.1,100.1));
+ length 
+--------
+   90.0
+(1 row)
+
+select length('["2000-01-01 01:00:00", "2000-01-05 03:00:00")'::period);
+      length      
+------------------
+ @ 4 days 2 hours
+(1 row)
+
+select length('["2000-01-01 01:00:00", "2000-01-01 03:00:00")'::periodtz);
+  length   
+-----------
+ @ 2 hours
+(1 row)
+
+select length('["2000-01-01", "2000-01-05")'::daterange);
+ length 
+--------
+      4
+(1 row)
+

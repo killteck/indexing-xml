@@ -112,3 +112,9 @@ select range__('2000-01-10'::date, '2000-01-20'::date);
 select rangei_('2000-01-10'::date, '2000-01-20'::date);
 select range_i('2000-01-10'::date, '2000-01-20'::date);
 select rangeii('2000-01-10'::date, '2000-01-20'::date);
+
+-- test length()
+select length(range(10.1,100.1));
+select length('["2000-01-01 01:00:00", "2000-01-05 03:00:00")'::period);
+select length('["2000-01-01 01:00:00", "2000-01-01 03:00:00")'::periodtz);
+select length('["2000-01-01", "2000-01-05")'::daterange);

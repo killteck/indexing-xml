@@ -5005,6 +5005,15 @@ DATA(insert OID = 3914 (  intrange_canonical		   PGNSP PGUID 12 1 0 0 f f f t f 
 DESCR("convert an integer range to canonical form");
 DATA(insert OID = 3915 (  daterange_canonical		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3906 "3906" _null_ _null_ _null_ _null_ daterange_canonical _null_ _null_ _null_ ));
 DESCR("convert a date range to canonical form");
+DATA(insert OID = 3922 (  length		   PGNSP PGUID 14 100 0 0 f f f t f i 1 0 2283 "3831" _null_ _null_ _null_ _null_ "select pg_catalog.upper($1) - pg_catalog.lower($1);" _null_ _null_ _null_ ));
+DESCR("range upper bound minus range lower bound");
+DATA(insert OID = 3923 (  length		   PGNSP PGUID 14 100 0 0 f f f t f i 1 0 1186 "3908" _null_ _null_ _null_ _null_ "select pg_catalog.upper($1) - pg_catalog.lower($1);" _null_ _null_ _null_ ));
+DESCR("range upper bound minus range lower bound");
+DATA(insert OID = 3924 (  length		   PGNSP PGUID 14 100 0 0 f f f t f i 1 0 1186 "3910" _null_ _null_ _null_ _null_ "select pg_catalog.upper($1) - pg_catalog.lower($1);" _null_ _null_ _null_ ));
+DESCR("range upper bound minus range lower bound");
+DATA(insert OID = 3925 (  length		   PGNSP PGUID 14 100 0 0 f f f t f i 1 0 23 "3912" _null_ _null_ _null_ _null_ "select pg_catalog.upper($1) - pg_catalog.lower($1);" _null_ _null_ _null_ ));
+DESCR("range upper bound minus range lower bound");
+
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result
