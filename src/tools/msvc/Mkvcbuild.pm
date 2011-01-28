@@ -36,7 +36,7 @@ my $contrib_extrasource = {
     'cube' => ['cubescan.l','cubeparse.y'],
     'seg' => ['segscan.l','segparse.y']
 };
-my @contrib_excludes = ('pgcrypto','intagg');
+my @contrib_excludes = ('pgcrypto','intagg','sepgsql');
 
 sub mkvcbuild
 {
