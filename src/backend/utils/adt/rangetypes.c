@@ -586,7 +586,7 @@ range_contained_by(PG_FUNCTION_ARGS)
 	RangeType	*r1 = PG_GETARG_RANGE(0);
 	RangeType	*r2 = PG_GETARG_RANGE(1);
 
-	PG_RETURN_BOOL(range_contains_internal(r1, r2));
+	PG_RETURN_BOOL(range_contains_internal(r2, r1));
 }
 
 Datum

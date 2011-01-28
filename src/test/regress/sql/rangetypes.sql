@@ -37,6 +37,9 @@ select rangeii(2.0, 3.0) -|- range__(3.0, 4.0);
 select range(1.0, 2.0) -|- rangeii(2.0, 3.0);
 select adjacent(range_i(2.0, 3.0), range_i(1.0, 2.0));
 
+select range(1.1, 3.3) <@ range(0.1,10.1);
+select range(0.1, 10.1) <@ range(1.1,3.3);
+
 select range(1.1, 2.2) - range(2.0, 3.0);
 select range(1.1, 2.2) - range(2.2, 3.0);
 select rangeii(1.1, 2.2) - range(2.0, 3.0);
