@@ -4131,6 +4131,8 @@ SET xmloption TO { DOCUMENT | CONTENT };
 
   &rowtypes;
 
+  &rangetypes;
+
   <sect1 id="datatype-oid">
    <title>Object Identifier Types</title>
 

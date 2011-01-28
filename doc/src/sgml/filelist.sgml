@@ -25,6 +25,7 @@
 <!entity mvcc       SYSTEM "mvcc.sgml">
 <!entity perform    SYSTEM "perform.sgml">
 <!entity queries    SYSTEM "queries.sgml">
+<!entity rangetypes SYSTEM "rangetypes.sgml">
 <!entity rowtypes   SYSTEM "rowtypes.sgml">
 <!entity syntax     SYSTEM "syntax.sgml">
 <!entity textsearch SYSTEM "textsearch.sgml">
