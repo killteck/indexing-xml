@@ -78,8 +78,8 @@ range_in(PG_FUNCTION_ARGS)
 	FmgrInfo	subInputFn;
 	Oid			ioParam;
 
-	RangeBound	*lower = palloc0(sizeof(RangeBound));
-	RangeBound	*upper = palloc0(sizeof(RangeBound));
+	RangeBound	lower;
+	RangeBound	upper;
 
 	if (rngtypoid == ANYRANGEOID)
 		ereport(ERROR,
@@ -95,24 +95,24 @@ range_in(PG_FUNCTION_ARGS)
 	getTypeInputInfo(subtype, &subInput, &ioParam);
 	fmgr_info(subInput, &subInputFn);
 
-	lower->rngtypid	 = rngtypoid;
-	lower->infinite	 = flags &	RANGE_LB_INF;
-	lower->inclusive = flags &	RANGE_LB_INC;
-	lower->lower	 = true;
-	upper->rngtypid	 = rngtypoid;
-	upper->infinite	 = flags &	RANGE_UB_INF;
-	upper->inclusive = flags &	RANGE_UB_INC;
-	upper->lower	 = false;
+	lower.rngtypid	= rngtypoid;
+	lower.infinite	= flags &	RANGE_LB_INF;
+	lower.inclusive = flags &	RANGE_LB_INC;
+	lower.lower		= true;
+	upper.rngtypid	= rngtypoid;
+	upper.infinite	= flags &	RANGE_UB_INF;
+	upper.inclusive = flags &	RANGE_UB_INC;
+	upper.lower		= false;
 
 	if (RANGE_HAS_LBOUND(flags))
-		lower->val = InputFunctionCall(&subInputFn, lbound_str,
+		lower.val = InputFunctionCall(&subInputFn, lbound_str,
 									   ioParam, typmod);
 	if (RANGE_HAS_UBOUND(flags))
-		upper->val = InputFunctionCall(&subInputFn, ubound_str,
+		upper.val = InputFunctionCall(&subInputFn, ubound_str,
 									   ioParam, typmod);
 
 	/* serialize and canonicalize */
-	range = make_range(lower, upper, flags & RANGE_EMPTY);
+	range = make_range(&lower, &upper, flags & RANGE_EMPTY);
 
 	PG_RETURN_RANGE(range);
 }
@@ -229,23 +229,25 @@ range_linf_(PG_FUNCTION_ARGS)
 	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
-	RangeBound	*lower	  = palloc0(sizeof(RangeBound));
-	RangeBound	*upper	  = palloc0(sizeof(RangeBound));
+	RangeBound	 lower;
+	RangeBound	 upper;
 
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "NULL range boundaries are not supported");
 
-	lower->rngtypid	 = rngtypid;
-	lower->inclusive = false;
-	lower->infinite	 = true;
-	lower->lower	 = true;
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = false;
+	lower.infinite	= true;
+	lower.lower		= true;
+	lower.val		= (Datum) 0;
 
-	upper->rngtypid	 = rngtypid;
-	upper->inclusive = false;
-	upper->val		 = arg;
-	upper->lower	 = false;
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = false;
+	upper.infinite	= false;
+	upper.lower		= false;
+	upper.val		= arg;
 
-	range = DatumGetRangeType(make_range(lower, upper, false));
+	range = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_RANGE(range);
 }
@@ -257,23 +259,25 @@ range_uinf_(PG_FUNCTION_ARGS)
 	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
-	RangeBound	*lower	  = palloc0(sizeof(RangeBound));
-	RangeBound	*upper	  = palloc0(sizeof(RangeBound));
+	RangeBound	 lower;
+	RangeBound	 upper;
 
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "NULL range boundaries are not supported");
 
-	lower->rngtypid	 = rngtypid;
-	lower->inclusive = false;
-	lower->val		 = arg;
-	lower->lower	 = true;
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = false;
+	lower.infinite	= false;
+	lower.lower		= true;
+	lower.val		= arg;
 
-	upper->rngtypid	 = rngtypid;
-	upper->inclusive = false;
-	upper->infinite	 = true;
-	upper->lower	 = false;
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = false;
+	upper.infinite	= true;
+	upper.lower		= false;
+	upper.val		= (Datum) 0;
 
-	range = DatumGetRangeType(make_range(lower, upper, false));
+	range = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_RANGE(range);
 }
@@ -285,23 +289,25 @@ range_linfi(PG_FUNCTION_ARGS)
 	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
-	RangeBound	*lower	  = palloc0(sizeof(RangeBound));
-	RangeBound	*upper	  = palloc0(sizeof(RangeBound));
+	RangeBound	 lower;
+	RangeBound	 upper;
 
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "NULL range boundaries are not supported");
 
-	lower->rngtypid	 = rngtypid;
-	lower->inclusive = false;
-	lower->infinite	 = true;
-	lower->lower	 = true;
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = false;
+	lower.infinite	= true;
+	lower.lower		= true;
+	lower.val		= (Datum) 0;
 
-	upper->rngtypid	 = rngtypid;
-	upper->inclusive = true;
-	upper->val		 = arg;
-	upper->lower	 = false;
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = true;
+	upper.infinite	= false;
+	upper.lower		= false;
+	upper.val		= arg;
 
-	range = DatumGetRangeType(make_range(lower, upper, false));
+	range = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_RANGE(range);
 }
@@ -313,22 +319,25 @@ range_uinfi(PG_FUNCTION_ARGS)
 	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
-	RangeBound	*lower	  = palloc0(sizeof(RangeBound));
-	RangeBound	*upper	  = palloc0(sizeof(RangeBound));
+	RangeBound	 lower;
+	RangeBound	 upper;
 
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "NULL range boundaries are not supported");
 
-	lower->rngtypid	 = rngtypid;
-	lower->inclusive = true;
-	lower->val		 = arg;
-	lower->lower	 = true;
-	upper->rngtypid	 = rngtypid;
-	upper->inclusive = false;
-	upper->infinite	 = true;
-	upper->lower	 = false;
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = true;
+	lower.infinite	= false;
+	lower.lower		= true;
+	lower.val		= arg;
 
-	range = DatumGetRangeType(make_range(lower, upper, false));
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = false;
+	upper.infinite	= true;
+	upper.lower		= false;
+	upper.val		= (Datum) 0;
+
+	range = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_RANGE(range);
 }

@@ -424,4 +424,190 @@ select length('["2000-01-01", "2000-01-05")'::daterange);
 
 create table test_range_gist(ir intrange);
 create index test_range_gist_idx on test_range_gist using gist (ir);
+insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
+insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select range(g, g+10000) from generate_series(1,1000) g;
+insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select range_linfi(g*10) from generate_series(1,100) g;
+insert into test_range_gist select range_uinf_(g*10) from generate_series(1,100) g;
+insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
+BEGIN;
+SET LOCAL enable_seqscan    = t;
+SET LOCAL enable_bitmapscan = f;
+SET LOCAL enable_indexscan  = f;
+select count(*) from test_range_gist where ir = range(10,20);
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from test_range_gist where ir @> range(10,20);
+ count 
+-------
+   111
+(1 row)
+
+select count(*) from test_range_gist where ir && range(10,20);
+ count 
+-------
+   158
+(1 row)
+
+select count(*) from test_range_gist where ir <@ range(10,50);
+ count 
+-------
+  1062
+(1 row)
+
+select count(*) from (select * from test_range_gist where ir?) s where ir << range(100,500);
+ count 
+-------
+   189
+(1 row)
+
+select count(*) from (select * from test_range_gist where ir?) s where ir >> range(100,500);
+ count 
+-------
+  3554
+(1 row)
+
+select count(*) from (select * from test_range_gist where ir?) s where ir &< range(100,500);
+ count 
+-------
+  1029
+(1 row)
+
+select count(*) from (select * from test_range_gist where ir?) s where ir &> range(100,500);
+ count 
+-------
+  4794
+(1 row)
+
+select count(*) from (select * from test_range_gist where ir?) s where ir -|- range(100,500);
+ count 
+-------
+     5
+(1 row)
+
+COMMIT;
+BEGIN;
+SET LOCAL enable_seqscan    = f;
+SET LOCAL enable_bitmapscan = f;
+SET LOCAL enable_indexscan  = t;
+select count(*) from test_range_gist where ir = range(10,20);
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from test_range_gist where ir @> range(10,20);
+ count 
+-------
+   111
+(1 row)
+
+select count(*) from test_range_gist where ir && range(10,20);
+ count 
+-------
+   158
+(1 row)
+
+select count(*) from test_range_gist where ir <@ range(10,50);
+ count 
+-------
+  1062
+(1 row)
+
+select count(*) from test_range_gist where ir << range(100,500);
+ count 
+-------
+   189
+(1 row)
+
+select count(*) from test_range_gist where ir >> range(100,500);
+ count 
+-------
+  3554
+(1 row)
+
+select count(*) from test_range_gist where ir &< range(100,500);
+ count 
+-------
+  1029
+(1 row)
+
+select count(*) from test_range_gist where ir &> range(100,500);
+ count 
+-------
+  4794
+(1 row)
+
+select count(*) from test_range_gist where ir -|- range(100,500);
+ count 
+-------
+     5
+(1 row)
+
+COMMIT;
+drop index test_range_gist_idx;
+create index test_range_gist_idx on test_range_gist using gist (ir);
+BEGIN;
+SET LOCAL enable_seqscan    = f;
+SET LOCAL enable_bitmapscan = f;
+SET LOCAL enable_indexscan  = t;
+select count(*) from test_range_gist where ir = range(10,20);
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from test_range_gist where ir @> range(10,20);
+ count 
+-------
+   111
+(1 row)
+
+select count(*) from test_range_gist where ir && range(10,20);
+ count 
+-------
+   158
+(1 row)
+
+select count(*) from test_range_gist where ir <@ range(10,50);
+ count 
+-------
+  1062
+(1 row)
+
+select count(*) from test_range_gist where ir << range(100,500);
+ count 
+-------
+   189
+(1 row)
+
+select count(*) from test_range_gist where ir >> range(100,500);
+ count 
+-------
+  3554
+(1 row)
+
+select count(*) from test_range_gist where ir &< range(100,500);
+ count 
+-------
+  1029
+(1 row)
+
+select count(*) from test_range_gist where ir &> range(100,500);
+ count 
+-------
+  4794
+(1 row)
+
+select count(*) from test_range_gist where ir -|- range(100,500);
+ count 
+-------
+     5
+(1 row)
+
+COMMIT;
 drop table test_range_gist;

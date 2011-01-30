@@ -311,6 +311,12 @@ range_super_union(RangeType *r1, RangeType *r2)
 	else
 		result_upper = &upper2;
 
+	/* optimization to avoid constructing a new range */
+	if (result_lower == &lower1 && result_upper == &upper1)
+		return r1;
+	if (result_lower == &lower2 && result_upper == &upper2)
+		return r2;
+
 	return DatumGetRangeType(make_range(result_lower, result_upper, false));
 }
 
@@ -349,6 +355,7 @@ range_gist_consistent_int(StrategyNumber strategy, RangeType *key,
 		case RANGESTRAT_CONTAINED_BY:
 			if (empty1)
 				return true;
+			return true; //TODO
 			proc   = range_overlaps;
 			break;
 		case RANGESTRAT_BEFORE:
@@ -402,6 +409,13 @@ range_gist_consistent_leaf(StrategyNumber strategy, RangeType *key,
 {
 	Datum (*proc)(PG_FUNCTION_ARGS);
 
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	range_deserialize(key, &lower1, &upper1, &empty1);
+	range_deserialize(query, &lower2, &upper2, &empty2);
+
 	switch (strategy)
 	{
 		case RANGESTRAT_EQ:
@@ -422,18 +436,28 @@ range_gist_consistent_leaf(StrategyNumber strategy, RangeType *key,
 			proc = range_contained_by;
 			break;
 		case RANGESTRAT_BEFORE:
+			if (empty1 || empty2)
+				return false;
 			proc = range_before;
 			break;
 		case RANGESTRAT_AFTER:
+			if (empty1 || empty2)
+				return false;
 			proc = range_after;
 			break;
 		case RANGESTRAT_OVERLEFT:
+			if (empty1 || empty2)
+				return false;
 			proc = range_overleft;
 			break;
 		case RANGESTRAT_OVERRIGHT:
+			if (empty1 || empty2)
+				return false;
 			proc = range_overright;
 			break;
 		case RANGESTRAT_ADJACENT:
+			if (empty1 || empty2)
+				return false;
 			proc = range_adjacent;
 			break;
 	}
@@ -443,7 +467,15 @@ range_gist_consistent_leaf(StrategyNumber strategy, RangeType *key,
 }
 
 /*
- * Compare function for PickSplitSortItem based on period_compare.
+ * Compare function for PickSplitSortItem. This is actually the
+ * interesting part of the picksplit algorithm.
+ *
+ * We want to push all of the empty ranges to one side, and all of the
+ * unbounded ranges to the other side. That's because empty ranges are
+ * rarely going to match search criteria, and unbounded ranges
+ * frequently will. Normal bounded intervals will be in the
+ * middle. Arbitrarily, we choose to push the unbounded intervals
+ * right and the empty intervals left.
  */
 static int
 sort_item_cmp(const void *a, const void *b)
