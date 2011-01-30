@@ -422,3 +422,6 @@ select length('["2000-01-01", "2000-01-05")'::daterange);
       4
 (1 row)
 
+create table test_range_gist(ir intrange);
+create index test_range_gist_idx on test_range_gist using gist (ir);
+drop table test_range_gist;

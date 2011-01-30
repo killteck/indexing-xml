@@ -197,22 +197,27 @@ range_make1(PG_FUNCTION_ARGS)
 	Oid			 subtype  = get_fn_expr_argtype(fcinfo->flinfo,0);
 	Oid			 rngtypid = get_range_from_subtype(subtype);
 	RangeType	*range;
-	RangeBound	*lower	  = palloc0(sizeof(RangeBound));
-	RangeBound	*upper	  = palloc0(sizeof(RangeBound));
+	RangeBound	 lower;
+	RangeBound	 upper;
 
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "NULL range boundaries are not supported");
 
-	lower->rngtypid	 = rngtypid;
-	lower->inclusive = true;
-	lower->val		 = arg;
-	lower->lower	 = true;
-	upper->rngtypid	 = rngtypid;
-	upper->inclusive = true;
-	upper->val		 = arg;
-	upper->lower	 = false;
+	if (!OidIsValid(subtype) || !OidIsValid(rngtypid))
+		elog(ERROR, "cannot determine argument types");
 
-	range = DatumGetRangeType(make_range(lower, upper, false));
+	lower.rngtypid	= rngtypid;
+	lower.inclusive = true;
+	lower.val		= arg;
+	lower.lower		= true;
+	lower.infinite	= false;
+	upper.rngtypid	= rngtypid;
+	upper.inclusive = true;
+	upper.val		= arg;
+	upper.lower		= false;
+	upper.infinite	= false;
+
+	range = DatumGetRangeType(make_range(&lower, &upper, false));
 
 	PG_RETURN_RANGE(range);
 }

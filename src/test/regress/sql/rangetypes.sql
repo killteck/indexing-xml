@@ -118,3 +118,8 @@ select length(range(10.1,100.1));
 select length('["2000-01-01 01:00:00", "2000-01-05 03:00:00")'::period);
 select length('["2000-01-01 01:00:00", "2000-01-01 03:00:00")'::periodtz);
 select length('["2000-01-01", "2000-01-05")'::daterange);
+
+create table test_range_gist(ir intrange);
+create index test_range_gist_idx on test_range_gist using gist (ir);
+
+drop table test_range_gist;
