@@ -135,6 +135,7 @@ SET LOCAL enable_seqscan    = t;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = f;
 
+select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);
@@ -151,6 +152,7 @@ SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
 
+select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);
@@ -170,6 +172,7 @@ SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
 
+select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);

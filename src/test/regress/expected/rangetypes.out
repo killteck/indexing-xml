@@ -435,6 +435,12 @@ BEGIN;
 SET LOCAL enable_seqscan    = t;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = f;
+select count(*) from test_range_gist where ir @> '-'::intrange;
+ count 
+-------
+  6200
+(1 row)
+
 select count(*) from test_range_gist where ir = range(10,20);
  count 
 -------
@@ -494,6 +500,12 @@ BEGIN;
 SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
+select count(*) from test_range_gist where ir @> '-'::intrange;
+ count 
+-------
+  6200
+(1 row)
+
 select count(*) from test_range_gist where ir = range(10,20);
  count 
 -------
@@ -555,6 +567,12 @@ BEGIN;
 SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
+select count(*) from test_range_gist where ir @> '-'::intrange;
+ count 
+-------
+  6200
+(1 row)
+
 select count(*) from test_range_gist where ir = range(10,20);
  count 
 -------

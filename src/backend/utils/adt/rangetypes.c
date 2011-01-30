@@ -1581,10 +1581,10 @@ range_contains_internal(RangeType *r1, RangeType *r2)
 		lower1.rngtypid != upper2.rngtypid)
 		elog(ERROR, "range types do not match");
 
-	if (empty1 && !empty2)
-		return false;
-	else if (empty2)
+	if (empty2)
 		return true;
+	else if (empty1)
+		return false;
 
 	if (range_cmp_bounds(&lower1, &lower2) > 0)
 		return false;

@@ -105,22 +105,15 @@ range_gist_union(PG_FUNCTION_ARGS)
 {
 	GistEntryVector		*entryvec = (GistEntryVector *) PG_GETARG_POINTER(0);
 	GISTENTRY			*ent	  = entryvec->vector;
-	RangeType			*tmp_range;
 	RangeType			*result_range;
-	int					 numentries;
 	int					 i;
 
-	numentries	 = entryvec->n;
-	tmp_range	 = DatumGetRangeType(ent[0].key);
-	result_range = tmp_range;
+	result_range = DatumGetRangeType(ent[0].key);
 
-	if (numentries == 1)
-		PG_RETURN_RANGE(tmp_range);
-
-	for (i = 1; i < numentries; i++)
+	for (i = 1; i < entryvec->n; i++)
 	{
-		tmp_range	 = DatumGetRangeType(ent[i].key);
-		result_range = range_super_union(result_range, tmp_range);
+		result_range = range_super_union(result_range,
+										 DatumGetRangeType(ent[i].key));
 	}
 
 	PG_RETURN_RANGE(result_range);
@@ -301,12 +294,12 @@ range_super_union(RangeType *r1, RangeType *r2)
 	if (empty2)
 		return r1;
 
-	if (range_cmp_bounds(&lower1, &lower2) < 0)
+	if (range_cmp_bounds(&lower1, &lower2) <= 0)
 		result_lower = &lower1;
 	else
 		result_lower = &lower2;
 
-	if (range_cmp_bounds(&upper1, &upper2) > 0)
+	if (range_cmp_bounds(&upper1, &upper2) >= 0)
 		result_upper = &upper1;
 	else
 		result_upper = &upper2;
@@ -353,10 +346,7 @@ range_gist_consistent_int(StrategyNumber strategy, RangeType *key,
 			break;
 		case RANGESTRAT_ELEM_CONTAINED_BY:
 		case RANGESTRAT_CONTAINED_BY:
-			if (empty1)
-				return true;
-			return true; //TODO
-			proc   = range_overlaps;
+			return true;
 			break;
 		case RANGESTRAT_BEFORE:
 			if (empty1)
