@@ -460,19 +460,74 @@ range_gist_consistent_leaf(StrategyNumber strategy, RangeType *key,
  * Compare function for PickSplitSortItem. This is actually the
  * interesting part of the picksplit algorithm.
  *
- * We want to push all of the empty ranges to one side, and all of the
- * unbounded ranges to the other side. That's because empty ranges are
- * rarely going to match search criteria, and unbounded ranges
- * frequently will. Normal bounded intervals will be in the
- * middle. Arbitrarily, we choose to push the unbounded intervals
- * right and the empty intervals left.
+ * We want to separate out empty ranges, bounded ranges, and unbounded
+ * ranges. We assume that "contains" and "overlaps" are the most
+ * important queries, so empty ranges will rarely match and unbounded
+ * ranges frequently will. Bounded ranges should be in the middle.
+ *
+ * Empty ranges we push all the way to the left, then bounded ranges
+ * (sorted on lower bound, then upper), then ranges with no lower
+ * bound, then ranges with no upper bound; and finally, ranges with no
+ * upper or lower bound all the way to the right.
  */
 static int
 sort_item_cmp(const void *a, const void *b)
 {
-	PickSplitSortItem *i1 = (PickSplitSortItem *)a;
-	PickSplitSortItem *i2 = (PickSplitSortItem *)b;
-	return DatumGetInt32(DirectFunctionCall2(range_cmp,
-											 RangeTypeGetDatum(i1->data),
-											 RangeTypeGetDatum(i2->data)));
+	PickSplitSortItem	*i1 = (PickSplitSortItem *)a;
+	PickSplitSortItem	*i2 = (PickSplitSortItem *)b;
+	RangeType			*r1 = i1->data;
+	RangeType			*r2 = i2->data;
+
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1, empty2;
+
+	int cmp;
+
+	range_deserialize(r1, &lower1, &upper1, &empty1);
+	range_deserialize(r2, &lower2, &upper2, &empty2);
+
+	if (empty1 || empty2)
+	{
+		if (empty1 && empty2)
+			return 0;
+		else if (empty1)
+			return -1;
+		else if (empty2)
+			return 1;
+		else
+			Assert(false);
+	}
+
+	/*
+	 * If both lower or both upper bounds are infinite, we sort by
+	 * ascending range size. That means that if both upper bounds are
+	 * infinite, we sort by the lower bound _descending_. That creates
+	 * a slightly odd total order, but keeps the pages with very
+	 * unselective predicates grouped more closely together on the
+	 * right.
+	 */
+	if (lower1.infinite || upper1.infinite ||
+		lower2.infinite || upper2.infinite)
+	{
+		if (lower1.infinite && lower2.infinite)
+			return range_cmp_bounds(&upper1, &upper2);
+		else if (lower1.infinite)
+			return -1;
+		else if (lower2.infinite)
+			return 1;
+		else if (upper1.infinite && upper2.infinite)
+			return -1 * range_cmp_bounds(&lower1, &lower2);
+		else if (upper1.infinite)
+			return 1;
+		else if (upper2.infinite)
+			return -1;
+		else
+			Assert(false);
+	}
+
+	if ((cmp = range_cmp_bounds(&lower1, &lower2)) != 0)
+		return cmp;
+
+	return range_cmp_bounds(&upper1, &upper2);
 }
