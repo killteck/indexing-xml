@@ -137,6 +137,7 @@ SET LOCAL enable_indexscan  = f;
 
 select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
+select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);
 select count(*) from test_range_gist where ir <@ range(10,50);
@@ -154,6 +155,7 @@ SET LOCAL enable_indexscan  = t;
 
 select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
+select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);
 select count(*) from test_range_gist where ir <@ range(10,50);
@@ -174,6 +176,7 @@ SET LOCAL enable_indexscan  = t;
 
 select count(*) from test_range_gist where ir @> '-'::intrange;
 select count(*) from test_range_gist where ir = range(10,20);
+select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
 select count(*) from test_range_gist where ir && range(10,20);
 select count(*) from test_range_gist where ir <@ range(10,50);
@@ -185,3 +188,30 @@ select count(*) from test_range_gist where ir -|- range(100,500);
 COMMIT;
 
 drop table test_range_gist;
+
+--
+-- Btree_gist is not included by default, so to test exclusion
+-- constraints with range types, use singleton int ranges for the "="
+-- portion of the constraint.
+--
+
+create table test_range_excl(
+  room intrange,
+  speaker intrange,
+  during period,
+  exclude using gist (room with =, during with &&),
+  exclude using gist (speaker with =, during with &&)
+);
+
+insert into test_range_excl
+  values(range(123), range(1), '["2010-01-02 10:00", "2010-01-02 11:00")');
+insert into test_range_excl
+  values(range(123), range(2), '["2010-01-02 11:00", "2010-01-02 12:00")');
+insert into test_range_excl
+  values(range(123), range(3), '["2010-01-02 10:10", "2010-01-02 11:10")');
+insert into test_range_excl
+  values(range(124), range(3), '["2010-01-02 10:10", "2010-01-02 11:10")');
+insert into test_range_excl
+  values(range(125), range(1), '["2010-01-02 10:10", "2010-01-02 11:10")');
+
+drop table test_range_excl;
