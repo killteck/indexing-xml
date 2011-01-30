@@ -129,8 +129,8 @@ range_out(PG_FUNCTION_ARGS)
 	bool		isVarlena;
 
 	char		 flags = 0;
-	char		*lbound_str;
-	char		*ubound_str;
+	char		*lbound_str = NULL;
+	char		*ubound_str = NULL;
 	char		*output_str;
 
 	bool		empty;
@@ -1144,8 +1144,8 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 	int16		 typlen	  = get_typlen(subtype);
 	char		 typalign = get_typalign(subtype);
 	char		 typbyval = get_typbyval(subtype);
-	size_t		 llen;
-	size_t		 ulen;
+	size_t		 llen = 0;
+	size_t		 ulen = 0;
 	char		 flags = 0;
 
 	if (lower->rngtypid != upper->rngtypid)
