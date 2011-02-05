@@ -44,8 +44,12 @@
 typedef enum
 {
 	RANGE_PSTATE_INIT,
+	RANGE_PSTATE_PRE_LB,
 	RANGE_PSTATE_LB,
+	RANGE_PSTATE_SEP,
+	RANGE_PSTATE_PRE_UB,
 	RANGE_PSTATE_UB,
+	RANGE_PSTATE_UB_INC,
 	RANGE_PSTATE_DONE
 } RangePState;
 
@@ -1360,6 +1364,21 @@ make_empty_range(Oid rngtypid)
  *----------------------------------------------------------
  */
 
+/*
+ * Parse input of the form:
+ *  <lb-inc> <lb> <sep> <ub> <ub-inc>
+ * where
+ *  <lb-inc> is either "[" or "("
+ *  <lb> and <ub> are either plain strings or quoted strings
+ *  <sep> is ","
+ *  <ub-inc> is either "]" or ")"
+ *
+ * Quoted strings preserve whitespace, and allow using special
+ * characters like "," and special values like "INF" ("\" is the
+ * escape character if you need to include a double quote or backslash
+ * character). Unquoted strings preserve internal whitespace, but not
+ * leading or trailing whitespace.
+ */
 static void
 range_parse(const char *input_str,  char *flags, char **lbound_str,
 			   char **ubound_str)
@@ -1368,7 +1387,9 @@ range_parse(const char *input_str,  char *flags, char **lbound_str,
 	char		*lb			   = palloc0(ilen + 1);
 	char		*ub			   = palloc0(ilen + 1);
 	int			 lidx		   = 0;
+	int			 lb_last	   = 1;
 	int			 uidx		   = 0;
+	int			 ub_last	   = 1;
 	bool		 inside_quotes = false;
 	bool		 lb_quoted	   = false;
 	bool		 ub_quoted	   = false;
@@ -1377,85 +1398,143 @@ range_parse(const char *input_str,  char *flags, char **lbound_str,
 	RangePState  pstate		   = RANGE_PSTATE_INIT;
 	int			 i;
 
+
 	for (i = 0; i < ilen; i++)
 	{
 		char ch = input_str[i];
-
-		if((ch == '"' || ch == '\\') && !escape)
+		switch(pstate)
 		{
-			if (pstate != RANGE_PSTATE_LB && pstate != RANGE_PSTATE_UB)
-				elog(ERROR, "syntax error on range input, character %d", i);
-			if (ch == '"')
-			{
-				if (pstate == RANGE_PSTATE_LB)
-					lb_quoted = true;
-				else if (pstate == RANGE_PSTATE_UB)
-					ub_quoted = true;
-				inside_quotes = !inside_quotes;
-			}
-			else if (ch == '\\')
-				escape = true;
-			continue;
+			case RANGE_PSTATE_INIT:
+				if (isspace(ch))
+					continue;
+				if(ch == '-')
+				{
+					fl = RANGE_EMPTY;
+					pstate = RANGE_PSTATE_DONE;
+					/* read the rest to make sure it's whitespace */
+					continue;
+				}
+
+				if (ch == '[' || ch == '(')
+				{
+					if (ch == '[')
+						fl |= RANGE_LB_INC;
+					pstate = RANGE_PSTATE_PRE_LB;
+					continue;
+				}
+				break;
+			case RANGE_PSTATE_PRE_LB:
+				/* remove leading whitespace */
+				if (isspace(ch))
+					continue;
+				pstate = RANGE_PSTATE_LB;
+				/* fall through */
+			case RANGE_PSTATE_LB:
+				if (ch == '"' && !escape)
+				{
+					if (inside_quotes)
+					{
+						inside_quotes = false;
+						pstate = RANGE_PSTATE_SEP;
+					}
+					else
+					{
+						inside_quotes = true;
+						lb_quoted	  = true;
+					}
+					continue;
+				}
+				if (ch == '\\' && !escape && inside_quotes)
+				{
+					escape = true;
+					continue;
+				}
+				escape = false;
+
+				if (ch != ',')
+				{
+					lb[lidx++] = ch;
+					/* track last significant character */
+					if (inside_quotes || !isspace(ch))
+						lb_last = lidx;
+					continue;
+				}
+
+				pstate = RANGE_PSTATE_SEP;
+				/* fall through */
+			case RANGE_PSTATE_SEP:
+				if (isspace(ch))
+					continue;
+				if (ch == ',')
+				{
+					pstate = RANGE_PSTATE_PRE_UB;
+					continue;
+				}
+			case RANGE_PSTATE_PRE_UB:
+				/* remove leading whitespace */
+				if (isspace(ch))
+					continue;
+				pstate = RANGE_PSTATE_UB;
+				/* fall through */
+			case RANGE_PSTATE_UB:
+				if (ch == '"' && !escape)
+				{
+					if (inside_quotes)
+					{
+						inside_quotes = false;
+						pstate = RANGE_PSTATE_UB_INC;
+					}
+					else
+					{
+						inside_quotes = true;
+						lb_quoted	  = true;
+					}
+					continue;
+				}
+				if (ch == '\\' && !escape && inside_quotes)
+				{
+					escape = true;
+					continue;
+				}
+				escape = false;
+
+				if (ch != ']' && ch != ')')
+				{
+					ub[uidx++] = ch;
+					/* track last significant character */
+					if (inside_quotes || !isspace(ch))
+						ub_last = uidx;
+					continue;
+				}
+
+				pstate = RANGE_PSTATE_UB_INC;
+				/* fall through */
+			case RANGE_PSTATE_UB_INC:
+				if (isspace(ch))
+					continue;
+				if (ch == ']' || ch == ')')
+				{
+					if (ch == ']')
+						fl |= RANGE_UB_INC;
+					pstate = RANGE_PSTATE_DONE;
+					continue;
+				}
+				break;
+			case RANGE_PSTATE_DONE:
+				if (isspace(ch))
+					continue;
+				break;
 		}
-
-		escape = false;
-
-		if(isspace(ch) && !inside_quotes)
-			continue;
-
-		if(ch == '-' && pstate == RANGE_PSTATE_INIT)
-		{
-			fl |= RANGE_EMPTY;
-			pstate = RANGE_PSTATE_DONE;
-			/* read the rest to make sure it's whitespace */
-			continue;
-		}
-
-		if((ch == '[' || ch == '(') && !inside_quotes)
-		{
-			if (pstate != RANGE_PSTATE_INIT)
-				elog(ERROR, "syntax error on range input, character %d", i);
-			if (ch == '[')
-				fl |= RANGE_LB_INC;
-			pstate = RANGE_PSTATE_LB;
-			continue;
-		}
-
-		if((ch == ')' || ch == ']') && !inside_quotes)
-		{
-			if (pstate != RANGE_PSTATE_UB)
-				elog(ERROR, "syntax error on range input, character %d", i);
-			if (ch == ']')
-				fl |= RANGE_UB_INC;
-			pstate = RANGE_PSTATE_DONE;
-			continue;
-		}
-
-		if(ch == ',' && !inside_quotes)
-		{
-			if (pstate != RANGE_PSTATE_LB)
-				elog(ERROR, "syntax error on range input, character %d", i);
-			pstate = RANGE_PSTATE_UB;
-			continue;
-		}
-
-		if (pstate == RANGE_PSTATE_LB)
-		{
-			lb[lidx++] = ch;
-			continue;
-		}
-
-		if (pstate == RANGE_PSTATE_UB)
-		{
-			ub[uidx++] = ch;
-			continue;
-		}
-
-		elog(ERROR, "syntax error on range input: characters after end of input");
+		elog(ERROR, "syntax error on range input \"%s\", character %d",
+			 input_str, i);
 	}
 
-	if (inside_quotes)
-		elog(ERROR, "syntax error on range input: unterminated quotation");
+	/* remove trailing whitespace */
+	lb[lb_last] = '\0';
+	ub[ub_last] = '\0';
+
+	if (pstate != RANGE_PSTATE_DONE)
+		elog(ERROR, "syntax error on range input: unexpected end of input");
 
 	if (fl & RANGE_EMPTY)
 		fl = RANGE_EMPTY;

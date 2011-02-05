@@ -115,9 +115,9 @@ select rangeii('2000-01-10'::date, '2000-01-20'::date);
 
 -- test length()
 select length(range(10.1,100.1));
-select length('["2000-01-01 01:00:00", "2000-01-05 03:00:00")'::period);
-select length('["2000-01-01 01:00:00", "2000-01-01 03:00:00")'::periodtz);
-select length('["2000-01-01", "2000-01-05")'::daterange);
+select length('[2000-01-01 01:00:00, 2000-01-05 03:00:00)'::period);
+select length('[2000-01-01 01:00:00, 2000-01-01 03:00:00)'::periodtz);
+select length('[2000-01-01, 2000-01-05)'::daterange);
 
 create table test_range_gist(ir intrange);
 create index test_range_gist_idx on test_range_gist using gist (ir);
@@ -204,14 +204,14 @@ create table test_range_excl(
 );
 
 insert into test_range_excl
-  values(range(123), range(1), '["2010-01-02 10:00", "2010-01-02 11:00")');
+  values(range(123), range(1), '[2010-01-02 10:00, 2010-01-02 11:00)');
 insert into test_range_excl
-  values(range(123), range(2), '["2010-01-02 11:00", "2010-01-02 12:00")');
+  values(range(123), range(2), '[2010-01-02 11:00, 2010-01-02 12:00)');
 insert into test_range_excl
-  values(range(123), range(3), '["2010-01-02 10:10", "2010-01-02 11:10")');
+  values(range(123), range(3), '[2010-01-02 10:10, 2010-01-02 11:10)');
 insert into test_range_excl
-  values(range(124), range(3), '["2010-01-02 10:10", "2010-01-02 11:10")');
+  values(range(124), range(3), '[2010-01-02 10:10, 2010-01-02 11:10)');
 insert into test_range_excl
-  values(range(125), range(1), '["2010-01-02 10:10", "2010-01-02 11:10")');
+  values(range(125), range(1), '[2010-01-02 10:10, 2010-01-02 11:10)');
 
 drop table test_range_excl;
