@@ -347,7 +347,7 @@ set enable_mergejoin to default;
 SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;
 DROP TABLE numrange_test2;
--- test canonical form for intrange
+-- test canonical form for int4range
 select range__(1,10);
   range__  
 -----------
@@ -404,13 +404,13 @@ select length(range(10.1,100.1));
    90.0
 (1 row)
 
-select length('[2000-01-01 01:00:00, 2000-01-05 03:00:00)'::period);
+select length('[2000-01-01 01:00:00, 2000-01-05 03:00:00)'::tsrange);
       length      
 ------------------
  @ 4 days 2 hours
 (1 row)
 
-select length('[2000-01-01 01:00:00, 2000-01-01 03:00:00)'::periodtz);
+select length('[2000-01-01 01:00:00, 2000-01-01 03:00:00)'::tstzrange);
   length   
 -----------
  @ 2 hours
@@ -422,12 +422,12 @@ select length('[2000-01-01, 2000-01-05)'::daterange);
       4
 (1 row)
 
-create table test_range_gist(ir intrange);
+create table test_range_gist(ir int4range);
 create index test_range_gist_idx on test_range_gist using gist (ir);
 insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
-insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select '-'::int4range from generate_series(1,500) g;
 insert into test_range_gist select range(g, g+10000) from generate_series(1,1000) g;
-insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select '-'::int4range from generate_series(1,500) g;
 insert into test_range_gist select range_linfi(g*10) from generate_series(1,100) g;
 insert into test_range_gist select range_uinf_(g*10) from generate_series(1,100) g;
 insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
@@ -435,7 +435,7 @@ BEGIN;
 SET LOCAL enable_seqscan    = t;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = f;
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
  count 
 -------
   6200
@@ -506,7 +506,7 @@ BEGIN;
 SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
  count 
 -------
   6200
@@ -579,7 +579,7 @@ BEGIN;
 SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
  count 
 -------
   6200
@@ -653,9 +653,9 @@ drop table test_range_gist;
 -- portion of the constraint.
 --
 create table test_range_excl(
-  room intrange,
-  speaker intrange,
-  during period,
+  room int4range,
+  speaker int4range,
+  during tsrange,
   exclude using gist (room with =, during with &&),
   exclude using gist (speaker with =, during with &&)
 );
@@ -676,3 +676,24 @@ insert into test_range_excl
 ERROR:  conflicting key value violates exclusion constraint "test_range_excl_speaker_during_excl"
 DETAIL:  Key (speaker, during)=([ 1, 2 ), [ Sat Jan 02 10:10:00 2010, Sat Jan 02 11:10:00 2010 )) conflicts with existing key (speaker, during)=([ 1, 2 ), [ Sat Jan 02 10:00:00 2010, Sat Jan 02 11:00:00 2010 )).
 drop table test_range_excl;
+-- test bigint ranges
+select range_i(10000000000::int8, 20000000000::int8);
+           range_i            
+------------------------------
+ [ 10000000001, 20000000001 )
+(1 row)
+
+-- test tstz ranges
+set timezone to '-08';
+select '[2010-01-01 01:00:00 -05, 2010-01-01 02:00:00 -08)'::tstzrange;
+                           tstzrange                            
+----------------------------------------------------------------
+ [ Thu Dec 31 22:00:00 2009 -08, Fri Jan 01 02:00:00 2010 -08 )
+(1 row)
+
+-- should fail
+select '[2010-01-01 01:00:00 -08, 2010-01-01 02:00:00 -05)'::tstzrange;
+ERROR:  range lower bound must be less than or equal to range upper bound
+LINE 1: select '[2010-01-01 01:00:00 -08, 2010-01-01 02:00:00 -05)':...
+               ^
+set timezone to default;

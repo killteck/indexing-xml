@@ -5001,8 +5001,10 @@ DATA(insert OID = 3881 (  range_gist_same	PGNSP PGUID 12 1 0 0 f f f t f i 3 0 2
 DESCR("the set difference of the two ranges");
 DATA(insert OID = 3902 (  hash_range		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 23 "3831" _null_ _null_ _null_ _null_ hash_range _null_ _null_ _null_ ));
 DESCR("hash a range");
-DATA(insert OID = 3914 (  intrange_canonical		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3904 "3904" _null_ _null_ _null_ _null_ intrange_canonical _null_ _null_ _null_ ));
-DESCR("convert an integer range to canonical form");
+DATA(insert OID = 3914 (  int4range_canonical		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3904 "3904" _null_ _null_ _null_ _null_ int4range_canonical _null_ _null_ _null_ ));
+DESCR("convert an int4 range to canonical form");
+DATA(insert OID = 3928 (  int8range_canonical		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3926 "3926" _null_ _null_ _null_ _null_ int8range_canonical _null_ _null_ _null_ ));
+DESCR("convert an int8 range to canonical form");
 DATA(insert OID = 3915 (  daterange_canonical		   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 3906 "3906" _null_ _null_ _null_ _null_ daterange_canonical _null_ _null_ _null_ ));
 DESCR("convert a date range to canonical form");
 DATA(insert OID = 3922 (  length		   PGNSP PGUID 14 100 0 0 f f f t f i 1 0 2283 "3831" _null_ _null_ _null_ _null_ "select pg_catalog.upper($1) - pg_catalog.lower($1);" _null_ _null_ _null_ ));

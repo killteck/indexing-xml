@@ -101,7 +101,7 @@ SET enable_seqscan TO DEFAULT;
 DROP TABLE numrange_test;
 DROP TABLE numrange_test2;
 
--- test canonical form for intrange
+-- test canonical form for int4range
 select range__(1,10);
 select rangei_(1,10);
 select range_i(1,10);
@@ -115,17 +115,17 @@ select rangeii('2000-01-10'::date, '2000-01-20'::date);
 
 -- test length()
 select length(range(10.1,100.1));
-select length('[2000-01-01 01:00:00, 2000-01-05 03:00:00)'::period);
-select length('[2000-01-01 01:00:00, 2000-01-01 03:00:00)'::periodtz);
+select length('[2000-01-01 01:00:00, 2000-01-05 03:00:00)'::tsrange);
+select length('[2000-01-01 01:00:00, 2000-01-01 03:00:00)'::tstzrange);
 select length('[2000-01-01, 2000-01-05)'::daterange);
 
-create table test_range_gist(ir intrange);
+create table test_range_gist(ir int4range);
 create index test_range_gist_idx on test_range_gist using gist (ir);
 
 insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
-insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select '-'::int4range from generate_series(1,500) g;
 insert into test_range_gist select range(g, g+10000) from generate_series(1,1000) g;
-insert into test_range_gist select '-'::intrange from generate_series(1,500) g;
+insert into test_range_gist select '-'::int4range from generate_series(1,500) g;
 insert into test_range_gist select range_linfi(g*10) from generate_series(1,100) g;
 insert into test_range_gist select range_uinf_(g*10) from generate_series(1,100) g;
 insert into test_range_gist select range(g, g+10) from generate_series(1,2000) g;
@@ -135,7 +135,7 @@ SET LOCAL enable_seqscan    = t;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = f;
 
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
@@ -153,7 +153,7 @@ SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
 
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
@@ -174,7 +174,7 @@ SET LOCAL enable_seqscan    = f;
 SET LOCAL enable_bitmapscan = f;
 SET LOCAL enable_indexscan  = t;
 
-select count(*) from test_range_gist where ir @> '-'::intrange;
+select count(*) from test_range_gist where ir @> '-'::int4range;
 select count(*) from test_range_gist where ir = range(10,20);
 select count(*) from test_range_gist where ir @> 10;
 select count(*) from test_range_gist where ir @> range(10,20);
@@ -196,9 +196,9 @@ drop table test_range_gist;
 --
 
 create table test_range_excl(
-  room intrange,
-  speaker intrange,
-  during period,
+  room int4range,
+  speaker int4range,
+  during tsrange,
   exclude using gist (room with =, during with &&),
   exclude using gist (speaker with =, during with &&)
 );
@@ -215,3 +215,12 @@ insert into test_range_excl
   values(range(125), range(1), '[2010-01-02 10:10, 2010-01-02 11:10)');
 
 drop table test_range_excl;
+
+-- test bigint ranges
+select range_i(10000000000::int8, 20000000000::int8);
+-- test tstz ranges
+set timezone to '-08';
+select '[2010-01-01 01:00:00 -05, 2010-01-01 02:00:00 -08)'::tstzrange;
+-- should fail
+select '[2010-01-01 01:00:00 -08, 2010-01-01 02:00:00 -05)'::tstzrange;
+set timezone to default;

@@ -70,10 +70,11 @@ void RangeDelete(Oid rangeTypeOid);
  *		initial contents of pg_range
  * ----------------
  */
-DATA(insert ( 3904 23 btint4cmp intrange_canonical 316 ));
+DATA(insert ( 3904 23 btint4cmp int4range_canonical 316 ));
 DATA(insert ( 3906 1700 numeric_cmp - 1746 ));
 DATA(insert ( 3908 1114 timestamp_cmp - 3916 ));
 DATA(insert ( 3910 1184 timestamp_cmp - 3917 ));
 DATA(insert ( 3912 1082 date_cmp daterange_canonical 3918 ));
+DATA(insert ( 3926 20 btint8cmp int8range_canonical 482 ));
 
 #endif   /* PG_RANGE_H */
