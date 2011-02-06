@@ -104,7 +104,7 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    </para>
   </refsect2>
 
-  <refsect2>
+  <refsect2 id="SQL-CREATETYPE-RANGE">
    <title>Range Types</title>
 
   <para>
