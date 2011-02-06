@@ -1244,7 +1244,7 @@ DefineRange(CreateRangeStmt *stmt)
 	if (!superuser())
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("must be superuser to create a base type")));
+				 errmsg("must be superuser to create a range type")));
 
 	/* Convert list of names to a name and namespace */
 	typeNamespace = QualifiedNameGetCreationNamespace(stmt->typeName,

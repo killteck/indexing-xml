@@ -10449,7 +10449,7 @@ SELECT NULLIF(value, '(none)') ...
        <row>
         <entry> <literal>=</literal> </entry>
         <entry>equal</entry>
-        <entry><literal>range(1,5) = '[1,4]'::intrange</literal></entry>
+        <entry><literal>range(1,5) = '[1,4]'::int4range</literal></entry>
         <entry><literal>t</literal></entry>
        </row>
 
@@ -10492,7 +10492,7 @@ SELECT NULLIF(value, '(none)') ...
        <row>
         <entry> <literal>@&gt;</literal> </entry>
         <entry>contains</entry>
-        <entry><literal>'[2011-01-01,2011-03-01)'::period @&gt; '2011-01-10'::timestamp</literal></entry>
+        <entry><literal>'[2011-01-01,2011-03-01)'::tsrange @&gt; '2011-01-10'::timestamp</literal></entry>
         <entry><literal>t</literal></entry>
        </row>
 
@@ -10569,7 +10569,7 @@ SELECT NULLIF(value, '(none)') ...
        <row>
         <entry> <literal>!?</literal> </entry>
         <entry>Is empty?</entry>
-        <entry><literal>'-'::intrange !?</literal></entry>
+        <entry><literal>'-'::int4range !?</literal></entry>
         <entry><literal>t</literal></entry>
        </row>
 
