@@ -541,23 +541,26 @@ range_contains_elem(PG_FUNCTION_ARGS)
 	RangeType	*r1		  = PG_GETARG_RANGE(0);
 	RangeType	*r2;
 	Datum		 val	  = PG_GETARG_DATUM(1);
-	Oid			 rngtypid = get_fn_expr_argtype(fcinfo->flinfo,0);
-	RangeBound	 lower;
-	RangeBound	 upper;
 
-	lower.rngtypid	= rngtypid;
-	lower.inclusive = true;
-	lower.infinite	= false;
-	lower.lower		= true;
-	lower.val		= val;
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1;
 
-	upper.rngtypid	= rngtypid;
-	upper.inclusive = true;
-	upper.infinite	= false;
-	upper.lower		= false;
-	upper.val		= val;
+	range_deserialize(r1, &lower1, &upper1, &empty1);
 
-	r2 = DatumGetRangeType(make_range(&lower, &upper, false));
+	lower2.rngtypid	 = lower1.rngtypid;
+	lower2.inclusive = true;
+	lower2.infinite	 = false;
+	lower2.lower	 = true;
+	lower2.val		 = val;
+
+	upper2.rngtypid	 = lower1.rngtypid;
+	upper2.inclusive = true;
+	upper2.infinite	 = false;
+	upper2.lower	 = false;
+	upper2.val		 = val;
+
+	r2 = DatumGetRangeType(make_range(&lower2, &upper2, false));
 
 	PG_RETURN_BOOL(range_contains_internal(r1, r2));
 }
@@ -577,23 +580,26 @@ elem_contained_by_range(PG_FUNCTION_ARGS)
 	RangeType	*r1		  = PG_GETARG_RANGE(1);
 	RangeType	*r2;
 	Datum		 val	  = PG_GETARG_DATUM(0);
-	Oid			 rngtypid = get_fn_expr_argtype(fcinfo->flinfo,1);
-	RangeBound	 lower;
-	RangeBound	 upper;
 
-	lower.rngtypid	= rngtypid;
-	lower.inclusive = true;
-	lower.infinite	= false;
-	lower.lower		= true;
-	lower.val		= val;
+	RangeBound	lower1, lower2;
+	RangeBound	upper1, upper2;
+	bool		empty1;
 
-	upper.rngtypid	= rngtypid;
-	upper.inclusive = true;
-	upper.infinite	= false;
-	upper.lower		= false;
-	upper.val		= val;
+	range_deserialize(r1, &lower1, &upper1, &empty1);
 
-	r2 = DatumGetRangeType(make_range(&lower, &upper, false));
+	lower2.rngtypid	 = lower1.rngtypid;
+	lower2.inclusive = true;
+	lower2.infinite	 = false;
+	lower2.lower	 = true;
+	lower2.val		 = val;
+
+	upper2.rngtypid	 = lower1.rngtypid;
+	upper2.inclusive = true;
+	upper2.infinite	 = false;
+	upper2.lower	 = false;
+	upper2.val		 = val;
+
+	r2 = DatumGetRangeType(make_range(&lower2, &upper2, false));
 
 	PG_RETURN_BOOL(range_contains_internal(r1, r2));
 }
