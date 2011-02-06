@@ -158,23 +158,27 @@ range_gist_penalty(PG_FUNCTION_ARGS)
 		length1 = 0.0;
 	else if (lower1.infinite || upper1.infinite)
 		length1 = 1.0/0.0;
-	else
+	else if (OidIsValid(subtype_float))
 	{
 		double l = DatumGetFloat8(OidFunctionCall1(subtype_float, lower1.val));
 		double u = DatumGetFloat8(OidFunctionCall1(subtype_float, upper1.val));
 		length1 = u - l;
 	}
+	else
+		length1 = 1.0;
 
 	if (empty2)
 		length2 = 0.0;
 	else if (lower2.infinite || upper2.infinite)
 		length2 = 1.0/0.0;
-	else
+	else if (OidIsValid(subtype_float))
 	{
 		double l = DatumGetFloat8(OidFunctionCall1(subtype_float, lower2.val));
 		double u = DatumGetFloat8(OidFunctionCall1(subtype_float, upper2.val));
 		length2 = u - l;
 	}
+	else
+		length2 = 1.0;
 
 	*penalty = (float) (length2 - length1);
 	PG_RETURN_POINTER(penalty);
