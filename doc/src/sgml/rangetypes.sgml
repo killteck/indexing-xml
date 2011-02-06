@@ -109,6 +109,11 @@ SELECT range(1, 5)? ;
   represented by "<literal>]</literal>", while an exclusive upper bound
   is represented by "<literal>)</literal>".
   </para>
+  <para>
+  Functions <literal>lower_inc</literal>
+  and <literal>upper_inc</literal> test the inclusivity of the lower
+  and upper bounds of a range, respectively.
+  </para>
  </sect2>
 
  <sect2 id="rangetypes-infinite">
@@ -121,17 +126,74 @@ SELECT range(1, 5)? ;
   bound are included in the range. If both lower and upper bounds are
   infinite, all points are considered to be in the range.
   </para>
+  <para>
+  Functions <literal>lower_inf</literal>
+  and <literal>upper_inf</literal> test the range for infinite lower
+  and upper bounds of a range, respectively.
+  </para>
  </sect2>
 
  <sect2 id="rangetypes-io">
   <title>Input/Output</title>
   <para>
+  The input follows one of the following patterns:
+<synopsis>
+( <replaceable>lower-bound</replaceable> , <replaceable>upper-bound</replaceable> )
+( <replaceable>lower-bound</replaceable> , <replaceable>upper-bound</replaceable> ]
+[ <replaceable>lower-bound</replaceable> , <replaceable>upper-bound</replaceable> )
+[ <replaceable>lower-bound</replaceable> , <replaceable>upper-bound</replaceable> ]
+-
+</synopsis>
+  Notice that the final pattern is a "<literal>-</literal>", which
+  represents an empty range (a range that contains no points).
+  </para>
+  <para>
+  The <replaceable>lower-bound</replaceable> may be either a string
+  that is valid input for the sub-type, or <literal>-INF</literal>;
+  and <replaceable>upper-bound</replaceable> may be either a string
+  that is valid input for the sub-type, or <literal>INF</literal>.
+  </para>
+  <para>
+  Either the <replaceable>lower-bound</replaceable> or
+  the <replaceable>upper-bound</replaceable> may be quoted
+  using <literal>"..."</literal> (double quotation), which will
+  preserve internal whitespace and special characters such as
+  "<literal>,</literal>". Within quotation marks,
+  "<literal>\</literal>" (backslash) serves as an escape character.
+  </para>
+  <para>
+  The choice between the other input formats affects the inclusivity
+  of the bounds. See <xref linkend="rangetypes-inclusivity">.
   </para>
  </sect2>
 
  <sect2 id="rangetypes-construct">
   <title>Constructing Ranges</title>
   <para>
+   Some examples of constructing ranges from existing values:
+<programlisting>
+SELECT range_i(1.0, 14.0);
+
+-- the int4range result will appear in the canonical format
+SELECT range_i(1, 14);
+
+SELECT range_uinfi(11.1);
+
+SELECT range_linf_(2.2);
+</programlisting>
+  </para>
+  <para>
+  The function names follow a pattern at the end where
+  "<literal>_</literal>" is used to mean "exclusive" and
+  "<literal></literal>" is used to mean "inclusive". Where two appear
+  together, the first is used to mean the lower bound, and the second
+  is used to mean the upper bound. The
+  function <literal>range</literal> assumes an inclusive lower bound
+  and an exclusive upper bound; and is an alias
+  for <literal>rangei_</literal>.
+  </para>
+  <para>
+  For a complete set of constructors, see <xref linkend="range-functions-table">.
   </para>
  </sect2>
 
@@ -175,7 +237,7 @@ SELECT '[1.234, 5.678]'::floatrange;
 </programlisting>
   Because <type>DOUBLE PRECISION</type> has no meaningful "step", we
   do not define a <literal>canonical</literal>
-  function. See <xref linkend="SQL-CREATETYPE-RANGE"> for more
+  function. See <xref linkend="SQL-CREATETYPE"> for more
   information.
   </para>
  </sect2>
