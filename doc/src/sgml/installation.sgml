@@ -1,4 +1,10 @@
 <!-- doc/src/sgml/installation.sgml -->
+<!--
+
+Use </link> not just </> so INSTALL.html can be created without links
+to the main documentation.  Don't use <xref>.
+
+-->
 
 <chapter id="installation">
  <title><![%standalone-include[<productname>PostgreSQL</>]]>
@@ -1467,8 +1473,10 @@ PostgreSQL, contrib and HTML documentation successfully made. Ready to install.
 
    <note>
     <para>
-     If you are upgrading an existing system be sure to read <xref
-     linkend="upgrading"> which has instructions about upgrading a
+     If you are upgrading an existing system be sure to read
+     <![%standalone-include[the documentation,]]>
+     <![%standalone-ignore[<xref linkend="upgrading">]]>
+     which has instructions about upgrading a
      cluster.
     </para>
    </note>

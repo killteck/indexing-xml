@@ -36,7 +36,7 @@ extern bool pg_set_block(pgsocket sock);
 
 extern char *first_dir_separator(const char *filename);
 extern char *last_dir_separator(const char *filename);
-extern char *first_path_separator(const char *pathlist);
+extern char *first_path_var_separator(const char *pathlist);
 extern void join_path_components(char *ret_path,
 					 const char *head, const char *tail);
 extern void canonicalize_path(char *path);
@@ -68,17 +68,27 @@ extern void pgfnames_cleanup(char **filenames);
  *	By making this a macro we avoid needing to include path.c in libpq.
  */
 #ifndef WIN32
+#define IS_DIR_SEP(ch)	((ch) == '/')
+
 #define is_absolute_path(filename) \
 ( \
-	((filename)[0] == '/') \
+	IS_DIR_SEP((filename)[0]) \
 )
 #else
+#define IS_DIR_SEP(ch)	((ch) == '/' || (ch) == '\\')
+
+/*
+ * On Win32, a drive letter _not_ followed by a slash, e.g. 'E:abc', is
+ * relative to the cwd on that drive, or the drive's root directory
+ * if that drive has no cwd.  Because the path itself cannot tell us
+ * which is the case, we have to assume the worst, i.e. that it is not
+ * absolute;  this check is done by IS_DIR_SEP(filename[2]).
+ */
 #define is_absolute_path(filename) \
 ( \
-	((filename)[0] == '/') || \
-	(filename)[0] == '\\' || \
+	IS_DIR_SEP((filename)[0]) || \
 	(isalpha((unsigned char) ((filename)[0])) && (filename)[1] == ':' && \
-	((filename)[2] == '\\' || (filename)[2] == '/')) \
+	 IS_DIR_SEP((filename)[2])) \
 )
 #endif
 

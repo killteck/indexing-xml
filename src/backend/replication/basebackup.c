@@ -52,6 +52,7 @@ static void SendBackupHeader(List *tablespaces);
 static void base_backup_cleanup(int code, Datum arg);
 static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir);
 static void parse_basebackup_options(List *options, basebackup_options *opt);
+static void SendXlogRecPtrResult(XLogRecPtr ptr);
 
 /*
  * Size of each block sent into the tar stream for larger files.
@@ -92,6 +93,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 	char	   *labelfile;
 
 	startptr = do_pg_start_backup(opt->label, opt->fastcheckpoint, &labelfile);
+	SendXlogRecPtrResult(startptr);
 
 	PG_ENSURE_ERROR_CLEANUP(base_backup_cleanup, (Datum) 0);
 	{
@@ -215,6 +217,12 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 				ptr.xlogid = logid;
 				ptr.xrecoff = logseg * XLogSegSize + TAR_SEND_SIZE * i;
 
+				/*
+				 *	Some old compilers, e.g. 2.95.3/x86, think that passing
+				 *	a struct in the same function as a longjump might clobber
+				 *	a variable.  bjm 2011-02-04
+				 *	http://lists.apple.com/archives/xcode-users/2003/Dec//msg00051.html
+				 */
 				XLogRead(buf, ptr, TAR_SEND_SIZE);
 				if (pq_putmessage('d', buf, TAR_SEND_SIZE))
 					ereport(ERROR,
@@ -239,6 +247,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 		/* Send CopyDone message for the last tar file */
 		pq_putemptymessage('c');
 	}
+	SendXlogRecPtrResult(endptr);
 }
 
 /*
@@ -426,6 +435,42 @@ SendBackupHeader(List *tablespaces)
 
 		pq_endmessage(&buf);
 	}
+
+	/* Send a CommandComplete message */
+	pq_puttextmessage('C', "SELECT");
+}
+
+/*
+ * Send a single resultset containing just a single
+ * XlogRecPtr record (in text format)
+ */
+static void
+SendXlogRecPtrResult(XLogRecPtr ptr)
+{
+	StringInfoData buf;
+	char		str[MAXFNAMELEN];
+
+	snprintf(str, sizeof(str), "%X/%X", ptr.xlogid, ptr.xrecoff);
+
+	pq_beginmessage(&buf, 'T'); /* RowDescription */
+	pq_sendint(&buf, 1, 2);		/* 1 field */
+
+	/* Field header */
+	pq_sendstring(&buf, "recptr");
+	pq_sendint(&buf, 0, 4);		/* table oid */
+	pq_sendint(&buf, 0, 2);		/* attnum */
+	pq_sendint(&buf, TEXTOID, 4);		/* type oid */
+	pq_sendint(&buf, -1, 2);
+	pq_sendint(&buf, 0, 4);
+	pq_sendint(&buf, 0, 2);
+	pq_endmessage(&buf);
+
+	/* Data row */
+	pq_beginmessage(&buf, 'D');
+	pq_sendint(&buf, 1, 2);		/* number of columns */
+	pq_sendint(&buf, strlen(str), 4);	/* length */
+	pq_sendbytes(&buf, str, strlen(str));
+	pq_endmessage(&buf);
 
 	/* Send a CommandComplete message */
 	pq_puttextmessage('C', "SELECT");
