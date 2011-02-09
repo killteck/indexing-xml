@@ -174,7 +174,7 @@ SELECT range(1, 5)? ;
 <programlisting>
 SELECT range_i(1.0, 14.0);
 
--- the int4range result will appear in the canonical format
+-- the int4range result will appear in the canonical form; see <xref linkend="rangetypes-discrete">
 SELECT range_i(1, 14);
 
 SELECT range_uinfi(11.1);
@@ -183,11 +183,11 @@ SELECT range_linf_(2.2);
 </programlisting>
   </para>
   <para>
-  The function names follow a pattern at the end where
+  The function names follow a pattern where the suffix
   "<literal>_</literal>" is used to mean "exclusive" and
-  "<literal></literal>" is used to mean "inclusive". Where two appear
-  together, the first is used to mean the lower bound, and the second
-  is used to mean the upper bound. The
+  "<literal>i</literal>" is used to mean "inclusive". In the case of a
+  two-character suffix, the first character refers to the lower bound,
+  and the second refers to the upper bound. The
   function <literal>range</literal> assumes an inclusive lower bound
   and an exclusive upper bound; and is an alias
   for <literal>rangei_</literal>.
