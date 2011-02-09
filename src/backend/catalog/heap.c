@@ -542,6 +542,7 @@ InsertPgAttributeTuple(Relation pg_attribute_rel,
 	values[Anum_pg_attribute_attisdropped - 1] = BoolGetDatum(new_attribute->attisdropped);
 	values[Anum_pg_attribute_attislocal - 1] = BoolGetDatum(new_attribute->attislocal);
 	values[Anum_pg_attribute_attinhcount - 1] = Int32GetDatum(new_attribute->attinhcount);
+	values[Anum_pg_attribute_attcollation - 1] = ObjectIdGetDatum(new_attribute->attcollation);
 
 	/* start out with empty permissions and empty options */
 	nulls[Anum_pg_attribute_attacl - 1] = true;
@@ -859,7 +860,8 @@ AddNewRelationType(const char *typeName,
 				   'x',			/* fully TOASTable */
 				   -1,			/* typmod */
 				   0,			/* array dimensions for typBaseType */
-				   false);		/* Type NOT NULL */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);	/* typcollation */
 }
 
 /* --------------------------------
@@ -1120,7 +1122,8 @@ heap_create_with_catalog(const char *relname,
 				   'x',			/* fully TOASTable */
 				   -1,			/* typmod */
 				   0,			/* array dimensions for typBaseType */
-				   false);		/* Type NOT NULL */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);	/* typcollation */
 
 		pfree(relarrayname);
 	}
@@ -1157,7 +1160,8 @@ heap_create_with_catalog(const char *relname,
 	 * entry, so we needn't record them here.  Likewise, TOAST tables don't
 	 * need a namespace dependency (they live in a pinned namespace) nor an
 	 * owner dependency (they depend indirectly through the parent table), nor
-	 * should they have any ACL entries.
+	 * should they have any ACL entries.  The same applies for extension
+	 * dependencies.
 	 *
 	 * Also, skip this in bootstrap mode, since we don't make dependencies
 	 * while bootstrapping.
@@ -1178,6 +1182,8 @@ heap_create_with_catalog(const char *relname,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
 		recordDependencyOnOwner(RelationRelationId, relid, ownerid);
+
+		recordDependencyOnCurrentExtension(&myself);
 
 		if (reloftypeid)
 		{
@@ -1837,6 +1843,7 @@ StoreRelCheck(Relation rel, char *ccname, Node *expr,
 						  CONSTRAINT_CHECK,		/* Constraint Type */
 						  false,	/* Is Deferrable */
 						  false,	/* Is Deferred */
+						  true,		/* Is Validated */
 						  RelationGetRelid(rel),		/* relation */
 						  attNos,		/* attrs in the constraint */
 						  keycount,		/* # attrs in the constraint */

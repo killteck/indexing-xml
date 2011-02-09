@@ -340,7 +340,7 @@ SPI_execute("INSERT INTO foo SELECT * FROM bar", false, 5);
    <function>SPI_execute</function> increments the command
    counter and computes a new <firstterm>snapshot</> before executing each
    command in the string.  The snapshot does not actually change if the
-   current transaction isolation level is <literal>SERIALIZABLE</>, but in
+   current transaction isolation level is <literal>SERIALIZABLE</> or <literal>REPEATABLE READ</>, but in
    <literal>READ COMMITTED</> mode the snapshot update allows each command to
    see the results of newly committed transactions from other sessions.
    This is essential for consistent behavior when the commands are modifying
@@ -1199,7 +1199,7 @@ int SPI_getargcount(SPIPlanPtr <parameter>plan</parameter>)
     The count of expected arguments for the <parameter>plan</parameter>.
     If the <parameter>plan</parameter> is <symbol>NULL</symbol> or invalid,
     <varname>SPI_result</varname> is set to <symbol>SPI_ERROR_ARGUMENT</symbol>
-    and <literal>-1</literal> is returned.
+    and -1 is returned.
   </para>
  </refsect1>
 </refentry>

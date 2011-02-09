@@ -1913,7 +1913,16 @@ LOG:  database system is ready to accept read only connections
      advised to select a larger value of <varname>max_locks_per_transaction</>,
      perhaps as much as twice the value of the parameter on
      the primary server. You need not consider this at all if
-     your setting of <varname>max_prepared_transactions</> is <literal>0</>.
+     your setting of <varname>max_prepared_transactions</> is 0.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     The Serializable transaction isolation level is not yet available in hot
+     standby.  (See <xref linkend="xact-serializable"> and
+     <xref linkend="serializable-consistency"> for details.)
+     An attempt to set a transaction to the serializable isolation level in
+     hot standby mode will generate an error.
     </para>
    </listitem>
   </itemizedlist>

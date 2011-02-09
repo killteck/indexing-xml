@@ -182,17 +182,20 @@ static char *recoveryEndCommand = NULL;
 static char *archiveCleanupCommand = NULL;
 static RecoveryTargetType recoveryTarget = RECOVERY_TARGET_UNSET;
 static bool recoveryTargetInclusive = true;
+static bool recoveryPauseAtTarget = true;
 static TransactionId recoveryTargetXid;
 static TimestampTz recoveryTargetTime;
+static char *recoveryTargetName;
 
 /* options taken from recovery.conf for XLOG streaming */
 static bool StandbyMode = false;
 static char *PrimaryConnInfo = NULL;
 static char *TriggerFile = NULL;
 
-/* if recoveryStopsHere returns true, it saves actual stop xid/time here */
+/* if recoveryStopsHere returns true, it saves actual stop xid/time/name here */
 static TransactionId recoveryStopXid;
 static TimestampTz recoveryStopTime;
+static char recoveryStopName[MAXFNAMELEN];
 static bool recoveryStopAfter;
 
 /*
@@ -423,6 +426,8 @@ typedef struct XLogCtlData
 	XLogRecPtr	recoveryLastRecPtr;
 	/* timestamp of last COMMIT/ABORT record replayed (or being replayed) */
 	TimestampTz recoveryLastXTime;
+	/* Are we requested to pause recovery? */
+	bool		recoveryPause;
 
 	slock_t		info_lck;		/* locks shared variables shown above */
 } XLogCtlData;
@@ -548,6 +553,13 @@ typedef struct xl_parameter_change
 	int			wal_level;
 } xl_parameter_change;
 
+/* logs restore point */
+typedef struct xl_restore_point
+{
+	TimestampTz	rp_time;
+	char		rp_name[MAXFNAMELEN];
+} xl_restore_point;
+
 /*
  * Flags set by interrupt handlers for later service in the redo loop.
  */
@@ -570,6 +582,9 @@ static void readRecoveryCommandFile(void);
 static void exitArchiveRecovery(TimeLineID endTLI,
 					uint32 endLogId, uint32 endLogSeg);
 static bool recoveryStopsHere(XLogRecord *record, bool *includeThis);
+static void recoveryPausesHere(void);
+static bool RecoveryIsPaused(void);
+static void SetRecoveryPause(bool recoveryPause);
 static void SetLatestXTime(TimestampTz xtime);
 static TimestampTz GetLatestXTime(void);
 static void CheckRequiredParameterValues(void);
@@ -4385,6 +4400,13 @@ writeTimeLineHistory(TimeLineID newTLI, TimeLineID parentTLI,
 				 xlogfname,
 				 recoveryStopAfter ? "after" : "before",
 				 timestamptz_to_str(recoveryStopTime));
+	else if (recoveryTarget == RECOVERY_TARGET_NAME)
+		snprintf(buffer, sizeof(buffer),
+				"%s%u\t%s\tat restore point \"%s\"\n",
+				 (srcfd < 0) ? "" : "\n",
+				 parentTLI,
+				 xlogfname,
+				 recoveryStopName);
 	else
 		snprintf(buffer, sizeof(buffer),
 				 "%s%u\t%s\tno recovery target specified\n",
@@ -5126,6 +5148,15 @@ readRecoveryCommandFile(void)
 					(errmsg("archive_cleanup_command = '%s'",
 							archiveCleanupCommand)));
 		}
+		else if (strcmp(item->name, "pause_at_recovery_target") == 0)
+		{
+			if (!parse_bool(item->value, &recoveryPauseAtTarget))
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("parameter \"%s\" requires a Boolean value", "pause_at_recovery_target")));
+			ereport(DEBUG2,
+					(errmsg("pause_at_recovery_target = '%s'", item->value)));
+		}
 		else if (strcmp(item->name, "recovery_target_timeline") == 0)
 		{
 			rtliGiven = true;
@@ -5163,10 +5194,11 @@ readRecoveryCommandFile(void)
 		else if (strcmp(item->name, "recovery_target_time") == 0)
 		{
 			/*
-			 * if recovery_target_xid specified, then this overrides
-			 * recovery_target_time
+			 * if recovery_target_xid or recovery_target_name specified, then
+			 * this overrides recovery_target_time
 			 */
-			if (recoveryTarget == RECOVERY_TARGET_XID)
+			if (recoveryTarget == RECOVERY_TARGET_XID ||
+					recoveryTarget == RECOVERY_TARGET_NAME)
 				continue;
 			recoveryTarget = RECOVERY_TARGET_TIME;
 
@@ -5181,6 +5213,26 @@ readRecoveryCommandFile(void)
 			ereport(DEBUG2,
 					(errmsg("recovery_target_time = '%s'",
 							timestamptz_to_str(recoveryTargetTime))));
+		}
+		else if (strcmp(item->name, "recovery_target_name") == 0)
+		{
+			/*
+			 * if recovery_target_xid specified, then this overrides
+			 * recovery_target_name
+			 */
+			if (recoveryTarget == RECOVERY_TARGET_XID)
+				continue;
+			recoveryTarget = RECOVERY_TARGET_NAME;
+
+			recoveryTargetName = pstrdup(item->value);
+			if (strlen(recoveryTargetName) >= MAXFNAMELEN)
+				ereport(FATAL,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("recovery_target_name is too long")));
+
+			ereport(DEBUG2,
+					(errmsg("recovery_target_name = '%s'",
+							recoveryTargetName)));
 		}
 		else if (strcmp(item->name, "recovery_target_inclusive") == 0)
 		{
@@ -5396,8 +5448,8 @@ exitArchiveRecovery(TimeLineID endTLI, uint32 endLogId, uint32 endLogSeg)
  * Returns TRUE if we are stopping, FALSE otherwise.  On TRUE return,
  * *includeThis is set TRUE if we should apply this record before stopping.
  *
- * We also track the timestamp of the latest applied COMMIT/ABORT record
- * in XLogCtl->recoveryLastXTime, for logging purposes.
+ * We also track the timestamp of the latest applied COMMIT/ABORT/RESTORE POINT
+ * record in XLogCtl->recoveryLastXTime, for logging purposes.
  * Also, some information is saved in recoveryStopXid et al for use in
  * annotating the new timeline's history file.
  */
@@ -5407,9 +5459,10 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 	bool		stopsHere;
 	uint8		record_info;
 	TimestampTz recordXtime;
+	char		recordRPName[MAXFNAMELEN];
 
-	/* We only consider stopping at COMMIT or ABORT records */
-	if (record->xl_rmid != RM_XACT_ID)
+	/* We only consider stopping at COMMIT, ABORT or RESTORE POINT records */
+	if (record->xl_rmid != RM_XACT_ID && record->xl_rmid != RM_XLOG_ID)
 		return false;
 	record_info = record->xl_info & ~XLR_INFO_MASK;
 	if (record_info == XLOG_XACT_COMMIT)
@@ -5425,6 +5478,14 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 
 		recordXactAbortData = (xl_xact_abort *) XLogRecGetData(record);
 		recordXtime = recordXactAbortData->xact_time;
+	}
+	else if (record_info == XLOG_RESTORE_POINT)
+	{
+		xl_restore_point *recordRestorePointData;
+
+		recordRestorePointData = (xl_restore_point *) XLogRecGetData(record);
+		recordXtime = recordRestorePointData->rp_time;
+		strncpy(recordRPName, recordRestorePointData->rp_name, MAXFNAMELEN);
 	}
 	else
 		return false;
@@ -5450,6 +5511,20 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 		stopsHere = (record->xl_xid == recoveryTargetXid);
 		if (stopsHere)
 			*includeThis = recoveryTargetInclusive;
+	}
+	else if (recoveryTarget == RECOVERY_TARGET_NAME)
+	{
+		/*
+		 * there can be many restore points that share the same name, so we stop
+		 * at the first one
+		 */
+		stopsHere = (strcmp(recordRPName, recoveryTargetName) == 0);
+
+		/*
+		 * ignore recoveryTargetInclusive because this is not a transaction
+		 * record
+		 */
+		*includeThis = false;
 	}
 	else
 	{
@@ -5485,7 +5560,7 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 								recoveryStopXid,
 								timestamptz_to_str(recoveryStopTime))));
 		}
-		else
+		else if (record_info == XLOG_XACT_ABORT)
 		{
 			if (recoveryStopAfter)
 				ereport(LOG,
@@ -5498,6 +5573,15 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 								recoveryStopXid,
 								timestamptz_to_str(recoveryStopTime))));
 		}
+		else
+		{
+			strncpy(recoveryStopName, recordRPName, MAXFNAMELEN);
+
+			ereport(LOG,
+					(errmsg("recovery stopping at restore point \"%s\", time %s",
+								recoveryStopName,
+								timestamptz_to_str(recoveryStopTime))));
+		}
 
 		if (recoveryStopAfter)
 			SetLatestXTime(recordXtime);
@@ -5506,6 +5590,110 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 		SetLatestXTime(recordXtime);
 
 	return stopsHere;
+}
+
+/*
+ * Recheck shared recoveryPause by polling.
+ *
+ * XXX Can also be done with shared latch.
+ */
+static void
+recoveryPausesHere(void)
+{
+	while (RecoveryIsPaused());
+	{
+		pg_usleep(1000000L);		/* 1000 ms */
+		HandleStartupProcInterrupts();
+	};
+}
+
+static bool
+RecoveryIsPaused(void)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+	bool recoveryPause;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	recoveryPause = xlogctl->recoveryPause;
+	SpinLockRelease(&xlogctl->info_lck);
+
+	return recoveryPause;
+}
+
+static void
+SetRecoveryPause(bool recoveryPause)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	xlogctl->recoveryPause = recoveryPause;
+	SpinLockRelease(&xlogctl->info_lck);
+}
+
+/*
+ * pg_xlog_replay_pause - pause recovery now
+ */
+Datum
+pg_xlog_replay_pause(PG_FUNCTION_ARGS)
+{
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+			 (errmsg("must be superuser to control recovery"))));
+
+	if (!RecoveryInProgress())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("recovery is not in progress"),
+				 errhint("Recovery control functions can only be executed during recovery.")));
+
+	SetRecoveryPause(true);
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * pg_xlog_replay_resume - resume recovery now
+ */
+Datum
+pg_xlog_replay_resume(PG_FUNCTION_ARGS)
+{
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+			 (errmsg("must be superuser to control recovery"))));
+
+	if (!RecoveryInProgress())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("recovery is not in progress"),
+				 errhint("Recovery control functions can only be executed during recovery.")));
+
+	SetRecoveryPause(false);
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * pg_is_xlog_replay_paused
+ */
+Datum
+pg_is_xlog_replay_paused(PG_FUNCTION_ARGS)
+{
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+			 (errmsg("must be superuser to control recovery"))));
+
+	if (!RecoveryInProgress())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("recovery is not in progress"),
+				 errhint("Recovery control functions can only be executed during recovery.")));
+
+	PG_RETURN_BOOL(RecoveryIsPaused());
 }
 
 /*
@@ -5781,6 +5969,10 @@ StartupXLOG(void)
 			ereport(LOG,
 					(errmsg("starting point-in-time recovery to %s",
 							timestamptz_to_str(recoveryTargetTime))));
+		else if (recoveryTarget == RECOVERY_TARGET_NAME)
+			ereport(LOG,
+					(errmsg("starting point-in-time recovery to \"%s\"",
+							recoveryTargetName)));
 		else
 			ereport(LOG,
 					(errmsg("starting archive recovery")));
@@ -6074,6 +6266,13 @@ StartupXLOG(void)
 				StandbyRecoverPreparedTransactions(false);
 			}
 		}
+		else
+		{
+			/*
+			 * Must not pause unless we are going to enter Hot Standby.
+			 */
+			recoveryPauseAtTarget = false;
+		}
 
 		/* Initialize resource managers */
 		for (rmid = 0; rmid <= RM_MAX_ID; rmid++)
@@ -6098,6 +6297,7 @@ StartupXLOG(void)
 		xlogctl->replayEndRecPtr = ReadRecPtr;
 		xlogctl->recoveryLastRecPtr = ReadRecPtr;
 		xlogctl->recoveryLastXTime = 0;
+		xlogctl->recoveryPause = false;
 		SpinLockRelease(&xlogctl->info_lck);
 
 		/* Also ensure XLogReceiptTime has a sane value */
@@ -6146,6 +6346,7 @@ StartupXLOG(void)
 		{
 			bool		recoveryContinue = true;
 			bool		recoveryApply = true;
+			bool		recoveryPause = false;
 			ErrorContextCallback errcontext;
 			TimestampTz xtime;
 
@@ -6192,6 +6393,11 @@ StartupXLOG(void)
 				 */
 				if (recoveryStopsHere(record, &recoveryApply))
 				{
+					if (recoveryPauseAtTarget)
+					{
+						SetRecoveryPause(true);
+						recoveryPausesHere();
+					}
 					reachedStopPoint = true;	/* see below */
 					recoveryContinue = false;
 					if (!recoveryApply)
@@ -6218,7 +6424,11 @@ StartupXLOG(void)
 				 */
 				SpinLockAcquire(&xlogctl->info_lck);
 				xlogctl->replayEndRecPtr = EndRecPtr;
+				recoveryPause = xlogctl->recoveryPause;
 				SpinLockRelease(&xlogctl->info_lck);
+
+				if (recoveryPause)
+					recoveryPausesHere();
 
 				/*
 				 * If we are attempting to enter Hot Standby mode, process
@@ -7853,6 +8063,29 @@ RequestXLogSwitch(void)
 }
 
 /*
+ * Write a RESTORE POINT record
+ */
+XLogRecPtr
+XLogRestorePoint(const char *rpName)
+{
+	XLogRecPtr				RecPtr;
+	XLogRecData				rdata;
+	xl_restore_point		xlrec;
+
+	xlrec.rp_time = GetCurrentTimestamp();
+	strncpy(xlrec.rp_name, rpName, MAXFNAMELEN);
+
+	rdata.buffer = InvalidBuffer;
+	rdata.data = (char *) &xlrec;
+	rdata.len = sizeof(xl_restore_point);
+	rdata.next = NULL;
+
+	RecPtr = XLogInsert(RM_XLOG_ID, XLOG_RESTORE_POINT, &rdata);
+
+	return RecPtr;
+}
+
+/*
  * Check if any of the GUC parameters that are critical for hot standby
  * have changed, and update the value in pg_control file if necessary.
  */
@@ -8044,6 +8277,10 @@ xlog_redo(XLogRecPtr lsn, XLogRecord *record)
 	{
 		/* nothing to do here */
 	}
+	else if (info == XLOG_RESTORE_POINT)
+	{
+		/* nothing to do here */
+	}
 	else if (info == XLOG_BACKUP_END)
 	{
 		XLogRecPtr	startpoint;
@@ -8145,6 +8382,13 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 	else if (info == XLOG_SWITCH)
 	{
 		appendStringInfo(buf, "xlog switch");
+	}
+	else if (info == XLOG_RESTORE_POINT)
+	{
+		xl_restore_point *xlrec = (xl_restore_point *) rec;
+
+		appendStringInfo(buf, "restore point: %s", xlrec->rp_name);
+
 	}
 	else if (info == XLOG_BACKUP_END)
 	{
@@ -8944,6 +9188,51 @@ pg_switch_xlog(PG_FUNCTION_ARGS)
 }
 
 /*
+ * pg_create_restore_point: a named point for restore
+ */
+Datum
+pg_create_restore_point(PG_FUNCTION_ARGS)
+{
+	text		*restore_name = PG_GETARG_TEXT_P(0);
+	char		*restore_name_str;
+	XLogRecPtr	restorepoint;
+	char		location[MAXFNAMELEN];
+
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 (errmsg("must be superuser to create a restore point"))));
+
+	if (RecoveryInProgress())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 (errmsg("recovery is in progress"),
+				  errhint("WAL control functions cannot be executed during recovery."))));
+
+	if (!XLogIsNeeded())
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+			  errmsg("WAL level not sufficient for creating a restore point"),
+				 errhint("wal_level must be set to \"archive\" or \"hot_standby\" at server start.")));
+
+	restore_name_str = text_to_cstring(restore_name);
+
+	if (strlen(restore_name_str) >= MAXFNAMELEN)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("value too long for restore point")));
+
+	restorepoint = XLogRestorePoint(restore_name_str);
+
+	/*
+	 * As a convenience, return the WAL location of the restore point record
+	 */
+	snprintf(location, sizeof(location), "%X/%X",
+			restorepoint.xlogid, restorepoint.xrecoff);
+	PG_RETURN_TEXT_P(cstring_to_text(location));
+}
+
+/*
  * Report the current WAL write location (same format as pg_start_backup etc)
  *
  * This is useful for determining how much of WAL is visible to an external
@@ -9619,7 +9908,7 @@ retry:
 					 * five seconds like in the WAL file polling case below.
 					 */
 					if (CheckForStandbyTrigger())
-						goto triggered;
+						goto retry;
 
 					/*
 					 * Wait for more WAL to arrive, or timeout to be reached
@@ -9886,6 +10175,10 @@ static bool
 CheckForStandbyTrigger(void)
 {
 	struct stat stat_buf;
+	static bool	triggered = false;
+
+	if (triggered)
+		return true;
 
 	if (TriggerFile == NULL)
 		return false;
@@ -9896,6 +10189,7 @@ CheckForStandbyTrigger(void)
 				(errmsg("trigger file found: %s", TriggerFile)));
 		ShutdownWalRcv();
 		unlink(TriggerFile);
+		triggered = true;
 		return true;
 	}
 	return false;

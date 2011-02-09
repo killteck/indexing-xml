@@ -14,6 +14,7 @@
 
 #include "postgres.h"
 
+#include "catalog/pg_collation.h"
 #include "commands/defrem.h"
 #include "tsearch/ts_locale.h"
 #include "tsearch/ts_public.h"
@@ -47,7 +48,7 @@
 #define HWORD			17
 #define URLPATH			18
 #define FILEPATH		19
-#define DECIMAL			20
+#define DECIMAL_T		20
 #define SIGNEDINT		21
 #define UNSIGNEDINT		22
 #define XMLENTITY		23
@@ -286,6 +287,7 @@ static TParser *
 TParserInit(char *str, int len)
 {
 	TParser    *prs = (TParser *) palloc0(sizeof(TParser));
+	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
 
 	prs->charmaxlen = pg_database_encoding_max_length();
 	prs->str = str;
@@ -299,7 +301,7 @@ TParserInit(char *str, int len)
 	if (prs->charmaxlen > 1)
 	{
 		prs->usewide = true;
-		if ( lc_ctype_is_c() )
+		if ( lc_ctype_is_c(collation) )
 		{
 			/*
 			 * char2wchar doesn't work for C-locale and
@@ -311,7 +313,7 @@ TParserInit(char *str, int len)
 		else
 		{
 			prs->wstr = (wchar_t *) palloc(sizeof(wchar_t) * (prs->lenstr + 1));
-			char2wchar(prs->wstr, prs->lenstr + 1, prs->str, prs->lenstr);
+			char2wchar(prs->wstr, prs->lenstr + 1, prs->str, prs->lenstr, collation);
 		}
 	}
 	else
@@ -1150,12 +1152,12 @@ static const TParserStateActionItem actionTPS_InUDecimalFirst[] = {
 };
 
 static const TParserStateActionItem actionTPS_InUDecimal[] = {
-	{p_isEOF, 0, A_BINGO, TPS_Base, DECIMAL, NULL},
+	{p_isEOF, 0, A_BINGO, TPS_Base, DECIMAL_T, NULL},
 	{p_isdigit, 0, A_NEXT, TPS_InUDecimal, 0, NULL},
 	{p_iseqC, '.', A_PUSH, TPS_InVersionFirst, 0, NULL},
 	{p_iseqC, 'e', A_PUSH, TPS_InMantissaFirst, 0, NULL},
 	{p_iseqC, 'E', A_PUSH, TPS_InMantissaFirst, 0, NULL},
-	{NULL, 0, A_BINGO, TPS_Base, DECIMAL, NULL}
+	{NULL, 0, A_BINGO, TPS_Base, DECIMAL_T, NULL}
 };
 
 static const TParserStateActionItem actionTPS_InDecimalFirst[] = {
@@ -1165,12 +1167,12 @@ static const TParserStateActionItem actionTPS_InDecimalFirst[] = {
 };
 
 static const TParserStateActionItem actionTPS_InDecimal[] = {
-	{p_isEOF, 0, A_BINGO, TPS_Base, DECIMAL, NULL},
+	{p_isEOF, 0, A_BINGO, TPS_Base, DECIMAL_T, NULL},
 	{p_isdigit, 0, A_NEXT, TPS_InDecimal, 0, NULL},
 	{p_iseqC, '.', A_PUSH, TPS_InVerVersion, 0, NULL},
 	{p_iseqC, 'e', A_PUSH, TPS_InMantissaFirst, 0, NULL},
 	{p_iseqC, 'E', A_PUSH, TPS_InMantissaFirst, 0, NULL},
-	{NULL, 0, A_BINGO, TPS_Base, DECIMAL, NULL}
+	{NULL, 0, A_BINGO, TPS_Base, DECIMAL_T, NULL}
 };
 
 static const TParserStateActionItem actionTPS_InVerVersion[] = {
@@ -2006,7 +2008,7 @@ prsd_end(PG_FUNCTION_ARGS)
 #define HLIDSKIP(x)     ( (x)==URL_T || (x)==NUMHWORD || (x)==ASCIIHWORD || (x)==HWORD )
 #define XMLHLIDSKIP(x)  ( (x)==URL_T || (x)==NUMHWORD || (x)==ASCIIHWORD || (x)==HWORD )
 #define NONWORDTOKEN(x) ( (x)==SPACE || HLIDREPLACE(x) || HLIDSKIP(x) )
-#define NOENDTOKEN(x)	( NONWORDTOKEN(x) || (x)==SCIENTIFIC || (x)==VERSIONNUMBER || (x)==DECIMAL || (x)==SIGNEDINT || (x)==UNSIGNEDINT || TS_IDIGNORE(x) )
+#define NOENDTOKEN(x)	( NONWORDTOKEN(x) || (x)==SCIENTIFIC || (x)==VERSIONNUMBER || (x)==DECIMAL_T || (x)==SIGNEDINT || (x)==UNSIGNEDINT || TS_IDIGNORE(x) )
 
 typedef struct
 {

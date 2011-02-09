@@ -191,7 +191,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 		AlterDefaultPrivilegesStmt DefACLAction
 		AnalyzeStmt ClosePortalStmt ClusterStmt CommentStmt
 		ConstraintsSetStmt CopyStmt CreateAsStmt CreateCastStmt
-		CreateDomainStmt CreateGroupStmt CreateOpClassStmt
+		CreateDomainStmt CreateExtensionStmt CreateGroupStmt CreateOpClassStmt
 		CreateOpFamilyStmt AlterOpFamilyStmt CreatePLangStmt
 		CreateSchemaStmt CreateSeqStmt CreateStmt CreateTableSpaceStmt
 		CreateFdwStmt CreateForeignServerStmt CreateForeignTableStmt
@@ -227,9 +227,9 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 %type <dbehavior>	opt_drop_behavior
 
 %type <list>	createdb_opt_list alterdb_opt_list copy_opt_list
-				transaction_mode_list
+				transaction_mode_list create_extension_opt_list
 %type <defelt>	createdb_opt_item alterdb_opt_item copy_opt_item
-				transaction_mode_item
+				transaction_mode_item create_extension_opt_item
 
 %type <ival>	opt_lock lock_type cast_context
 %type <ival>	vacuum_option_list vacuum_option_elem
@@ -261,6 +261,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 
 %type <list>	func_name handler_name qual_Op qual_all_Op subquery_Op
 				opt_class opt_inline_handler opt_validator validator_clause
+				opt_collate
 
 %type <range>	qualified_name OptConstrFromTable
 
@@ -394,7 +395,8 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 %type <list>	copy_generic_opt_list copy_generic_opt_arg_list
 %type <list>	copy_options
 
-%type <typnam>	Typename SimpleTypename ConstTypename
+%type <typnam>	Typename SimpleTypename SimpleTypenameWithoutCollation
+				ConstTypename
 				GenericType Numeric opt_float
 				Character ConstCharacter
 				CharacterWithLength CharacterWithoutLength
@@ -490,7 +492,8 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 	DICTIONARY DISABLE_P DISCARD DISTINCT DO DOCUMENT_P DOMAIN_P DOUBLE_P DROP
 
 	EACH ELSE ENABLE_P ENCODING ENCRYPTED END_P ENUM_P ESCAPE EXCEPT
-	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN EXTERNAL EXTRACT
+	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
+	EXTENSION EXTERNAL EXTRACT
 
 	FALSE_P FAMILY FETCH FIRST_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORWARD
 	FREEZE FROM FULL FUNCTION FUNCTIONS
@@ -546,7 +549,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLISTEN UNLOGGED
 	UNTIL UPDATE USER USING
 
-	VACUUM VALID VALIDATOR VALUE_P VALUES VARCHAR VARIADIC VARYING
+	VACUUM VALID VALIDATE VALIDATOR VALUE_P VALUES VARCHAR VARIADIC VARYING
 	VERBOSE VERSION_P VIEW VOLATILE
 
 	WHEN WHERE WHITESPACE_P WINDOW WITH WITHOUT WORK WRAPPER WRITE
@@ -690,6 +693,7 @@ stmt :
 			| CreateCastStmt
 			| CreateConversionStmt
 			| CreateDomainStmt
+			| CreateExtensionStmt
 			| CreateFdwStmt
 			| CreateForeignServerStmt
 			| CreateForeignTableStmt
@@ -1752,6 +1756,14 @@ alter_table_cmd:
 					n->def = $2;
 					$$ = (Node *)n;
 				}
+			/* ALTER TABLE <name> VALIDATE CONSTRAINT ... */
+			| VALIDATE CONSTRAINT name
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_ValidateConstraint;
+					n->name = $3;
+					$$ = (Node *)n;
+				}
 			/* ALTER TABLE <name> DROP CONSTRAINT IF EXISTS <name> [RESTRICT|CASCADE] */
 			| DROP CONSTRAINT IF_P EXISTS name opt_drop_behavior
 				{
@@ -2743,9 +2755,25 @@ ConstraintElem:
 					n->fk_matchtype		= $9;
 					n->fk_upd_action	= (char) ($10 >> 8);
 					n->fk_del_action	= (char) ($10 & 0xFF);
-					n->skip_validation  = FALSE;
 					n->deferrable		= ($11 & 1) != 0;
 					n->initdeferred		= ($11 & 2) != 0;
+					n->skip_validation  = false;
+					$$ = (Node *)n;
+				}
+			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
+				opt_column_list key_match key_actions
+				NOT VALID
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_FOREIGN;
+					n->location = @1;
+					n->pktable			= $7;
+					n->fk_attrs			= $4;
+					n->pk_attrs			= $8;
+					n->fk_matchtype		= $9;
+					n->fk_upd_action	= (char) ($10 >> 8);
+					n->fk_del_action	= (char) ($10 & 0xFF);
+					n->skip_validation  = true;
 					$$ = (Node *)n;
 				}
 		;
@@ -3186,6 +3214,37 @@ DropTableSpaceStmt: DROP TABLESPACE name
 					n->tablespacename = $5;
 					n->missing_ok = true;
 					$$ = (Node *) n;
+				}
+		;
+
+/*****************************************************************************
+ *
+ * 		QUERY:
+ *             CREATE EXTENSION extension
+ *             [ WITH ] [ SCHEMA [=] schema ]
+ *
+ *****************************************************************************/
+
+CreateExtensionStmt: CREATE EXTENSION name opt_with create_extension_opt_list
+				{
+					CreateExtensionStmt *n = makeNode(CreateExtensionStmt);
+					n->extname = $3;
+					n->options = $5;
+					$$ = (Node *) n;
+				}
+		;
+
+create_extension_opt_list:
+			create_extension_opt_list create_extension_opt_item
+				{ $$ = lappend($1, $2); }
+			| /* EMPTY */
+				{ $$ = NIL; }
+		;
+
+create_extension_opt_item:
+			SCHEMA opt_equal name
+				{
+					$$ = makeDefElem("schema", (Node *)makeString($3));
 				}
 		;
 
@@ -4321,11 +4380,12 @@ drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
 			| SEQUENCE								{ $$ = OBJECT_SEQUENCE; }
 			| VIEW									{ $$ = OBJECT_VIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
-			| TYPE_P								{ $$ = OBJECT_TYPE; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }
+			| TYPE_P								{ $$ = OBJECT_TYPE; }
 			| DOMAIN_P								{ $$ = OBJECT_DOMAIN; }
 			| CONVERSION_P							{ $$ = OBJECT_CONVERSION; }
 			| SCHEMA								{ $$ = OBJECT_SCHEMA; }
+			| EXTENSION								{ $$ = OBJECT_EXTENSION; }
 			| TEXT_P SEARCH PARSER					{ $$ = OBJECT_TSPARSER; }
 			| TEXT_P SEARCH DICTIONARY				{ $$ = OBJECT_TSDICTIONARY; }
 			| TEXT_P SEARCH TEMPLATE				{ $$ = OBJECT_TSTEMPLATE; }
@@ -4379,7 +4439,7 @@ opt_restart_seqs:
  *
  *	COMMENT ON [ [ DATABASE | DOMAIN | INDEX | SEQUENCE | TABLE | TYPE | VIEW |
  *				   CONVERSION | LANGUAGE | OPERATOR CLASS | LARGE OBJECT |
- *				   CAST | COLUMN | SCHEMA | TABLESPACE | ROLE |
+ *				   CAST | COLUMN | SCHEMA | TABLESPACE | EXTENSION | ROLE |
  *				   TEXT SEARCH PARSER | TEXT SEARCH DICTIONARY |
  *				   TEXT SEARCH TEMPLATE | TEXT SEARCH CONFIGURATION |
  *				   FOREIGN TABLE ] <objname> |
@@ -4558,6 +4618,7 @@ comment_type:
 			| VIEW								{ $$ = OBJECT_VIEW; }
 			| CONVERSION_P						{ $$ = OBJECT_CONVERSION; }
 			| TABLESPACE						{ $$ = OBJECT_TABLESPACE; }
+			| EXTENSION 						{ $$ = OBJECT_EXTENSION; }
 			| ROLE								{ $$ = OBJECT_ROLE; }
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
 		;
@@ -5306,36 +5367,43 @@ index_params:	index_elem							{ $$ = list_make1($1); }
  * expressions in parens.  For backwards-compatibility reasons, we allow
  * an expression that's just a function call to be written without parens.
  */
-index_elem:	ColId opt_class opt_asc_desc opt_nulls_order
+index_elem:	ColId opt_collate opt_class opt_asc_desc opt_nulls_order
 				{
 					$$ = makeNode(IndexElem);
 					$$->name = $1;
 					$$->expr = NULL;
 					$$->indexcolname = NULL;
-					$$->opclass = $2;
-					$$->ordering = $3;
-					$$->nulls_ordering = $4;
+					$$->collation = $2;
+					$$->opclass = $3;
+					$$->ordering = $4;
+					$$->nulls_ordering = $5;
 				}
-			| func_expr opt_class opt_asc_desc opt_nulls_order
+			| func_expr opt_collate opt_class opt_asc_desc opt_nulls_order
 				{
 					$$ = makeNode(IndexElem);
 					$$->name = NULL;
 					$$->expr = $1;
 					$$->indexcolname = NULL;
-					$$->opclass = $2;
-					$$->ordering = $3;
-					$$->nulls_ordering = $4;
+					$$->collation = $2;
+					$$->opclass = $3;
+					$$->ordering = $4;
+					$$->nulls_ordering = $5;
 				}
-			| '(' a_expr ')' opt_class opt_asc_desc opt_nulls_order
+			| '(' a_expr ')' opt_collate opt_class opt_asc_desc opt_nulls_order
 				{
 					$$ = makeNode(IndexElem);
 					$$->name = NULL;
 					$$->expr = $2;
 					$$->indexcolname = NULL;
-					$$->opclass = $4;
-					$$->ordering = $5;
-					$$->nulls_ordering = $6;
+					$$->collation = $4;
+					$$->opclass = $5;
+					$$->ordering = $6;
+					$$->nulls_ordering = $7;
 				}
+		;
+
+opt_collate: COLLATE any_name						{ $$ = $2; }
+			| /*EMPTY*/								{ $$ = NIL; }
 		;
 
 opt_class:	any_name								{ $$ = $1; }
@@ -6245,6 +6313,14 @@ AlterObjectSchemaStmt:
 					n->newschema = $6;
 					$$ = (Node *)n;
 				}
+			| ALTER EXTENSION any_name SET SCHEMA name
+				{
+					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
+					n->objectType = OBJECT_EXTENSION;
+					n->object = $3;
+					n->newschema = $6;
+					$$ = (Node *)n;
+				}
 			| ALTER FUNCTION function_with_argtypes SET SCHEMA name
 				{
 					AlterObjectSchemaStmt *n = makeNode(AlterObjectSchemaStmt);
@@ -6774,6 +6850,12 @@ transaction_mode_item:
 									   makeIntConst(TRUE, @1)); }
 			| READ WRITE
 					{ $$ = makeDefElem("transaction_read_only",
+									   makeIntConst(FALSE, @1)); }
+			| DEFERRABLE
+					{ $$ = makeDefElem("transaction_deferrable",
+									   makeIntConst(TRUE, @1)); }
+			| NOT DEFERRABLE
+					{ $$ = makeDefElem("transaction_deferrable",
 									   makeIntConst(FALSE, @1)); }
 		;
 
@@ -8753,6 +8835,13 @@ opt_array_bounds:
 		;
 
 SimpleTypename:
+			SimpleTypenameWithoutCollation opt_collate
+			{
+				$$ = $1;
+				$$->collnames = $2;
+			}
+
+SimpleTypenameWithoutCollation:
 			GenericType								{ $$ = $1; }
 			| Numeric								{ $$ = $1; }
 			| Bit									{ $$ = $1; }
@@ -9787,6 +9876,14 @@ c_expr:		columnref								{ $$ = $1; }
 					r->row_typeid = InvalidOid;	/* not analyzed yet */
 					r->location = @1;
 					$$ = (Node *)r;
+				}
+			| c_expr COLLATE any_name
+				{
+					CollateClause *n = makeNode(CollateClause);
+					n->arg = (Expr *) $1;
+					n->collnames = $3;
+					n->location = @2;
+					$$ = (Node *)n;
 				}
 		;
 
@@ -11415,6 +11512,7 @@ unreserved_keyword:
 			| EXCLUSIVE
 			| EXECUTE
 			| EXPLAIN
+			| EXTENSION
 			| EXTERNAL
 			| FAMILY
 			| FIRST_P

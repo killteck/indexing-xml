@@ -835,8 +835,8 @@ SELECT pg_stop_backup();
     GNU <application>tar</> return an error code indistinguishable from
     a fatal error if a file was truncated while <application>tar</> was
     copying it.  Fortunately, GNU <application>tar</> versions 1.16 and
-    later exit with <literal>1</> if a file was changed during the backup,
-    and <literal>2</> for other errors.
+    later exit with 1 if a file was changed during the backup,
+    and 2 for other errors.
    </para>
 
    <para>
@@ -1086,9 +1086,10 @@ restore_command = 'cp /mnt/server/archivedir/%f %p'
     the junior DBA dropped your main transaction table), just specify the
     required stopping point in <filename>recovery.conf</>.  You can specify
     the stop point, known as the <quote>recovery target</>, either by
-    date/time or by completion of a specific transaction ID.  As of this
-    writing only the date/time option is very usable, since there are no tools
-    to help you identify with any accuracy which transaction ID to use.
+    date/time, named restore point or by completion of a specific transaction
+    ID.  As of this writing only the date/time and named restore point options
+    are very usable, since there are no tools to help you identify with any
+    accuracy which transaction ID to use.
    </para>
 
    <note>

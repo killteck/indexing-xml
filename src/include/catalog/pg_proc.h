@@ -1386,8 +1386,8 @@ DATA(insert OID = 1078 (  bpcharcmp		   PGNSP PGUID 12 1 0 0 f f f t f i 2 0 23 
 DESCR("less-equal-greater");
 DATA(insert OID = 1080 (  hashbpchar	   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 23 "1042" _null_ _null_ _null_ _null_	hashbpchar _null_ _null_ _null_ ));
 DESCR("hash");
-DATA(insert OID = 1081 (  format_type	   PGNSP PGUID 12 1 0 0 f f f f f s 2 0 25 "26 23" _null_ _null_ _null_ _null_ format_type _null_ _null_ _null_ ));
-DESCR("format a type oid and atttypmod to canonical SQL");
+DATA(insert OID = 1081 (  format_type	   PGNSP PGUID 12 1 0 0 f f f f f s 3 0 25 "26 23 26" _null_ _null_ _null_ _null_ format_type _null_ _null_ _null_ ));
+DESCR("format a type OID, atttypmod, and collation OID to canonical SQL");
 DATA(insert OID = 1084 (  date_in		   PGNSP PGUID 12 1 0 0 f f f t f s 1 0 1082 "2275" _null_ _null_ _null_ _null_ date_in _null_ _null_ _null_ ));
 DESCR("I/O");
 DATA(insert OID = 1085 (  date_out		   PGNSP PGUID 12 1 0 0 f f f t f s 1 0 2275 "1082" _null_ _null_ _null_ _null_ date_out _null_ _null_ _null_ ));
@@ -3387,6 +3387,8 @@ DATA(insert OID = 3768 (  pg_ts_template_is_visible PGNSP PGUID 12 1 0 0 f f f t
 DESCR("is text search template visible in search path?");
 DATA(insert OID = 3758 (  pg_ts_config_is_visible	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 16 "26" _null_ _null_ _null_ _null_ pg_ts_config_is_visible _null_ _null_ _null_ ));
 DESCR("is text search configuration visible in search path?");
+DATA(insert OID = 3815 (  pg_collation_is_visible	PGNSP PGUID 12 1 0 0 f f f t f s 1 0 16 "26" _null_ _null_ _null_ _null_ pg_collation_is_visible _null_ _null_ _null_ ));
+DESCR("is collation visible in search path?");
 
 DATA(insert OID = 2854 (  pg_my_temp_schema			PGNSP PGUID 12 1 0 0 f f f t f s 0 0 26 "" _null_ _null_ _null_ _null_ pg_my_temp_schema _null_ _null_ _null_ ));
 DESCR("get OID of current session's temp schema, if any");
@@ -3403,6 +3405,7 @@ DATA(insert OID = 2173 ( pg_stop_backup			PGNSP PGUID 12 1 0 0 f f f t f v 0 0 2
 DESCR("finish taking an online backup");
 DATA(insert OID = 2848 ( pg_switch_xlog			PGNSP PGUID 12 1 0 0 f f f t f v 0 0 25 "" _null_ _null_ _null_ _null_ pg_switch_xlog _null_ _null_ _null_ ));
 DESCR("switch to new xlog file");
+DATA(insert OID = 3098 ( pg_create_restore_point	PGNSP PGUID 12 1 0 0 f f f t f v 1 0 25 "25" _null_ _null_ _null_ _null_ pg_create_restore_point _null_ _null_ _null_ ));
 DATA(insert OID = 2849 ( pg_current_xlog_location	PGNSP PGUID 12 1 0 0 f f f t f v 0 0 25 "" _null_ _null_ _null_ _null_ pg_current_xlog_location _null_ _null_ _null_ ));
 DESCR("current xlog write location");
 DATA(insert OID = 2852 ( pg_current_xlog_insert_location	PGNSP PGUID 12 1 0 0 f f f t f v 0 0 25 "" _null_ _null_ _null_ _null_ pg_current_xlog_insert_location _null_ _null_ _null_ ));
@@ -3421,6 +3424,13 @@ DATA(insert OID = 3821 ( pg_last_xlog_replay_location	PGNSP PGUID 12 1 0 0 f f f
 DESCR("last xlog replay location");
 DATA(insert OID = 3830 ( pg_last_xact_replay_timestamp	PGNSP PGUID 12 1 0 0 f f f t f v 0 0 1184 "" _null_ _null_ _null_ _null_ pg_last_xact_replay_timestamp _null_ _null_ _null_ ));
 DESCR("timestamp of last replay xact");
+
+DATA(insert OID = 3071 ( pg_xlog_replay_pause		PGNSP PGUID 12 1 0 0 f f f t f v 0 0 2278 "" _null_ _null_ _null_ _null_ pg_xlog_replay_pause _null_ _null_ _null_ ));
+DESCR("pauses xlog replay");
+DATA(insert OID = 3072 ( pg_xlog_replay_resume		PGNSP PGUID 12 1 0 0 f f f t f v 0 0 2278 "" _null_ _null_ _null_ _null_ pg_xlog_replay_resume _null_ _null_ _null_ ));
+DESCR("resumes xlog replay, if it was paused");
+DATA(insert OID = 3073 ( pg_is_xlog_replay_paused	PGNSP PGUID 12 1 0 0 f f f t f v 0 0 16 "" _null_ _null_ _null_ _null_ pg_is_xlog_replay_paused _null_ _null_ _null_ ));
+DESCR("true if xlog replay is paused");
 
 DATA(insert OID = 2621 ( pg_reload_conf			PGNSP PGUID 12 1 0 0 f f f t f v 0 0 16 "" _null_ _null_ _null_ _null_ pg_reload_conf _null_ _null_ _null_ ));
 DESCR("reload configuration files");
@@ -4868,6 +4878,12 @@ DATA(insert OID = 2986 (  record_ge		   PGNSP PGUID 12 1 0 0 f f f t f i 2 0 16 
 DESCR("record greater than or equal");
 DATA(insert OID = 2987 (  btrecordcmp	   PGNSP PGUID 12 1 0 0 f f f t f i 2 0 23 "2249 2249" _null_ _null_ _null_ _null_ btrecordcmp _null_ _null_ _null_ ));
 DESCR("btree less-equal-greater");
+
+/* Extensions */
+DATA(insert OID = 3082 (  pg_available_extensions		PGNSP PGUID 12 10 100 0 f f f t t s 0 0 2249 "" "{19,25,16,25}" "{o,o,o,o}" "{name,version,relocatable,comment}" _null_ pg_available_extensions _null_ _null_ _null_ ));
+DESCR("list available extensions");
+DATA(insert OID = 3083 (  pg_extension_config_dump		PGNSP PGUID 12 1 0 0 f f f t f v 2 0 2278 "2205 25" _null_ _null_ _null_ _null_ pg_extension_config_dump _null_ _null_ _null_ ));
+DESCR("flag an extension's table contents to be emitted by pg_dump");
 
 /* SQL-spec window functions */
 DATA(insert OID = 3100 (  row_number	PGNSP PGUID 12 1 0 0 f t f f f i 0 0 20 "" _null_ _null_ _null_ _null_ window_row_number _null_ _null_ _null_ ));

@@ -3705,8 +3705,8 @@ substring('foobar' from 'o(.)b')   <lineannotation>o</lineannotation>
      match, the <replaceable>source</> string is returned with the
      <replaceable>replacement</> string substituted for the matching
      substring.  The <replaceable>replacement</> string can contain
-     <literal>\</><replaceable>n</>, where <replaceable>n</> is <literal>1</>
-     through <literal>9</>, to indicate that the source substring matching the
+     <literal>\</><replaceable>n</>, where <replaceable>n</> is 1
+     through 9, to indicate that the source substring matching the
      <replaceable>n</>'th parenthesized subexpression of the pattern should be
      inserted, and it can contain <literal>\&amp;</> to indicate that the
      substring matching the entire pattern should be inserted.  Write
@@ -13518,6 +13518,12 @@ SELECT relname FROM pg_class WHERE pg_table_is_visible(oid);
 
      <tbody>
       <row>
+       <entry><literal><function>pg_collation_is_visible(<parameter>collation_oid</parameter>)</function></literal>
+       </entry>
+       <entry><type>boolean</type></entry>
+       <entry>is collation visible in search path</entry>
+      </row>
+      <row>
        <entry><literal><function>pg_conversion_is_visible(<parameter>conversion_oid</parameter>)</function></literal>
        </entry>
        <entry><type>boolean</type></entry>
@@ -13581,6 +13587,9 @@ SELECT relname FROM pg_class WHERE pg_table_is_visible(oid);
     </tgroup>
    </table>
 
+   <indexterm>
+    <primary>pg_collation_is_visible</primary>
+   </indexterm>
    <indexterm>
     <primary>pg_conversion_is_visible</primary>
    </indexterm>
@@ -13714,7 +13723,7 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
 
      <tbody>
       <row>
-       <entry><literal><function>format_type(<parameter>type_oid</parameter>, <parameter>typemod</>)</function></literal></entry>
+       <entry><literal><function>format_type(<parameter>type_oid</parameter> [, <parameter>typemod</> [, <parameter>collation_oid</> ]])</function></literal></entry>
        <entry><type>text</type></entry>
        <entry>get SQL name of a data type</entry>
       </row>
@@ -13850,7 +13859,9 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
   <para>
    <function>format_type</function> returns the SQL name of a data type that
    is identified by its type OID and possibly a type modifier.  Pass NULL
-   for the type modifier if no specific modifier is known.
+   for the type modifier or omit the argument if no specific modifier is known.
+   If a collation is given as third argument, a <literal>COLLATE</> clause
+   followed by a formatted collation name is appended.
   </para>
 
   <para>
@@ -14373,6 +14384,9 @@ SELECT set_config('log_statement_stats', 'off', false);
     <primary>backup</primary>
    </indexterm>
    <indexterm>
+    <primary>pg_create_restore_point</primary>
+   </indexterm>
+   <indexterm>
     <primary>pg_current_xlog_insert_location</primary>
    </indexterm>
    <indexterm>
@@ -14409,6 +14423,13 @@ SELECT set_config('log_statement_stats', 'off', false);
      </thead>
 
      <tbody>
+      <row>
+       <entry>
+        <literal><function>pg_create_restore_point(<parameter>name</> <type>text</>)</function></literal>
+        </entry>
+       <entry><type>text</type></entry>
+       <entry>Create a named point for performing restore (restricted to superusers)</entry>
+      </row>
       <row>
        <entry>
         <literal><function>pg_current_xlog_insert_location()</function></literal>
@@ -14630,6 +14651,64 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
      </tbody>
     </tgroup>
    </table>
+
+   <para>
+    The functions shown in <xref
+    linkend="functions-recovery-control-table"> control the progress of recovery.
+    These functions may be executed only during recovery.
+   </para>
+
+   <table id="functions-recovery-control-table">
+    <title>Recovery Control Functions</title>
+    <tgroup cols="3">
+     <thead>
+      <row><entry>Name</entry> <entry>Return Type</entry> <entry>Description</entry>
+      </row>
+     </thead>
+
+     <tbody>
+      <row>
+       <entry>
+        <literal><function>pg_is_xlog_replay_paused()</function></literal>
+        </entry>
+       <entry><type>bool</type></entry>
+       <entry>True if recovery is paused.
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <literal><function>pg_xlog_replay_pause()</function></literal>
+        </entry>
+       <entry><type>void</type></entry>
+       <entry>Pauses recovery immediately.
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <literal><function>pg_xlog_replay_resume()</function></literal>
+        </entry>
+       <entry><type>void</type></entry>
+       <entry>Restarts recovery if it was paused.
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+
+   <para>
+    While recovery is paused no further database changes are applied.
+    If in hot standby, all new queries will see the same consistent snapshot
+    of the database, and no further query conflicts will be generated until
+    recovery is resumed.
+   </para>
+
+   <para>
+    If streaming replication is disabled, the paused state may continue
+    indefinitely without problem. While streaming replication is in
+    progress WAL records will continue to be received, which will
+    eventually fill available disk space, depending upon the duration of
+    the pause, the rate of WAL generation and available disk space.
+   </para>
 
    <para>
     The functions shown in <xref linkend="functions-admin-dbsize"> calculate

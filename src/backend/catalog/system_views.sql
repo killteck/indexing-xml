@@ -153,6 +153,13 @@ CREATE VIEW pg_locks AS
 CREATE VIEW pg_cursors AS
     SELECT * FROM pg_cursor() AS C;
 
+CREATE VIEW pg_available_extensions AS
+    SELECT E.name, E.version, X.extversion AS installed,
+           N.nspname AS schema, E.relocatable, E.comment
+      FROM pg_available_extensions() AS E
+           LEFT JOIN pg_extension AS X ON E.name = X.extname
+           LEFT JOIN pg_namespace AS N on N.oid = X.extnamespace;
+
 CREATE VIEW pg_prepared_xacts AS
     SELECT P.transaction, P.gid, P.prepared,
            U.rolname AS owner, D.datname AS database
@@ -670,6 +677,10 @@ COMMENT ON FUNCTION ts_debug(text) IS
 -- in pg_proc.h; we are merely causing their proargnames and proargdefaults
 -- to get filled in.)
 --
+
+CREATE OR REPLACE FUNCTION
+  format_type(oid, int DEFAULT NULL, oid DEFAULT NULL)
+  RETURNS text STABLE LANGUAGE internal AS 'format_type';
 
 CREATE OR REPLACE FUNCTION
   pg_start_backup(label text, fast boolean DEFAULT false)

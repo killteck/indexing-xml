@@ -36,6 +36,7 @@
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
+#include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "utils/acl.h"
@@ -148,7 +149,19 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt,
 	 * matter if we ever try to accumulate stats on dead tuples.) If the rel
 	 * has been dropped since we last saw it, we don't need to process it.
 	 */
-	onerel = try_relation_open(relid, ShareUpdateExclusiveLock);
+	if (!(vacstmt->options & VACOPT_NOWAIT))
+		onerel = try_relation_open(relid, ShareUpdateExclusiveLock);
+	else if (ConditionalLockRelationOid(relid, ShareUpdateExclusiveLock))
+		onerel = try_relation_open(relid, NoLock);
+	else
+	{
+		onerel = NULL;
+		if (IsAutoVacuumWorkerProcess() && Log_autovacuum_min_duration >= 0)
+			ereport(LOG,
+					(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+					 errmsg("skipping analyze of \"%s\" --- lock not available",
+						vacstmt->relation->relname)));
+	}
 	if (!onerel)
 		return;
 
@@ -849,11 +862,13 @@ examine_attribute(Relation onerel, int attnum, Node *index_expr)
 	{
 		stats->attrtypid = exprType(index_expr);
 		stats->attrtypmod = exprTypmod(index_expr);
+		stats->attrcollation = exprCollation(index_expr);
 	}
 	else
 	{
 		stats->attrtypid = attr->atttypid;
 		stats->attrtypmod = attr->atttypmod;
+		stats->attrcollation = attr->attcollation;
 	}
 
 	typtuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(stats->attrtypid));
@@ -1916,6 +1931,7 @@ compute_minimal_stats(VacAttrStatsP stats,
 	track_cnt = 0;
 
 	fmgr_info(mystats->eqfunc, &f_cmpeq);
+	fmgr_info_collation(stats->attrcollation, &f_cmpeq);
 
 	for (i = 0; i < samplerows; i++)
 	{
@@ -2237,6 +2253,7 @@ compute_scalar_stats(VacAttrStatsP stats,
 
 	SelectSortFunction(mystats->ltopr, false, &cmpFn, &cmpFlags);
 	fmgr_info(cmpFn, &f_cmpfn);
+	fmgr_info_collation(stats->attrcollation, &f_cmpfn);
 
 	/* Initial scan to find sortable values */
 	for (i = 0; i < samplerows; i++)

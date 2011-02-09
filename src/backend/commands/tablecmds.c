@@ -254,6 +254,7 @@ static void AlterIndexNamespaces(Relation classRel, Relation rel,
 static void AlterSeqNamespaces(Relation classRel, Relation rel,
 				   Oid oldNspOid, Oid newNspOid,
 				   const char *newNspName, LOCKMODE lockmode);
+static void ATExecValidateConstraint(Relation rel, const char *constrName);
 static int transformColumnNameList(Oid relId, List *colList,
 						int16 *attnums, Oid *atttypids);
 static int transformFkeyGetPrimaryKey(Relation pkrel, Oid *indexOid,
@@ -264,7 +265,7 @@ static Oid transformFkeyCheckAttrs(Relation pkrel,
 						int numattrs, int16 *attnums,
 						Oid *opclasses);
 static void checkFkeyPermissions(Relation rel, int16 *attnums, int natts);
-static void validateForeignKeyConstraint(Constraint *fkconstraint,
+static void validateForeignKeyConstraint(char *conname,
 							 Relation rel, Relation pkrel,
 							 Oid pkindOid, Oid constraintOid);
 static void createForeignKeyTriggers(Relation rel, Constraint *fkconstraint,
@@ -1192,7 +1193,7 @@ storage_name(char c)
  * 'schema' is the column/attribute definition for the table. (It's a list
  *		of ColumnDef's.) It is destructively changed.
  * 'supers' is a list of names (as RangeVar nodes) of parent relations.
- * 'istemp' is TRUE if we are creating a temp relation.
+ * 'relpersistence' is a persistence type of the table.
  *
  * Output arguments:
  * 'supOids' receives a list of the OIDs of the parent relations.
@@ -1421,6 +1422,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 			{
 				Oid			defTypeId;
 				int32		deftypmod;
+				Oid			defCollId;
 
 				/*
 				 * Yes, try to merge the two column definitions. They must
@@ -1430,7 +1432,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 						(errmsg("merging multiple inherited definitions of column \"%s\"",
 								attributeName)));
 				def = (ColumnDef *) list_nth(inhSchema, exist_attno - 1);
-				typenameTypeIdAndMod(NULL, def->typeName, &defTypeId, &deftypmod);
+				typenameTypeIdModColl(NULL, def->typeName, &defTypeId, &deftypmod, &defCollId);
 				if (defTypeId != attribute->atttypid ||
 					deftypmod != attribute->atttypmod)
 					ereport(ERROR,
@@ -1440,6 +1442,14 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 							 errdetail("%s versus %s",
 									   TypeNameToString(def->typeName),
 									   format_type_be(attribute->atttypid))));
+				if (defCollId != attribute->attcollation)
+					ereport(ERROR,
+							(errcode(ERRCODE_COLLATION_MISMATCH),
+							 errmsg("inherited column \"%s\" has a collation conflict",
+									attributeName),
+							 errdetail("\"%s\" versus \"%s\"",
+									   get_collation_name(defCollId),
+									   get_collation_name(attribute->attcollation))));
 
 				/* Copy storage parameter */
 				if (def->storage == 0)
@@ -1467,7 +1477,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				def = makeNode(ColumnDef);
 				def->colname = pstrdup(attributeName);
 				def->typeName = makeTypeNameFromOid(attribute->atttypid,
-													attribute->atttypmod);
+													attribute->atttypmod,
+													attribute->attcollation);
 				def->inhcount = 1;
 				def->is_local = false;
 				def->is_not_null = attribute->attnotnull;
@@ -1593,6 +1604,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 							newTypeId;
 				int32		deftypmod,
 							newtypmod;
+				Oid			defcollid,
+							newcollid;
 
 				/*
 				 * Yes, try to merge the two column definitions. They must
@@ -1602,8 +1615,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				   (errmsg("merging column \"%s\" with inherited definition",
 						   attributeName)));
 				def = (ColumnDef *) list_nth(inhSchema, exist_attno - 1);
-				typenameTypeIdAndMod(NULL, def->typeName, &defTypeId, &deftypmod);
-				typenameTypeIdAndMod(NULL, newdef->typeName, &newTypeId, &newtypmod);
+				typenameTypeIdModColl(NULL, def->typeName, &defTypeId, &deftypmod, &defcollid);
+				typenameTypeIdModColl(NULL, newdef->typeName, &newTypeId, &newtypmod, &newcollid);
 				if (defTypeId != newTypeId || deftypmod != newtypmod)
 					ereport(ERROR,
 							(errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -1612,6 +1625,14 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 							 errdetail("%s versus %s",
 									   TypeNameToString(def->typeName),
 									   TypeNameToString(newdef->typeName))));
+				if (defcollid != newcollid)
+					ereport(ERROR,
+							(errcode(ERRCODE_COLLATION_MISMATCH),
+							 errmsg("column \"%s\" has a collation conflict",
+									attributeName),
+							 errdetail("\"%s\" versus \"%s\"",
+									   get_collation_name(defcollid),
+									   get_collation_name(newcollid))));
 
 				/* Copy storage parameter */
 				if (def->storage == 0)
@@ -2649,7 +2670,7 @@ AlterTableGetLockLevel(List *cmds)
 			 * though don't change the semantic results from normal data reads and writes.
 			 * Delaying an ALTER TABLE behind currently active writes only delays the point
 			 * where the new strategy begins to take effect, so there is no benefit in waiting.
-			 * In thise case the minimum restriction applies: we don't currently allow
+			 * In this case the minimum restriction applies: we don't currently allow
 			 * concurrent catalog updates.
 			 */
 			case AT_SetStatistics:
@@ -2660,6 +2681,7 @@ AlterTableGetLockLevel(List *cmds)
 			case AT_SetOptions:
 			case AT_ResetOptions:
 			case AT_SetStorage:
+			case AT_ValidateConstraint:
 				cmd_lockmode = ShareUpdateExclusiveLock;
 				break;
 
@@ -2887,6 +2909,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			ATPrepAddInherit(rel);
 			pass = AT_PASS_MISC;
 			break;
+		case AT_ValidateConstraint:
 		case AT_EnableTrig:		/* ENABLE TRIGGER variants */
 		case AT_EnableAlwaysTrig:
 		case AT_EnableReplicaTrig:
@@ -3053,6 +3076,9 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			break;
 		case AT_AddIndexConstraint:	/* ADD CONSTRAINT USING INDEX */
 			ATExecAddIndexConstraint(tab, rel, (IndexStmt *) cmd->def, lockmode);
+			break;
+		case AT_ValidateConstraint:
+			ATExecValidateConstraint(rel, cmd->name);
 			break;
 		case AT_DropConstraint:	/* DROP CONSTRAINT */
 			ATExecDropConstraint(rel, cmd->name, cmd->behavior,
@@ -3307,9 +3333,14 @@ ATRewriteTables(List **wqueue, LOCKMODE lockmode)
 				 */
 				refrel = heap_open(con->refrelid, ShareRowExclusiveLock);
 
-				validateForeignKeyConstraint(fkconstraint, rel, refrel,
+				validateForeignKeyConstraint(fkconstraint->conname, rel, refrel,
 											 con->refindid,
 											 con->conid);
+
+				/*
+				 * No need to mark the constraint row as validated,
+				 * we did that when we inserted the row earlier.
+				 */
 
 				heap_close(refrel, NoLock);
 			}
@@ -4054,6 +4085,7 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 	HeapTuple	typeTuple;
 	Oid			typeOid;
 	int32		typmod;
+	Oid			collOid;
 	Form_pg_type tform;
 	Expr	   *defval;
 
@@ -4074,15 +4106,24 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 			Form_pg_attribute childatt = (Form_pg_attribute) GETSTRUCT(tuple);
 			Oid			ctypeId;
 			int32		ctypmod;
+			Oid			ccollid;
 
 			/* Child column must match by type */
-			typenameTypeIdAndMod(NULL, colDef->typeName, &ctypeId, &ctypmod);
+			typenameTypeIdModColl(NULL, colDef->typeName, &ctypeId, &ctypmod, &ccollid);
 			if (ctypeId != childatt->atttypid ||
 				ctypmod != childatt->atttypmod)
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
 						 errmsg("child table \"%s\" has different type for column \"%s\"",
 							RelationGetRelationName(rel), colDef->colname)));
+			if (ccollid != childatt->attcollation)
+				ereport(ERROR,
+						(errcode(ERRCODE_COLLATION_MISMATCH),
+						 errmsg("child table \"%s\" has different collation for column \"%s\"",
+								RelationGetRelationName(rel), colDef->colname),
+						 errdetail("\"%s\" versus \"%s\"",
+								   get_collation_name(ccollid),
+								   get_collation_name(childatt->attcollation))));
 
 			/* If it's OID, child column must actually be OID */
 			if (isOid && childatt->attnum != ObjectIdAttributeNumber)
@@ -4140,7 +4181,7 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 							MaxHeapAttributeNumber)));
 	}
 
-	typeTuple = typenameType(NULL, colDef->typeName, &typmod);
+	typeTuple = typenameType(NULL, colDef->typeName, &typmod, &collOid);
 	tform = (Form_pg_type) GETSTRUCT(typeTuple);
 	typeOid = HeapTupleGetOid(typeTuple);
 
@@ -4165,6 +4206,7 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 	attribute.attisdropped = false;
 	attribute.attislocal = colDef->is_local;
 	attribute.attinhcount = colDef->inhcount;
+	attribute.attcollation = collOid;
 	/* attribute.attacl is handled by InsertPgAttributeTuple */
 
 	ReleaseSysCache(typeTuple);
@@ -4342,7 +4384,7 @@ ATPrepAddOids(List **wqueue, Relation rel, bool recurse, AlterTableCmd *cmd, LOC
 		ColumnDef  *cdef = makeNode(ColumnDef);
 
 		cdef->colname = pstrdup("oid");
-		cdef->typeName = makeTypeNameFromOid(OIDOID, -1);
+		cdef->typeName = makeTypeNameFromOid(OIDOID, -1, InvalidOid);
 		cdef->inhcount = 0;
 		cdef->is_local = true;
 		cdef->is_not_null = true;
@@ -5509,6 +5551,7 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 									  CONSTRAINT_FOREIGN,
 									  fkconstraint->deferrable,
 									  fkconstraint->initdeferred,
+									  !fkconstraint->skip_validation,
 									  RelationGetRelid(rel),
 									  fkattnum,
 									  numfks,
@@ -5538,7 +5581,8 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 
 	/*
 	 * Tell Phase 3 to check that the constraint is satisfied by existing rows
-	 * (we can skip this during table creation).
+	 * We can skip this during table creation or if requested explicitly
+	 * by specifying NOT VALID on an alter table statement.
 	 */
 	if (!fkconstraint->skip_validation)
 	{
@@ -5561,6 +5605,85 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 	heap_close(pkrel, NoLock);
 }
 
+/*
+ * ALTER TABLE VALIDATE CONSTRAINT
+ */
+static void
+ATExecValidateConstraint(Relation rel, const char *constrName)
+{
+	Relation	conrel;
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple	tuple;
+	Form_pg_constraint con = NULL;
+	bool		found = false;
+
+	conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
+
+	/*
+	 * Find and check the target constraint
+	 */
+	ScanKeyInit(&key,
+				Anum_pg_constraint_conrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationGetRelid(rel)));
+	scan = systable_beginscan(conrel, ConstraintRelidIndexId,
+							  true, SnapshotNow, 1, &key);
+
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		con = (Form_pg_constraint) GETSTRUCT(tuple);
+		if (con->contype == CONSTRAINT_FOREIGN &&
+			strcmp(NameStr(con->conname), constrName) == 0)
+		{
+			found = true;
+			break;
+		}
+	}
+
+	if (!found)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+			errmsg("foreign key constraint \"%s\" of relation \"%s\" does not exist",
+				   constrName, RelationGetRelationName(rel))));
+
+	if (!con->convalidated)
+	{
+		Oid			conid = HeapTupleGetOid(tuple);
+		HeapTuple	copyTuple = heap_copytuple(tuple);
+		Form_pg_constraint copy_con = (Form_pg_constraint) GETSTRUCT(copyTuple);
+		Relation	refrel;
+
+		/*
+		 * Triggers are already in place on both tables, so a
+		 * concurrent write that alters the result here is not
+		 * possible. Normally we can run a query here to do the
+		 * validation, which would only require AccessShareLock.
+		 * In some cases, it is possible that we might need to
+		 * fire triggers to perform the check, so we take a lock
+		 * at RowShareLock level just in case.
+		 */
+		refrel = heap_open(con->confrelid, RowShareLock);
+
+		validateForeignKeyConstraint((char *)constrName, rel, refrel,
+									 con->conindid,
+									 conid);
+
+		/*
+		 * Now update the catalog, while we have the door open.
+		 */
+		copy_con->convalidated = true;
+		simple_heap_update(conrel, &copyTuple->t_self, copyTuple);
+		CatalogUpdateIndexes(conrel, copyTuple);
+		heap_freetuple(copyTuple);
+
+		heap_close(refrel, NoLock);
+	}
+
+	systable_endscan(scan);
+
+	heap_close(conrel, RowExclusiveLock);
+}
 
 /*
  * transformColumnNameList - transform list of column names
@@ -5866,7 +5989,7 @@ checkFkeyPermissions(Relation rel, int16 *attnums, int natts)
  * Caller must have opened and locked both relations appropriately.
  */
 static void
-validateForeignKeyConstraint(Constraint *fkconstraint,
+validateForeignKeyConstraint(char *conname,
 							 Relation rel,
 							 Relation pkrel,
 							 Oid pkindOid,
@@ -5881,7 +6004,7 @@ validateForeignKeyConstraint(Constraint *fkconstraint,
 	 */
 	MemSet(&trig, 0, sizeof(trig));
 	trig.tgoid = InvalidOid;
-	trig.tgname = fkconstraint->conname;
+	trig.tgname = conname;
 	trig.tgenabled = TRIGGER_FIRES_ON_ORIGIN;
 	trig.tgisinternal = TRUE;
 	trig.tgconstrrelid = RelationGetRelid(pkrel);
@@ -6322,6 +6445,7 @@ ATPrepAlterColumnType(List **wqueue,
 	AttrNumber	attnum;
 	Oid			targettype;
 	int32		targettypmod;
+	Oid			targetcollid;
 	Node	   *transform;
 	NewColumnValue *newval;
 	ParseState *pstate = make_parsestate(NULL);
@@ -6356,7 +6480,7 @@ ATPrepAlterColumnType(List **wqueue,
 						colName)));
 
 	/* Look up the target type */
-	typenameTypeIdAndMod(NULL, typeName, &targettype, &targettypmod);
+	typenameTypeIdModColl(NULL, typeName, &targettype, &targettypmod, &targetcollid);
 
 	/* make sure datatype is legal for a column */
 	CheckAttributeType(colName, targettype, false);
@@ -6408,7 +6532,7 @@ ATPrepAlterColumnType(List **wqueue,
 		else
 		{
 			transform = (Node *) makeVar(1, attnum,
-										 attTup->atttypid, attTup->atttypmod,
+										 attTup->atttypid, attTup->atttypmod, attTup->attcollation,
 										 0);
 		}
 
@@ -6485,6 +6609,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 	Form_pg_type tform;
 	Oid			targettype;
 	int32		targettypmod;
+	Oid			targetcollid;
 	Node	   *defaultexpr;
 	Relation	attrelation;
 	Relation	depRel;
@@ -6513,7 +6638,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 						colName)));
 
 	/* Look up the target type (should not fail, since prep found it) */
-	typeTuple = typenameType(NULL, typeName, &targettypmod);
+	typeTuple = typenameType(NULL, typeName, &targettypmod, &targetcollid);
 	tform = (Form_pg_type) GETSTRUCT(typeTuple);
 	targettype = HeapTupleGetOid(typeTuple);
 
@@ -6725,6 +6850,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 			case OCLASS_FOREIGN_SERVER:
 			case OCLASS_USER_MAPPING:
 			case OCLASS_DEFACL:
+			case OCLASS_EXTENSION:
 
 				/*
 				 * We don't expect any of these sorts of objects to depend on
@@ -6787,6 +6913,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 	 */
 	attTup->atttypid = targettype;
 	attTup->atttypmod = targettypmod;
+	attTup->attcollation = targetcollid;
 	attTup->attndims = list_length(typeName->arrayBounds);
 	attTup->attlen = tform->typlen;
 	attTup->attbyval = tform->typbyval;

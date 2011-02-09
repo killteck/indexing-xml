@@ -38,6 +38,7 @@
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_enum.h"
@@ -123,6 +124,7 @@ DefineType(List *names, List *parameters)
 	bool		byValue = false;
 	char		alignment = 'i';	/* default alignment */
 	char		storage = 'p';	/* default TOAST storage method */
+	Oid			collation = InvalidOid;
 	DefElem    *likeTypeEl = NULL;
 	DefElem    *internalLengthEl = NULL;
 	DefElem    *inputNameEl = NULL;
@@ -140,6 +142,7 @@ DefineType(List *names, List *parameters)
 	DefElem    *byValueEl = NULL;
 	DefElem    *alignmentEl = NULL;
 	DefElem    *storageEl = NULL;
+	DefElem	   *collatableEl = NULL;
 	Oid			inputOid;
 	Oid			outputOid;
 	Oid			receiveOid = InvalidOid;
@@ -266,6 +269,8 @@ DefineType(List *names, List *parameters)
 			defelp = &alignmentEl;
 		else if (pg_strcasecmp(defel->defname, "storage") == 0)
 			defelp = &storageEl;
+		else if (pg_strcasecmp(defel->defname, "collatable") == 0)
+			defelp = &collatableEl;
 		else
 		{
 			/* WARNING, not ERROR, for historical backwards-compatibility */
@@ -292,7 +297,7 @@ DefineType(List *names, List *parameters)
 		Type		likeType;
 		Form_pg_type likeForm;
 
-		likeType = typenameType(NULL, defGetTypeName(likeTypeEl), NULL);
+		likeType = typenameType(NULL, defGetTypeName(likeTypeEl), NULL, NULL);
 		likeForm = (Form_pg_type) GETSTRUCT(likeType);
 		internalLength = likeForm->typlen;
 		byValue = likeForm->typbyval;
@@ -395,6 +400,8 @@ DefineType(List *names, List *parameters)
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("storage \"%s\" not recognized", a)));
 	}
+	if (collatableEl)
+		collation = defGetBoolean(collatableEl) ? DEFAULT_COLLATION_OID : InvalidOid;
 
 	/*
 	 * make sure we have our required definitions
@@ -567,7 +574,8 @@ DefineType(List *names, List *parameters)
 				   storage,		/* TOAST strategy */
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array Dimensions of typbasetype */
-				   false);		/* Type NOT NULL */
+				   false,		/* Type NOT NULL */
+				   collation);
 
 	/*
 	 * Create the array type that goes with it.
@@ -606,7 +614,8 @@ DefineType(List *names, List *parameters)
 			   'x',				/* ARRAY is always toastable */
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */
-			   false);			/* Type NOT NULL */
+			   false,			/* Type NOT NULL */
+			   collation);
 
 	pfree(array_type);
 }
@@ -645,7 +654,7 @@ RemoveTypes(DropStmt *drop)
 		typename = makeTypeNameFromNameList(names);
 
 		/* Use LookupTypeName here so that shell types can be removed. */
-		tup = LookupTypeName(NULL, typename, NULL);
+		tup = LookupTypeName(NULL, typename, NULL, NULL);
 		if (tup == NULL)
 		{
 			if (!drop->missing_ok)
@@ -780,6 +789,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	Oid			old_type_oid;
 	Form_pg_type baseType;
 	int32		basetypeMod;
+	Oid			baseColl;
 
 	/* Convert list of names to a name and namespace */
 	domainNamespace = QualifiedNameGetCreationNamespace(stmt->domainname,
@@ -810,7 +820,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	/*
 	 * Look up the base type.
 	 */
-	typeTup = typenameType(NULL, stmt->typeName, &basetypeMod);
+	typeTup = typenameType(NULL, stmt->typeName, &basetypeMod, &baseColl);
 	baseType = (Form_pg_type) GETSTRUCT(typeTup);
 	basetypeoid = HeapTupleGetOid(typeTup);
 
@@ -1053,7 +1063,8 @@ DefineDomain(CreateDomainStmt *stmt)
 				   storage,		/* TOAST strategy */
 				   basetypeMod, /* typeMod value */
 				   typNDims,	/* Array dimensions for base type */
-				   typNotNull); /* Type NOT NULL */
+				   typNotNull,	/* Type NOT NULL */
+				   baseColl);
 
 	/*
 	 * Process constraints which refer to the domain ID returned by TypeCreate
@@ -1162,7 +1173,8 @@ DefineEnum(CreateEnumStmt *stmt)
 				   'p',			/* TOAST strategy always plain */
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array dimensions of typbasetype */
-				   false);		/* Type NOT NULL */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);	/* typcollation */
 
 	/* Enter the enum's values into pg_enum */
 	EnumValuesCreate(enumTypeOid, stmt->vals);
@@ -1201,7 +1213,8 @@ DefineEnum(CreateEnumStmt *stmt)
 			   'x',				/* ARRAY is always toastable */
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */
-			   false);			/* Type NOT NULL */
+			   false,			/* Type NOT NULL */
+			   InvalidOid);		/* typcollation */
 
 	pfree(enumArrayName);
 }
@@ -1410,7 +1423,8 @@ DefineRange(CreateRangeStmt *stmt)
 				   'x',			/* TOAST strategy always plain */
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array dimensions of typbasetype */
-				   false);		/* Type NOT NULL */
+				   false,		/* Type NOT NULL */
+				   InvalidOid);	/* typcollation */
 
 	/* create the entry in pg_range */
 	RangeCreate(typoid, rangeSubtype, rangeSubtypeCmp, rangeCanonical,
@@ -1450,7 +1464,8 @@ DefineRange(CreateRangeStmt *stmt)
 			   'x',				/* ARRAY is always toastable */
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */
-			   false);			/* Type NOT NULL */
+			   false,			/* Type NOT NULL */
+			   InvalidOid);		/* typcollation */
 
 	pfree(rangeArrayName);
 }
@@ -2757,6 +2772,7 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 						  CONSTRAINT_CHECK,		/* Constraint Type */
 						  false,	/* Is Deferrable */
 						  false,	/* Is Deferred */
+						  true,		/* Is Validated */
 						  InvalidOid,	/* not a relation constraint */
 						  NULL,
 						  0,
@@ -2993,7 +3009,7 @@ AlterTypeOwner(List *names, Oid newOwnerId)
 	typename = makeTypeNameFromNameList(names);
 
 	/* Use LookupTypeName here so that shell types can be processed */
-	tup = LookupTypeName(NULL, typename, NULL);
+	tup = LookupTypeName(NULL, typename, NULL, NULL);
 	if (tup == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -3145,19 +3161,26 @@ AlterTypeNamespace(List *names, const char *newschema)
 	TypeName   *typename;
 	Oid			typeOid;
 	Oid			nspOid;
-	Oid			elemOid;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
 	typeOid = typenameTypeId(NULL, typename);
 
+	/* get schema OID and check its permissions */
+	nspOid = LookupCreationNamespace(newschema);
+
+	AlterTypeNamespace_oid(typeOid, nspOid);
+}
+
+Oid
+AlterTypeNamespace_oid(Oid typeOid, Oid nspOid)
+{
+	Oid			elemOid;
+
 	/* check permissions on type */
 	if (!pg_type_ownercheck(typeOid, GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_TYPE,
 					   format_type_be(typeOid));
-
-	/* get schema OID and check its permissions */
-	nspOid = LookupCreationNamespace(newschema);
 
 	/* don't allow direct alteration of array types */
 	elemOid = get_element_type(typeOid);
@@ -3170,7 +3193,7 @@ AlterTypeNamespace(List *names, const char *newschema)
 						 format_type_be(elemOid))));
 
 	/* and do the work */
-	AlterTypeNamespaceInternal(typeOid, nspOid, false, true);
+	return AlterTypeNamespaceInternal(typeOid, nspOid, false, true);
 }
 
 /*
@@ -3185,8 +3208,10 @@ AlterTypeNamespace(List *names, const char *newschema)
  * If errorOnTableType is TRUE, the function errors out if the type is
  * a table type.  ALTER TABLE has to be used to move a table to a new
  * namespace.
+ *
+ * Returns the type's old namespace OID.
  */
-void
+Oid
 AlterTypeNamespaceInternal(Oid typeOid, Oid nspOid,
 						   bool isImplicitArray,
 						   bool errorOnTableType)
@@ -3293,4 +3318,6 @@ AlterTypeNamespaceInternal(Oid typeOid, Oid nspOid,
 	/* Recursively alter the associated array type, if any */
 	if (OidIsValid(arrayOid))
 		AlterTypeNamespaceInternal(arrayOid, nspOid, true, true);
+
+	return oldNspOid;
 }
