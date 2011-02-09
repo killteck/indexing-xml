@@ -1419,7 +1419,7 @@ DefineRange(CreateRangeStmt *stmt)
 				   NULL,		/* never a default type value */
 				   NULL,		/* binary default isn't sent either */
 				   false,		/* never passed by value */
-				   'i',			/* int alignment */
+				   'c',			/* char alignment */
 				   'x',			/* TOAST strategy always plain */
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array dimensions of typbasetype */
@@ -1460,7 +1460,7 @@ DefineRange(CreateRangeStmt *stmt)
 			   NULL,			/* never a default type value */
 			   NULL,			/* binary default isn't sent either */
 			   false,			/* never passed by value */
-			   'i',				/* ranges have align i, so do their arrays */
+			   'i',				/* align 'i' */
 			   'x',				/* ARRAY is always toastable */
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */

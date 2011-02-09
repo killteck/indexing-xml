@@ -25,6 +25,9 @@
 #include "utils/rangetypes.h"
 #include "utils/typcache.h"
 
+#define TYPE_IS_PACKABLE(typlen, typstorage) \
+	(typlen == -1 && typstorage != 'p')
+
 /* flags */
 #define RANGE_EMPTY		0x01
 #define RANGE_LB_INC	0x02
@@ -58,6 +61,10 @@ static void range_parse(const char *input_str,  char *flags,
 static char *range_deparse(char flags, char *lbound_str, char *ubound_str);
 static Datum range_make2(PG_FUNCTION_ARGS);
 static bool range_contains_internal(RangeType *r1, RangeType *r2);
+static Size datum_compute_size(Size sz, Datum datum, bool typbyval,
+							   char typalign, int16 typlen, char typstorage);
+static Pointer datum_write(Pointer ptr, Datum datum, bool typbyval,
+						   char typalign, int16 typlen, char typstorage);
 
 /*
  *----------------------------------------------------------
@@ -1170,22 +1177,35 @@ daterange_canonical(PG_FUNCTION_ARGS)
  */
 
 /*
+ * Serialized format is:
+ *
+ *  4 bytes: Range type Oid
+ *  Lower boundary, if any, aligned according to subtype's typalign
+ *  Upper boundary, if any, aligned according to subtype's typalign
+ *  1 byte for flags
+ *
+ * This representation is chosen for best alignment behavior, to avoid
+ * pad bytes when aligning. However, it requires an odd
+ * deserialization strategy, because we have to read the flags byte
+ * before we know whether to read a boundary.
+ */
+
+/*
  * This serializes a range, but does not canonicalize it. This should
  * only be called by a canonicalization function.
  */
 Datum
 range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 {
-	Datum		 range;
-	size_t		 msize;
-	char		*ptr;
-	Oid			 subtype  = get_range_subtype(lower->rngtypid);
-	int16		 typlen	  = get_typlen(subtype);
-	char		 typalign = get_typalign(subtype);
-	char		 typbyval = get_typbyval(subtype);
-	size_t		 llen = 0;
-	size_t		 ulen = 0;
-	char		 flags = 0;
+	Datum		range;
+	size_t		msize;
+	Pointer		ptr;
+	Oid			subtype	   = get_range_subtype(lower->rngtypid);
+	int16		typlen	   = get_typlen(subtype);
+	char		typalign   = get_typalign(subtype);
+	char		typbyval   = get_typbyval(subtype);
+	char		typstorage = get_typstorage(subtype);
+	char		flags	   = 0;
 
 	if (lower->rngtypid != upper->rngtypid)
 		elog(ERROR, "range types do not match");
@@ -1202,53 +1222,45 @@ range_serialize(RangeBound *lower, RangeBound *upper, bool empty)
 
 	msize  = VARHDRSZ;
 	msize += sizeof(Oid);
-	msize += sizeof(char);
 
 	if (RANGE_HAS_LBOUND(flags))
 	{
-		llen = att_addlength_datum(0, typlen, lower->val);
-		msize = att_align_nominal(msize, typalign);
-		msize += llen;
+		msize = datum_compute_size(msize, lower->val, typbyval, typalign,
+								   typlen, typstorage);
 	}
 
 	if (RANGE_HAS_UBOUND(flags))
 	{
-		ulen = att_addlength_datum(0, typlen, upper->val);
-		msize = att_align_nominal(msize, typalign);
-		msize += ulen;
+		msize = datum_compute_size(msize, upper->val, typbyval, typalign,
+								   typlen, typstorage);
 	}
 
-	ptr = palloc(msize);
+	msize += sizeof(char);
+
+	ptr = palloc0(msize);
 	range = (Datum) ptr;
 
 	ptr += VARHDRSZ;
 
 	memcpy(ptr, &lower->rngtypid, sizeof(Oid));
 	ptr += sizeof(Oid);
-	memcpy(ptr, &flags, sizeof(char));
-	ptr += sizeof(char);
 
 	if (RANGE_HAS_LBOUND(flags))
 	{
 		Assert(lower->lower);
-		ptr = (char *) att_align_nominal(ptr, typalign);
-		if (typbyval)
-			store_att_byval(ptr, lower->val, typlen);
-		else
-			memcpy(ptr, (void *) lower->val, llen);
-		ptr += llen;
+		ptr = datum_write(ptr, lower->val, typbyval, typalign, typlen,
+						  typstorage);
 	}
 
 	if (RANGE_HAS_UBOUND(flags))
 	{
 		Assert(!upper->lower);
-		ptr = (char *) att_align_nominal(ptr, typalign);
-		if (typbyval)
-			store_att_byval(ptr, upper->val, typlen);
-		else
-			memcpy(ptr, (void *) upper->val, ulen);
-		ptr += ulen;
+		ptr = datum_write(ptr, upper->val, typbyval, typalign, typlen,
+						  typstorage);
 	}
+
+	memcpy(ptr, &flags, sizeof(char));
+	ptr += sizeof(char);
 
 	SET_VARSIZE(range, msize);
 	PG_RETURN_RANGE(range);
@@ -1258,25 +1270,26 @@ void
 range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 				  bool *empty)
 {
-	char		*ptr = VARDATA(range);
-	int			 llen;
-	int			 ulen;
-	char		 typalign;
-	int16		 typlen;
-	int16		 typbyval;
-	char		 flags;
-	Oid			 rngtypid;
-	Oid			 subtype;
-	Datum		 lbound;
-	Datum		 ubound;
+	Pointer		ptr	= VARDATA(range);
+	char		typalign;
+	int16		typlen;
+	int16		typbyval;
+	char		flags;
+	Oid			rngtypid;
+	Oid			subtype;
+	Datum		lbound;
+	Datum		ubound;
+	Pointer		flags_ptr;
 
 	memset(lower, 0, sizeof(RangeBound));
 	memset(upper, 0, sizeof(RangeBound));
 
+	/* peek at last byte to read the flag byte */
+	flags_ptr = ptr + VARSIZE(range) - VARHDRSZ - 1;
+	memcpy(&flags, flags_ptr, sizeof(char));
+
 	memcpy(&rngtypid, ptr, sizeof(Oid));
 	ptr += sizeof(Oid);
-	memcpy(&flags, ptr, sizeof(char));
-	ptr += sizeof(char);
 
 	if (rngtypid == ANYRANGEOID)
 		ereport(ERROR,
@@ -1290,20 +1303,22 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 
 	if (RANGE_HAS_LBOUND(flags))
 	{
-		ptr = (char *) att_align_nominal(ptr, typalign);
-		llen = att_addlength_datum(0, typlen, (Datum) ptr);
+		ptr = (Pointer) att_align_pointer(ptr, typalign, typlen, ptr);
 		lbound = fetch_att(ptr, typbyval, typlen);
-		ptr += llen;
+		ptr = (Pointer) att_addlength_datum(ptr, typlen, PointerGetDatum(ptr));
+		if (typlen == -1)
+			lbound = PointerGetDatum(PG_DETOAST_DATUM(lbound));
 	}
 	else
 		lbound = (Datum) 0;
 
 	if (RANGE_HAS_UBOUND(flags))
 	{
-		ptr = (char *) att_align_nominal(ptr, typalign);
-		ulen = att_addlength_datum(0, typlen, (Datum) ptr);
+		ptr = (Pointer) att_align_pointer(ptr, typalign, typlen, ptr);
 		ubound = fetch_att(ptr, typbyval, typlen);
-		ptr += ulen;
+		ptr = (Pointer) att_addlength_datum(ptr, typlen, PointerGetDatum(ptr));
+		if (typlen == -1)
+			ubound = PointerGetDatum(PG_DETOAST_DATUM(ubound));
 	}
 	else
 		ubound = (Datum) 0;
@@ -1317,7 +1332,7 @@ range_deserialize(RangeType *range, RangeBound *lower, RangeBound *upper,
 	lower->lower	 = true;
 
 	upper->rngtypid	 = rngtypid;
-	upper->val		 = ubound;;
+	upper->val		 = ubound;
 	upper->inclusive = flags &	RANGE_UB_INC;
 	upper->infinite	 = flags &	RANGE_UB_INF;
 	upper->lower	 = false;
@@ -1706,4 +1721,98 @@ range_contains_internal(RangeType *r1, RangeType *r2)
 		return false;
 
 	return true;
+}
+
+/*
+ * datum_compute_size() and datum_write() are modeled after
+ * heap_compute_data_size() and heap_fill_tuple().
+ */
+
+static Size
+datum_compute_size(Size data_length, Datum val, bool typbyval, char typalign,
+				   int16 typlen, char typstorage)
+{
+	if (TYPE_IS_PACKABLE(typlen, typstorage) &&
+		VARATT_CAN_MAKE_SHORT(DatumGetPointer(val)))
+	{
+		/*
+		 * we're anticipating converting to a short varlena header, so
+		 * adjust length and don't count any alignment
+		 */
+		data_length += VARATT_CONVERTED_SHORT_SIZE(DatumGetPointer(val));
+	}
+	else
+	{
+		data_length = att_align_datum(data_length, typalign, typlen, val);
+		data_length = att_addlength_datum(data_length, typlen, val);
+	}
+
+	return data_length;
+}
+
+static Pointer
+datum_write(Pointer ptr, Datum datum, bool typbyval, char typalign,
+			int16 typlen, char typstorage)
+{
+	Size		data_length;
+
+	if (typbyval)
+	{
+		/* pass-by-value */
+		ptr = (char *) att_align_nominal(ptr, typalign);
+		store_att_byval(ptr, datum, typlen);
+		data_length = typlen;
+	}
+	else if (typlen == -1)
+	{
+		/* varlena */
+		Pointer		val = DatumGetPointer(datum);
+
+		if (VARATT_IS_EXTERNAL(val))
+		{
+			/* no alignment, since it's short by definition */
+			data_length = VARSIZE_EXTERNAL(val);
+			memcpy(ptr, val, data_length);
+		}
+		else if (VARATT_IS_SHORT(val))
+		{
+			/* no alignment for short varlenas */
+			data_length = VARSIZE_SHORT(val);
+			memcpy(ptr, val, data_length);
+		}
+		else if (TYPE_IS_PACKABLE(typlen, typstorage) &&
+				 VARATT_CAN_MAKE_SHORT(val))
+		{
+			/* convert to short varlena -- no alignment */
+			data_length = VARATT_CONVERTED_SHORT_SIZE(val);
+			SET_VARSIZE_SHORT(ptr, data_length);
+			memcpy(ptr + 1, VARDATA(val), data_length - 1);
+		}
+		else
+		{
+			/* full 4-byte header varlena */
+			ptr = (char *) att_align_nominal(ptr, typalign);
+			data_length = VARSIZE(val);
+			memcpy(ptr, val, data_length);
+		}
+	}
+	else if (typlen == -2)
+	{
+		/* cstring ... never needs alignment */
+		Assert(typalign == 'c');
+		data_length = strlen(DatumGetCString(datum)) + 1;
+		memcpy(ptr, DatumGetPointer(datum), data_length);
+	}
+	else
+	{
+		/* fixed-length pass-by-reference */
+		ptr = (char *) att_align_nominal(ptr, typalign);
+		Assert(typlen > 0);
+		data_length = typlen;
+		memcpy(ptr, DatumGetPointer(datum), data_length);
+	}
+
+	ptr += data_length;
+
+	return ptr;
 }
