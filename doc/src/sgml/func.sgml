@@ -10471,8 +10471,7 @@ SELECT NULLIF(value, '(none)') ...
         <entry> <literal>&gt;</literal> </entry>
         <entry>greater than</entry>
         <entry><literal>range(1,10) &gt; range(1,5)</literal></entry>
-        <entry><literal>
-	</literal>t</entry>
+        <entry><literal>t</literal></entry>
        </row>
 
        <row>
