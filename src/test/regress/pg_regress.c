@@ -86,6 +86,7 @@ char	   *outputdir = ".";
 char	   *psqldir = PGBINDIR;
 char	   *launcher = NULL;
 static _stringlist *loadlanguage = NULL;
+static _stringlist *loadextension = NULL;
 static int	max_connections = 0;
 static char *encoding = NULL;
 static _stringlist *schedulelist = NULL;
@@ -1800,6 +1801,16 @@ create_database(const char *dbname)
 		header(_("installing %s"), sl->str);
 		psql_command(dbname, "CREATE OR REPLACE LANGUAGE \"%s\"", sl->str);
 	}
+
+	/*
+	 * Install any requested extensions.  We use CREATE IF NOT EXISTS
+	 * so that this will work whether or not the extension is preinstalled.
+	 */
+	for (sl = loadextension; sl != NULL; sl = sl->next)
+	{
+		header(_("installing %s"), sl->str);
+		psql_command(dbname, "CREATE EXTENSION IF NOT EXISTS \"%s\"", sl->str);
+	}
 }
 
 static void
@@ -1861,6 +1872,8 @@ help(void)
 	printf(_("  --debug                   turn on debug mode in programs that are run\n"));
 	printf(_("  --inputdir=DIR            take input files from DIR (default \".\")\n"));
 	printf(_("  --load-language=lang      load the named language before running the\n"));
+	printf(_("                            tests; can appear multiple times\n"));
+	printf(_("  --load-extension=ext      load the named extension before running the\n"));
 	printf(_("                            tests; can appear multiple times\n"));
 	printf(_("  --create-role=ROLE        create the specified role before testing\n"));
 	printf(_("  --max-connections=N       maximum number of concurrent connections\n"));
@@ -1925,6 +1938,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"temp-config", required_argument, NULL, 19},
 		{"use-existing", no_argument, NULL, 20},
 		{"launcher", required_argument, NULL, 21},
+		{"load-extension", required_argument, NULL, 22},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2021,6 +2035,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 			case 21:
 				launcher = strdup(optarg);
 				break;
+			case 22:
+				add_stringlist_item(&loadextension, optarg);
+				break;
 			default:
 				/* getopt_long already emitted a complaint */
 				fprintf(stderr, _("\nTry \"%s -h\" for more information.\n"),
@@ -2094,7 +2111,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		/* "make install" */
 #ifndef WIN32_ONLY_COMPILER
 		snprintf(buf, sizeof(buf),
-				 SYSTEMQUOTE "\"%s\" -C \"%s\" DESTDIR=\"%s/install\" install with_perl=no with_python=no > \"%s/log/install.log\" 2>&1" SYSTEMQUOTE,
+				 SYSTEMQUOTE "\"%s\" -C \"%s\" DESTDIR=\"%s/install\" install > \"%s/log/install.log\" 2>&1" SYSTEMQUOTE,
 				 makeprog, top_builddir, temp_install, outputdir);
 #else
 		snprintf(buf, sizeof(buf),

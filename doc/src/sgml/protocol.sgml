@@ -1469,11 +1469,87 @@ The commands accepted in walsender mode are:
        shutdown), it will send a CommandComplete message before exiting.
        This might not happen during an abnormal shutdown, of course.
      </para>
+
+     <para>
+       The receiving process can send a status update back to the sender at
+       any time, using the following message format (also in the payload of
+       a CopyData message):
+     </para>
+
+     <para>
+      <variablelist>
+      <varlistentry>
+      <term>
+          Standby status update (F)
+      </term>
+      <listitem>
+      <para>
+      <variablelist>
+      <varlistentry>
+      <term>
+          Byte1('r')
+      </term>
+      <listitem>
+      <para>
+          Identifies the message as a receiver status update.
+      </para>
+      </listitem>
+      </varlistentry>
+      <varlistentry>
+      <term>
+          Byte8
+      </term>
+      <listitem>
+      <para>
+          The location of the last WAL byte + 1 received and written to disk
+          in the standby, in XLogRecPtr format.
+      </para>
+      </listitem>
+      </varlistentry>
+      <varlistentry>
+      <term>
+          Byte8
+      </term>
+      <listitem>
+      <para>
+          The location of the last WAL byte + 1 flushed to disk in
+          the standby, in XLogRecPtr format.
+      </para>
+      </listitem>
+      </varlistentry>
+      <varlistentry>
+      <term>
+          Byte8
+      </term>
+      <listitem>
+      <para>
+          The location of the last WAL byte + 1 applied in the standby, in
+          XLogRecPtr format.
+      </para>
+      </listitem>
+      </varlistentry>
+      <varlistentry>
+      <term>
+          Byte8
+      </term>
+      <listitem>
+      <para>
+          The server's system clock at the time of transmission,
+          given in TimestampTz format.
+      </para>
+      </listitem>
+      </varlistentry>
+      </variablelist>
+      </para>
+      </listitem>
+      </varlistentry>
+      </variablelist>
+     </para>
     </listitem>
   </varlistentry>
 
   <varlistentry>
-    <term>BASE_BACKUP [<literal>LABEL</literal> <replaceable>'label'</replaceable>] [<literal>PROGRESS</literal>] [<literal>FAST</literal>] [<literal>WAL</literal>]</term>
+    <term>BASE_BACKUP [<literal>LABEL</literal> <replaceable>'label'</replaceable>] [<literal>PROGRESS</literal>] [<literal>FAST</literal>] [<literal>WAL</literal>] [<literal>NOWAIT</literal>]</term>
     <listitem>
      <para>
       Instructs the server to start streaming a base backup.
@@ -1529,6 +1605,19 @@ The commands accepted in walsender mode are:
           file.
          </para>
         </listitem>
+       </varlistentry>
+
+       <varlistentry>
+        <term><literal>NOWAIT</literal></term>
+        <listitem>
+         <para>
+          By default, the backup will wait until the last required xlog
+          segment has been archived, or emit a warning if log archiving is
+          not enabled. Specifying <literal>NOWAIT</literal> disables both
+          the waiting and the warning, leaving the client responsible for
+          ensuring the required log is available.
+         </para>
+         </listitem>
        </varlistentry>
       </variablelist>
      </para>

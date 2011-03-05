@@ -504,10 +504,14 @@ extern Datum anyenum_in(PG_FUNCTION_ARGS);
 extern Datum anyenum_out(PG_FUNCTION_ARGS);
 extern Datum void_in(PG_FUNCTION_ARGS);
 extern Datum void_out(PG_FUNCTION_ARGS);
+extern Datum void_recv(PG_FUNCTION_ARGS);
+extern Datum void_send(PG_FUNCTION_ARGS);
 extern Datum trigger_in(PG_FUNCTION_ARGS);
 extern Datum trigger_out(PG_FUNCTION_ARGS);
 extern Datum language_handler_in(PG_FUNCTION_ARGS);
 extern Datum language_handler_out(PG_FUNCTION_ARGS);
+extern Datum fdw_handler_in(PG_FUNCTION_ARGS);
+extern Datum fdw_handler_out(PG_FUNCTION_ARGS);
 extern Datum internal_in(PG_FUNCTION_ARGS);
 extern Datum internal_out(PG_FUNCTION_ARGS);
 extern Datum opaque_in(PG_FUNCTION_ARGS);
@@ -984,7 +988,7 @@ extern int32 type_maximum_size(Oid type_oid, int32 typemod);
 /* quote.c */
 extern Datum quote_ident(PG_FUNCTION_ARGS);
 extern Datum quote_literal(PG_FUNCTION_ARGS);
-extern char *quote_literal_cstr(char *rawstr);
+extern char *quote_literal_cstr(const char *rawstr);
 extern Datum quote_nullable(PG_FUNCTION_ARGS);
 
 /* guc.c */
@@ -995,15 +999,23 @@ extern Datum show_all_settings(PG_FUNCTION_ARGS);
 /* lockfuncs.c */
 extern Datum pg_lock_status(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_int8(PG_FUNCTION_ARGS);
+extern Datum pg_advisory_xact_lock_int8(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_shared_int8(PG_FUNCTION_ARGS);
+extern Datum pg_advisory_xact_lock_shared_int8(PG_FUNCTION_ARGS);
 extern Datum pg_try_advisory_lock_int8(PG_FUNCTION_ARGS);
+extern Datum pg_try_advisory_xact_lock_int8(PG_FUNCTION_ARGS);
 extern Datum pg_try_advisory_lock_shared_int8(PG_FUNCTION_ARGS);
+extern Datum pg_try_advisory_xact_lock_shared_int8(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int8(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int8(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_int4(PG_FUNCTION_ARGS);
+extern Datum pg_advisory_xact_lock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_shared_int4(PG_FUNCTION_ARGS);
+extern Datum pg_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_try_advisory_lock_int4(PG_FUNCTION_ARGS);
+extern Datum pg_try_advisory_xact_lock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_try_advisory_lock_shared_int4(PG_FUNCTION_ARGS);
+extern Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_all(PG_FUNCTION_ARGS);
@@ -1053,6 +1065,7 @@ extern Datum window_nth_value(PG_FUNCTION_ARGS);
 
 /* access/gin/ginarrayproc.c */
 extern Datum ginarrayextract(PG_FUNCTION_ARGS);
+extern Datum ginarrayextract_2args(PG_FUNCTION_ARGS);
 extern Datum ginqueryarrayextract(PG_FUNCTION_ARGS);
 extern Datum ginarrayconsistent(PG_FUNCTION_ARGS);
 
@@ -1067,6 +1080,8 @@ extern Datum unique_key_recheck(PG_FUNCTION_ARGS);
 
 /* commands/extension.c */
 extern Datum pg_available_extensions(PG_FUNCTION_ARGS);
+extern Datum pg_available_extension_versions(PG_FUNCTION_ARGS);
+extern Datum pg_extension_update_paths(PG_FUNCTION_ARGS);
 extern Datum pg_extension_config_dump(PG_FUNCTION_ARGS);
 
 /* commands/prepare.c */

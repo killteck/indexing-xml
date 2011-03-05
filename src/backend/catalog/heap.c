@@ -42,6 +42,7 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_attrdef.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_foreign_table.h"
 #include "catalog/pg_inherits.h"
@@ -428,6 +429,7 @@ CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind,
 	{
 		CheckAttributeType(NameStr(tupdesc->attrs[i]->attname),
 						   tupdesc->attrs[i]->atttypid,
+						   tupdesc->attrs[i]->attcollation,
 						   allow_system_table_mods);
 	}
 }
@@ -441,7 +443,7 @@ CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind,
  * --------------------------------
  */
 void
-CheckAttributeType(const char *attname, Oid atttypid,
+CheckAttributeType(const char *attname, Oid atttypid, Oid attcollation,
 				   bool allow_system_table_mods)
 {
 	char		att_typtype = get_typtype(atttypid);
@@ -492,12 +494,24 @@ CheckAttributeType(const char *attname, Oid atttypid,
 
 			if (attr->attisdropped)
 				continue;
-			CheckAttributeType(NameStr(attr->attname), attr->atttypid,
+			CheckAttributeType(NameStr(attr->attname), attr->atttypid, attr->attcollation,
 							   allow_system_table_mods);
 		}
 
 		relation_close(relation, AccessShareLock);
 	}
+
+	/*
+	 * This might not be strictly invalid per SQL standard, but it is
+	 * pretty useless, and it cannot be dumped, so we must disallow
+	 * it.
+	 */
+	if (type_is_collatable(atttypid) && !OidIsValid(attcollation))
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					 errmsg("no collation was derived for column \"%s\" with collatable type %s",
+							attname, format_type_be(atttypid)),
+					 errhint("Use the COLLATE clause to set the collation explicitly.")));
 }
 
 /*
@@ -613,6 +627,14 @@ AddNewAttributeTuples(Oid new_rel_oid,
 		referenced.objectId = attr->atttypid;
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+
+		if (OidIsValid(attr->attcollation))
+		{
+			referenced.classId = CollationRelationId;
+			referenced.objectId = attr->attcollation;
+			referenced.objectSubId = 0;
+			recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+		}
 	}
 
 	/*
@@ -1594,14 +1616,10 @@ heap_drop_with_catalog(Oid relid)
 
 	/*
 	 * There can no longer be anyone *else* touching the relation, but we
-	 * might still have open queries or cursors in our own session.
+	 * might still have open queries or cursors, or pending trigger events,
+	 * in our own session.
 	 */
-	if (rel->rd_refcnt != 1)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_IN_USE),
-				 errmsg("cannot drop \"%s\" because "
-						"it is being used by active queries in this session",
-						RelationGetRelationName(rel))));
+	CheckTableNotInUse(rel, "DROP TABLE");
 
 	/*
 	 * Delete pg_foreign_table tuple first.

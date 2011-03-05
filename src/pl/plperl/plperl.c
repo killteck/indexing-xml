@@ -58,8 +58,8 @@ PG_MODULE_MAGIC;
 
 
 /**********************************************************************
- * Information associated with a Perl interpreter.  We have one interpreter
- * that is used for all plperlu (untrusted) functions.  For plperl (trusted)
+ * Information associated with a Perl interpreter.	We have one interpreter
+ * that is used for all plperlu (untrusted) functions.	For plperl (trusted)
  * functions, there is a separate interpreter for each effective SQL userid.
  * (This is needed to ensure that an unprivileged user can't inject Perl code
  * that'll be executed with the privileges of some other SQL user.)
@@ -83,9 +83,9 @@ PG_MODULE_MAGIC;
  **********************************************************************/
 typedef struct plperl_interp_desc
 {
-	Oid			user_id;				/* Hash key (must be first!) */
-	PerlInterpreter *interp;			/* The interpreter */
-	HTAB	   *query_hash;				/* plperl_query_entry structs */
+	Oid			user_id;		/* Hash key (must be first!) */
+	PerlInterpreter *interp;	/* The interpreter */
+	HTAB	   *query_hash;		/* plperl_query_entry structs */
 } plperl_interp_desc;
 
 
@@ -97,7 +97,7 @@ typedef struct plperl_proc_desc
 	char	   *proname;		/* user name of procedure */
 	TransactionId fn_xmin;
 	ItemPointerData fn_tid;
-	plperl_interp_desc *interp;	/* interpreter it's created in */
+	plperl_interp_desc *interp; /* interpreter it's created in */
 	bool		fn_readonly;
 	bool		lanpltrusted;
 	bool		fn_retistuple;	/* true, if function returns tuple */
@@ -109,6 +109,7 @@ typedef struct plperl_proc_desc
 	int			nargs;
 	FmgrInfo	arg_out_func[FUNC_MAX_ARGS];
 	bool		arg_is_rowtype[FUNC_MAX_ARGS];
+	Oid			arg_arraytype[FUNC_MAX_ARGS];	/* InvalidOid if not an array */
 	SV		   *reference;
 } plperl_proc_desc;
 
@@ -127,18 +128,19 @@ typedef struct plperl_proc_desc
  **********************************************************************/
 typedef struct plperl_proc_key
 {
-	Oid			proc_id;				/* Function OID */
+	Oid			proc_id;		/* Function OID */
+
 	/*
 	 * is_trigger is really a bool, but declare as Oid to ensure this struct
 	 * contains no padding
 	 */
-	Oid			is_trigger;				/* is it a trigger function? */
-	Oid			user_id;				/* User calling the function, or 0 */
+	Oid			is_trigger;		/* is it a trigger function? */
+	Oid			user_id;		/* User calling the function, or 0 */
 } plperl_proc_key;
 
 typedef struct plperl_proc_ptr
 {
-	plperl_proc_key proc_key;			/* Hash key (must be first!) */
+	plperl_proc_key proc_key;	/* Hash key (must be first!) */
 	plperl_proc_desc *proc_ptr;
 } plperl_proc_ptr;
 
@@ -178,12 +180,26 @@ typedef struct plperl_query_entry
 } plperl_query_entry;
 
 /**********************************************************************
+ * Information for PostgreSQL - Perl array conversion.
+ **********************************************************************/
+typedef struct plperl_array_info
+{
+	int			ndims;
+	bool		elem_is_rowtype;	/* 't' if element type is a rowtype */
+	Datum	   *elements;
+	bool	   *nulls;
+	int		   *nelems;
+	FmgrInfo	proc;
+} plperl_array_info;
+
+/**********************************************************************
  * Global data
  **********************************************************************/
 
 static HTAB *plperl_interp_hash = NULL;
 static HTAB *plperl_proc_hash = NULL;
 static plperl_interp_desc *plperl_active_interp = NULL;
+
 /* If we have an unassigned "held" interpreter, it's stored here */
 static PerlInterpreter *plperl_held_interp = NULL;
 
@@ -206,6 +222,9 @@ static plperl_call_data *current_call_data = NULL;
 Datum		plperl_call_handler(PG_FUNCTION_ARGS);
 Datum		plperl_inline_handler(PG_FUNCTION_ARGS);
 Datum		plperl_validator(PG_FUNCTION_ARGS);
+Datum		plperlu_call_handler(PG_FUNCTION_ARGS);
+Datum		plperlu_inline_handler(PG_FUNCTION_ARGS);
+Datum		plperlu_validator(PG_FUNCTION_ARGS);
 void		_PG_init(void);
 
 static PerlInterpreter *plperl_init_interp(void);
@@ -219,6 +238,19 @@ static Datum plperl_trigger_handler(PG_FUNCTION_ARGS);
 static plperl_proc_desc *compile_plperl_function(Oid fn_oid, bool is_trigger);
 
 static SV  *plperl_hash_from_tuple(HeapTuple tuple, TupleDesc tupdesc);
+static SV  *plperl_hash_from_datum(Datum attr);
+static SV  *plperl_ref_from_pg_array(Datum arg, Oid typid);
+static SV  *split_array(plperl_array_info *info, int first, int last, int nest);
+static SV  *make_array_ref(plperl_array_info *info, int first, int last);
+static SV  *get_perl_array_ref(SV *sv);
+static Datum plperl_sv_to_datum(SV *sv, FmgrInfo *func, Oid typid,
+				   Oid typioparam, int32 typmod, bool *isnull);
+static void _sv_to_datum_finfo(FmgrInfo *fcinfo, Oid typid, Oid *typioparam);
+static Datum plperl_array_to_datum(SV *src, Oid typid);
+static ArrayBuildState *_array_to_datum(AV *av, int *ndims, int *dims,
+			  int cur_depth, ArrayBuildState *astate, Oid typid, Oid atypid);
+static Datum plperl_hash_to_datum(SV *src, TupleDesc td);
+
 static void plperl_init_shared_libs(pTHX);
 static void plperl_trusted_init(void);
 static void plperl_untrusted_init(void);
@@ -227,7 +259,8 @@ static char *hek2cstr(HE *he);
 static SV **hv_store_string(HV *hv, const char *key, SV *val);
 static SV **hv_fetch_string(HV *hv, const char *key);
 static void plperl_create_sub(plperl_proc_desc *desc, char *s, Oid fn_oid);
-static SV  *plperl_call_perl_func(plperl_proc_desc *desc, FunctionCallInfo fcinfo);
+static SV  *plperl_call_perl_func(plperl_proc_desc *desc,
+					  FunctionCallInfo fcinfo);
 static void plperl_compile_callback(void *arg);
 static void plperl_exec_callback(void *arg);
 static void plperl_inline_callback(void *arg);
@@ -245,31 +278,32 @@ static char *setlocale_perl(int category, char *locale);
 static char *
 hek2cstr(HE *he)
 {
-	/*
-	 * Unfortunately,  while HeUTF8 is true for most things > 256, for
-	 * values 128..255 it's not, but perl will treat them as
-	 * unicode code points if the utf8 flag is not set ( see
-	 * The "Unicode Bug" in perldoc perlunicode for more)
+	/*-------------------------
+	 * Unfortunately,  while HeUTF8 is true for most things > 256, for values
+	 * 128..255 it's not, but perl will treat them as unicode code points if
+	 * the utf8 flag is not set ( see The "Unicode Bug" in perldoc perlunicode
+	 * for more)
 	 *
 	 * So if we did the expected:
-	 *    if (HeUTF8(he))
-	 * 	  	  utf_u2e(key...);
-	 * 	  else // must be ascii
-	 * 	      return HePV(he);
+	 *	  if (HeUTF8(he))
+	 *		  utf_u2e(key...);
+	 *	  else // must be ascii
+	 *		  return HePV(he);
 	 * we won't match columns with codepoints from 128..255
 	 *
-	 * For a more concrete example given a column with the
-	 * name of the unicode codepoint U+00ae (registered sign)
-	 * and a UTF8 database and the perl return_next {
-	 * "\N{U+00ae}=>'text } would always fail as heUTF8
-	 * returns 0 and HePV() would give us a char * with 1 byte
-	 * contains the decimal value 174
+	 * For a more concrete example given a column with the name of the unicode
+	 * codepoint U+00ae (registered sign) and a UTF8 database and the perl
+	 * return_next { "\N{U+00ae}=>'text } would always fail as heUTF8 returns
+	 * 0 and HePV() would give us a char * with 1 byte contains the decimal
+	 * value 174
 	 *
-	 * Perl has the brains to know when it should utf8 encode
-	 * 174 properly, so here we force it into an SV so that
-	 * perl will figure it out and do the right thing
+	 * Perl has the brains to know when it should utf8 encode 174 properly, so
+	 * here we force it into an SV so that perl will figure it out and do the
+	 * right thing
+	 *-------------------------
 	 */
-	SV *sv = HeSVKEY_force(he);
+	SV		   *sv = HeSVKEY_force(he);
+
 	if (HeUTF8(he))
 		SvUTF8_on(sv);
 	return sv2cstr(sv);
@@ -547,6 +581,7 @@ select_perl_context(bool trusted)
 	else
 	{
 #ifdef MULTIPLICITY
+
 		/*
 		 * plperl_init_interp will change Perl's idea of the active
 		 * interpreter.  Reset plperl_active_interp temporarily, so that if we
@@ -675,7 +710,7 @@ plperl_init_interp(void)
 	STMT_START { \
 		if (saved != NULL) { setlocale_perl(name, saved); pfree(saved); } \
 	} STMT_END
-#endif /* WIN32 */
+#endif   /* WIN32 */
 
 	if (plperl_on_init && *plperl_on_init)
 	{
@@ -685,12 +720,12 @@ plperl_init_interp(void)
 
 	/*
 	 * The perl API docs state that PERL_SYS_INIT3 should be called before
-	 * allocating interpreters. Unfortunately, on some platforms this fails
-	 * in the Perl_do_taint() routine, which is called when the platform is
-	 * using the system's malloc() instead of perl's own. Other platforms,
-	 * notably Windows, fail if PERL_SYS_INIT3 is not called. So we call it
-	 * if it's available, unless perl is using the system malloc(), which is
-	 * true when MYMALLOC is set.
+	 * allocating interpreters. Unfortunately, on some platforms this fails in
+	 * the Perl_do_taint() routine, which is called when the platform is using
+	 * the system's malloc() instead of perl's own. Other platforms, notably
+	 * Windows, fail if PERL_SYS_INIT3 is not called. So we call it if it's
+	 * available, unless perl is using the system malloc(), which is true when
+	 * MYMALLOC is set.
 	 */
 #if defined(PERL_SYS_INIT3) && !defined(MYMALLOC)
 	{
@@ -859,8 +894,8 @@ plperl_trusted_init(void)
 				 errcontext("while executing PLC_TRUSTED")));
 
 	/*
-	 * Force loading of utf8 module now to prevent errors that can arise
-	 * from the regex code later trying to load utf8 modules. See
+	 * Force loading of utf8 module now to prevent errors that can arise from
+	 * the regex code later trying to load utf8 modules. See
 	 * http://rt.perl.org/rt3/Ticket/Display.html?id=47576
 	 */
 	eval_pv("my $a=chr(0x100); return $a =~ /\\xa9/i", FALSE);
@@ -955,78 +990,393 @@ static HeapTuple
 plperl_build_tuple_result(HV *perlhash, AttInMetadata *attinmeta)
 {
 	TupleDesc	td = attinmeta->tupdesc;
-	char	  **values;
-	HE			*he;
+	Datum	   *values;
+	bool	   *nulls;
+	HE		   *he;
 	HeapTuple	tup;
-	int			i;
 
-	values = (char **) palloc0(td->natts * sizeof(char *));
+	values = palloc0(sizeof(Datum) * td->natts);
+	nulls = palloc(sizeof(bool) * td->natts);
+	memset(nulls, true, sizeof(bool) * td->natts);
 
 	hv_iterinit(perlhash);
 	while ((he = hv_iternext(perlhash)))
 	{
-		SV		*val = HeVAL(he);
-		char	*key = hek2cstr(he);
-		int		attn = SPI_fnumber(td, key);
+		SV		   *val = HeVAL(he);
+		char	   *key = hek2cstr(he);
+		int			attn = SPI_fnumber(td, key);
+		bool		isnull;
 
 		if (attn <= 0 || td->attrs[attn - 1]->attisdropped)
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_COLUMN),
 					 errmsg("Perl hash contains nonexistent column \"%s\"",
 							key)));
-		if (SvOK(val))
-		{
-			values[attn - 1] = sv2cstr(val);
-		}
+
+		values[attn - 1] = plperl_sv_to_datum(val,
+											  NULL,
+											  td->attrs[attn - 1]->atttypid,
+											  InvalidOid,
+											  td->attrs[attn - 1]->atttypmod,
+											  &isnull);
+		nulls[attn - 1] = isnull;
 
 		pfree(key);
 	}
 	hv_iterinit(perlhash);
 
-	tup = BuildTupleFromCStrings(attinmeta, values);
-
-	for(i = 0; i < td->natts; i++)
-	{
-		if (values[i])
-			pfree(values[i]);
-	}
+	tup = heap_form_tuple(td, values, nulls);
 	pfree(values);
-
+	pfree(nulls);
 	return tup;
 }
 
-/*
- * convert perl array to postgres string representation
- */
-static SV  *
-plperl_convert_to_pg_array(SV *src)
+/* convert a hash reference to a datum */
+static Datum
+plperl_hash_to_datum(SV *src, TupleDesc td)
 {
-	SV		   *rv;
-	int			count;
+	AttInMetadata *attinmeta = TupleDescGetAttInMetadata(td);
+	HeapTuple	tup = plperl_build_tuple_result((HV *) SvRV(src), attinmeta);
 
-	dSP;
-
-	PUSHMARK(SP);
-	XPUSHs(src);
-	PUTBACK;
-
-	count = perl_call_pv("::encode_array_literal", G_SCALAR);
-
-	SPAGAIN;
-
-	if (count != 1)
-		elog(ERROR, "unexpected encode_array_literal failure");
-
-	rv = POPs;
-
-	PUTBACK;
-
-	return rv;
+	return HeapTupleGetDatum(tup);
 }
 
+/*
+ * if we are an array ref return the reference. this is special in that if we
+ * are a PostgreSQL::InServer::ARRAY object we will return the 'magic' array.
+ */
+static SV  *
+get_perl_array_ref(SV *sv)
+{
+	if (SvOK(sv) && SvROK(sv))
+	{
+		if (SvTYPE(SvRV(sv)) == SVt_PVAV)
+			return sv;
+		else if (sv_isa(sv, "PostgreSQL::InServer::ARRAY"))
+		{
+			HV		   *hv = (HV *) SvRV(sv);
+			SV		  **sav = hv_fetch_string(hv, "array");
+
+			if (*sav && SvOK(*sav) && SvROK(*sav) &&
+				SvTYPE(SvRV(*sav)) == SVt_PVAV)
+				return *sav;
+
+			elog(ERROR, "could not get array reference from PostgreSQL::InServer::ARRAY object");
+		}
+	}
+	return NULL;
+}
+
+/*
+ * helper function for plperl_array_to_datum, does the main recursing
+ */
+static ArrayBuildState *
+_array_to_datum(AV *av, int *ndims, int *dims, int cur_depth,
+				ArrayBuildState *astate, Oid typid, Oid atypid)
+{
+	int			i = 0;
+	int			len = av_len(av) + 1;
+
+	if (len == 0)
+		astate = accumArrayResult(astate, (Datum) 0, true, atypid, NULL);
+
+	for (i = 0; i < len; i++)
+	{
+		SV		  **svp = av_fetch(av, i, FALSE);
+		SV		   *sav = svp ? get_perl_array_ref(*svp) : NULL;
+
+		if (sav)
+		{
+			AV		   *nav = (AV *) SvRV(sav);
+
+			if (cur_depth + 1 > MAXDIM)
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)",
+								cur_depth + 1, MAXDIM)));
+
+			/* size based off the first element */
+			if (i == 0 && *ndims == cur_depth)
+			{
+				dims[*ndims] = av_len(nav) + 1;
+				(*ndims)++;
+			}
+			else
+			{
+				if (av_len(nav) + 1 != dims[cur_depth])
+					ereport(ERROR,
+							(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+							 errmsg("multidimensional arrays must have array expressions with matching dimensions")));
+			}
+
+			astate = _array_to_datum(nav, ndims, dims, cur_depth + 1, astate,
+									 typid, atypid);
+		}
+		else
+		{
+			bool		isnull;
+			Datum		dat = plperl_sv_to_datum(svp ? *svp : NULL, NULL,
+												 atypid, 0, -1, &isnull);
+
+			astate = accumArrayResult(astate, dat, isnull, atypid, NULL);
+		}
+	}
+
+	return astate;
+}
+
+/*
+ * convert perl array ref to a datum
+ */
+static Datum
+plperl_array_to_datum(SV *src, Oid typid)
+{
+	ArrayBuildState *astate = NULL;
+	Oid			atypid;
+	int			dims[MAXDIM];
+	int			lbs[MAXDIM];
+	int			ndims = 1;
+	int			i;
+
+	atypid = get_element_type(typid);
+	if (!atypid)
+		atypid = typid;
+
+	memset(dims, 0, sizeof(dims));
+	dims[0] = av_len((AV *) SvRV(src)) + 1;
+
+	astate = _array_to_datum((AV *) SvRV(src), &ndims, dims, 1, astate, typid,
+							 atypid);
+
+	for (i = 0; i < ndims; i++)
+		lbs[i] = 1;
+
+	return makeMdArrayResult(astate, ndims, dims, lbs, CurrentMemoryContext, true);
+}
+
+static void
+_sv_to_datum_finfo(FmgrInfo *fcinfo, Oid typid, Oid *typioparam)
+{
+	Oid			typinput;
+
+	/* XXX would be better to cache these lookups */
+	getTypeInputInfo(typid,
+					 &typinput, typioparam);
+	fmgr_info(typinput, fcinfo);
+}
+
+/*
+ * convert a sv to datum
+ * fcinfo and typioparam are optional and will be looked-up if needed
+ */
+static Datum
+plperl_sv_to_datum(SV *sv, FmgrInfo *finfo, Oid typid, Oid typioparam,
+				   int32 typmod, bool *isnull)
+{
+	FmgrInfo	tmp;
+
+	/* we might recurse */
+	check_stack_depth();
+
+	if (isnull)
+		*isnull = false;
+
+	if (!sv || !SvOK(sv))
+	{
+		if (!finfo)
+		{
+			_sv_to_datum_finfo(&tmp, typid, &typioparam);
+			finfo = &tmp;
+		}
+		if (isnull)
+			*isnull = true;
+		return InputFunctionCall(finfo, NULL, typioparam, typmod);
+	}
+	else if (SvROK(sv))
+	{
+		SV		   *sav = get_perl_array_ref(sv);
+
+		if (sav)
+		{
+			return plperl_array_to_datum(sav, typid);
+		}
+		else if (SvTYPE(SvRV(sv)) == SVt_PVHV)
+		{
+			TupleDesc	td = lookup_rowtype_tupdesc(typid, typmod);
+			Datum		ret = plperl_hash_to_datum(sv, td);
+
+			ReleaseTupleDesc(td);
+			return ret;
+		}
+
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("PL/Perl function must return reference to hash or array")));
+		return (Datum) 0;		/* shut up compiler */
+	}
+	else
+	{
+		Datum		ret;
+		char	   *str = sv2cstr(sv);
+
+		if (!finfo)
+		{
+			_sv_to_datum_finfo(&tmp, typid, &typioparam);
+			finfo = &tmp;
+		}
+
+		ret = InputFunctionCall(finfo, str, typioparam, typmod);
+		pfree(str);
+
+		return ret;
+	}
+}
+
+/* Convert the perl SV to a string returned by the type output function */
+char *
+plperl_sv_to_literal(SV *sv, char *fqtypename)
+{
+	Datum		str = CStringGetDatum(fqtypename);
+	Oid			typid = DirectFunctionCall1(regtypein, str);
+	Oid			typoutput;
+	Datum		datum;
+	bool		typisvarlena,
+				isnull;
+
+	if (!OidIsValid(typid))
+		elog(ERROR, "lookup failed for type %s", fqtypename);
+
+	datum = plperl_sv_to_datum(sv, NULL, typid, 0, -1, &isnull);
+
+	if (isnull)
+		return NULL;
+
+	getTypeOutputInfo(typid,
+					  &typoutput, &typisvarlena);
+
+	return OidOutputFunctionCall(typoutput, datum);
+}
+
+/*
+ * Convert PostgreSQL array datum to a perl array reference.
+ *
+ * typid is arg's OID, which must be an array type.
+ */
+static SV  *
+plperl_ref_from_pg_array(Datum arg, Oid typid)
+{
+	ArrayType  *ar = DatumGetArrayTypeP(arg);
+	Oid			elementtype = ARR_ELEMTYPE(ar);
+	int16		typlen;
+	bool		typbyval;
+	char		typalign,
+				typdelim;
+	Oid			typioparam;
+	Oid			typoutputfunc;
+	int			i,
+				nitems,
+			   *dims;
+	plperl_array_info *info;
+	SV		   *av;
+	HV		   *hv;
+
+	info = palloc(sizeof(plperl_array_info));
+
+	/* get element type information, including output conversion function */
+	get_type_io_data(elementtype, IOFunc_output,
+					 &typlen, &typbyval, &typalign,
+					 &typdelim, &typioparam, &typoutputfunc);
+
+	perm_fmgr_info(typoutputfunc, &info->proc);
+
+	info->elem_is_rowtype = type_is_rowtype(elementtype);
+
+	/* Get the number and bounds of array dimensions */
+	info->ndims = ARR_NDIM(ar);
+	dims = ARR_DIMS(ar);
+
+	deconstruct_array(ar, elementtype, typlen, typbyval,
+					  typalign, &info->elements, &info->nulls,
+					  &nitems);
+
+	/* Get total number of elements in each dimension */
+	info->nelems = palloc(sizeof(int) * info->ndims);
+	info->nelems[0] = nitems;
+	for (i = 1; i < info->ndims; i++)
+		info->nelems[i] = info->nelems[i - 1] / dims[i - 1];
+
+	av = split_array(info, 0, nitems, 0);
+
+	hv = newHV();
+	(void) hv_store(hv, "array", 5, av, 0);
+	(void) hv_store(hv, "typeoid", 7, newSViv(typid), 0);
+
+	return sv_bless(newRV_noinc((SV *) hv),
+					gv_stashpv("PostgreSQL::InServer::ARRAY", 0));
+}
+
+/*
+ * Recursively form array references from splices of the initial array
+ */
+static SV  *
+split_array(plperl_array_info *info, int first, int last, int nest)
+{
+	int			i;
+	AV		   *result;
+
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
+
+	/*
+	 * Base case, return a reference to a single-dimensional array
+	 */
+	if (nest >= info->ndims - 1)
+		return make_array_ref(info, first, last);
+
+	result = newAV();
+	for (i = first; i < last; i += info->nelems[nest + 1])
+	{
+		/* Recursively form references to arrays of lower dimensions */
+		SV		   *ref = split_array(info, i, i + info->nelems[nest + 1], nest + 1);
+
+		av_push(result, ref);
+	}
+	return newRV_noinc((SV *) result);
+}
+
+/*
+ * Create a Perl reference from a one-dimensional C array, converting
+ * composite type elements to hash references.
+ */
+static SV  *
+make_array_ref(plperl_array_info *info, int first, int last)
+{
+	int			i;
+	AV		   *result = newAV();
+
+	for (i = first; i < last; i++)
+	{
+		if (info->nulls[i])
+			av_push(result, &PL_sv_undef);
+		else
+		{
+			Datum		itemvalue = info->elements[i];
+
+			/* Handle composite type elements */
+			if (info->elem_is_rowtype)
+				av_push(result, plperl_hash_from_datum(itemvalue));
+			else
+			{
+				char	   *val = OutputFunctionCall(&info->proc, itemvalue);
+
+				av_push(result, cstr2sv(val));
+			}
+		}
+	}
+	return newRV_noinc((SV *) result);
+}
 
 /* Set up the arguments for a trigger call. */
-
 static SV  *
 plperl_trigger_build_args(FunctionCallInfo fcinfo)
 {
@@ -1169,12 +1519,9 @@ plperl_modify_tuple(HV *hvTD, TriggerData *tdata, HeapTuple otup)
 	hv_iterinit(hvNew);
 	while ((he = hv_iternext(hvNew)))
 	{
-		Oid			typinput;
-		Oid			typioparam;
-		int32		atttypmod;
-		FmgrInfo	finfo;
-		SV			*val = HeVAL(he);
-		char		*key = hek2cstr(he);
+		bool		isnull;
+		char	   *key = hek2cstr(he);
+		SV		   *val = HeVAL(he);
 		int			attn = SPI_fnumber(tupdesc, key);
 
 		if (attn <= 0 || tupdesc->attrs[attn - 1]->attisdropped)
@@ -1182,29 +1529,15 @@ plperl_modify_tuple(HV *hvTD, TriggerData *tdata, HeapTuple otup)
 					(errcode(ERRCODE_UNDEFINED_COLUMN),
 					 errmsg("Perl hash contains nonexistent column \"%s\"",
 							key)));
-		/* XXX would be better to cache these lookups */
-		getTypeInputInfo(tupdesc->attrs[attn - 1]->atttypid,
-						 &typinput, &typioparam);
-		fmgr_info(typinput, &finfo);
-		atttypmod = tupdesc->attrs[attn - 1]->atttypmod;
-		if (SvOK(val))
-		{
-			char	*str = sv2cstr(val);
-			modvalues[slotsused] = InputFunctionCall(&finfo,
-													 str,
-													 typioparam,
-													 atttypmod);
-			modnulls[slotsused] = ' ';
-			pfree(str);
-		}
-		else
-		{
-			modvalues[slotsused] = InputFunctionCall(&finfo,
-													 NULL,
-													 typioparam,
-													 atttypmod);
-			modnulls[slotsused] = 'n';
-		}
+
+		modvalues[slotsused] = plperl_sv_to_datum(val,
+												  NULL,
+										  tupdesc->attrs[attn - 1]->atttypid,
+												  InvalidOid,
+										 tupdesc->attrs[attn - 1]->atttypmod,
+												  &isnull);
+
+		modnulls[slotsused] = isnull ? 'n' : ' ';
 		modattrs[slotsused] = attn;
 		slotsused++;
 
@@ -1429,6 +1762,39 @@ plperl_validator(PG_FUNCTION_ARGS)
 
 
 /*
+ * plperlu likewise requires three externally visible functions:
+ * plperlu_call_handler, plperlu_inline_handler, and plperlu_validator.
+ * These are currently just aliases that send control to the plperl
+ * handler functions, and we decide whether a particular function is
+ * trusted or not by inspecting the actual pg_language tuple.
+ */
+
+PG_FUNCTION_INFO_V1(plperlu_call_handler);
+
+Datum
+plperlu_call_handler(PG_FUNCTION_ARGS)
+{
+	return plperl_call_handler(fcinfo);
+}
+
+PG_FUNCTION_INFO_V1(plperlu_inline_handler);
+
+Datum
+plperlu_inline_handler(PG_FUNCTION_ARGS)
+{
+	return plperl_inline_handler(fcinfo);
+}
+
+PG_FUNCTION_INFO_V1(plperlu_validator);
+
+Datum
+plperlu_validator(PG_FUNCTION_ARGS)
+{
+	return plperl_validator(fcinfo);
+}
+
+
+/*
  * Uses mksafefunc/mkunsafefunc to create a subroutine whose text is
  * supplied in s, and returns a reference to it
  */
@@ -1452,12 +1818,13 @@ plperl_create_sub(plperl_proc_desc *prodesc, char *s, Oid fn_oid)
 	EXTEND(SP, 4);
 	PUSHs(sv_2mortal(cstr2sv(subname)));
 	PUSHs(sv_2mortal(newRV_noinc((SV *) pragma_hv)));
-	/* 
-	 * Use 'false' for $prolog in mkfunc, which is kept for compatibility
-	 * in case a module such as PostgreSQL::PLPerl::NYTprof replaces
-	 * the function compiler.
+
+	/*
+	 * Use 'false' for $prolog in mkfunc, which is kept for compatibility in
+	 * case a module such as PostgreSQL::PLPerl::NYTprof replaces the function
+	 * compiler.
 	 */
-	PUSHs(&PL_sv_no); 
+	PUSHs(&PL_sv_no);
 	PUSHs(sv_2mortal(cstr2sv(s)));
 	PUTBACK;
 
@@ -1523,7 +1890,6 @@ plperl_call_perl_func(plperl_proc_desc *desc, FunctionCallInfo fcinfo)
 	SV		   *retval;
 	int			i;
 	int			count;
-	SV		   *sv;
 
 	ENTER;
 	SAVETMPS;
@@ -1537,35 +1903,27 @@ plperl_call_perl_func(plperl_proc_desc *desc, FunctionCallInfo fcinfo)
 			PUSHs(&PL_sv_undef);
 		else if (desc->arg_is_rowtype[i])
 		{
-			HeapTupleHeader td;
-			Oid			tupType;
-			int32		tupTypmod;
-			TupleDesc	tupdesc;
-			HeapTupleData tmptup;
-			SV		   *hashref;
+			SV		   *sv = plperl_hash_from_datum(fcinfo->arg[i]);
 
-			td = DatumGetHeapTupleHeader(fcinfo->arg[i]);
-			/* Extract rowtype info and find a tupdesc */
-			tupType = HeapTupleHeaderGetTypeId(td);
-			tupTypmod = HeapTupleHeaderGetTypMod(td);
-			tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
-			/* Build a temporary HeapTuple control structure */
-			tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
-			tmptup.t_data = td;
-
-			hashref = plperl_hash_from_tuple(&tmptup, tupdesc);
-			PUSHs(sv_2mortal(hashref));
-			ReleaseTupleDesc(tupdesc);
+			PUSHs(sv_2mortal(sv));
 		}
 		else
 		{
-			char	   *tmp;
+			SV		   *sv;
 
-			tmp = OutputFunctionCall(&(desc->arg_out_func[i]),
-									 fcinfo->arg[i]);
-			sv = cstr2sv(tmp);
+			if (OidIsValid(desc->arg_arraytype[i]))
+				sv = plperl_ref_from_pg_array(fcinfo->arg[i], desc->arg_arraytype[i]);
+			else
+			{
+				char	   *tmp;
+
+				tmp = OutputFunctionCall(&(desc->arg_out_func[i]),
+										 fcinfo->arg[i]);
+				sv = cstr2sv(tmp);
+				pfree(tmp);
+			}
+
 			PUSHs(sv_2mortal(sv));
-			pfree(tmp);
 		}
 	}
 	PUTBACK;
@@ -1609,15 +1967,17 @@ plperl_call_perl_trigger_func(plperl_proc_desc *desc, FunctionCallInfo fcinfo,
 							  SV *td)
 {
 	dSP;
-	SV		   *retval, *TDsv;
-	int			i, count;
+	SV		   *retval,
+			   *TDsv;
+	int			i,
+				count;
 	Trigger    *tg_trigger = ((TriggerData *) fcinfo->context)->tg_trigger;
 
 	ENTER;
 	SAVETMPS;
 
 	TDsv = get_sv("_TD", GV_ADD);
-	SAVESPTR(TDsv);	/* local $_TD */
+	SAVESPTR(TDsv);				/* local $_TD */
 	sv_setsv(TDsv, td);
 
 	PUSHMARK(sp);
@@ -1666,10 +2026,10 @@ plperl_func_handler(PG_FUNCTION_ARGS)
 {
 	plperl_proc_desc *prodesc;
 	SV		   *perlret;
-	Datum		retval;
+	Datum		retval = 0;
 	ReturnSetInfo *rsi;
-	SV		   *array_ret = NULL;
 	ErrorContextCallback pl_error_context;
+	bool		has_retval = false;
 
 	/*
 	 * Create the call_data beforing connecting to SPI, so that it is not
@@ -1719,19 +2079,20 @@ plperl_func_handler(PG_FUNCTION_ARGS)
 
 	if (prodesc->fn_retisset)
 	{
+		SV		   *sav;
+
 		/*
 		 * If the Perl function returned an arrayref, we pretend that it
 		 * called return_next() for each element of the array, to handle old
 		 * SRFs that didn't know about return_next(). Any other sort of return
 		 * value is an error, except undef which means return an empty set.
 		 */
-		if (SvOK(perlret) &&
-			SvROK(perlret) &&
-			SvTYPE(SvRV(perlret)) == SVt_PVAV)
+		sav = get_perl_array_ref(perlret);
+		if (sav)
 		{
 			int			i = 0;
 			SV		  **svp = 0;
-			AV		   *rav = (AV *) SvRV(perlret);
+			AV		   *rav = (AV *) SvRV(sav);
 
 			while ((svp = av_fetch(rav, i, FALSE)) != NULL)
 			{
@@ -1754,22 +2115,18 @@ plperl_func_handler(PG_FUNCTION_ARGS)
 			rsi->setDesc = current_call_data->ret_tdesc;
 		}
 		retval = (Datum) 0;
+		has_retval = true;
 	}
 	else if (!SvOK(perlret))
 	{
 		/* Return NULL if Perl code returned undef */
 		if (rsi && IsA(rsi, ReturnSetInfo))
 			rsi->isDone = ExprEndResult;
-		retval = InputFunctionCall(&prodesc->result_in_func, NULL,
-								   prodesc->result_typioparam, -1);
-		fcinfo->isnull = true;
 	}
 	else if (prodesc->fn_retistuple)
 	{
 		/* Return a perl hash converted to a Datum */
 		TupleDesc	td;
-		AttInMetadata *attinmeta;
-		HeapTuple	tup;
 
 		if (!SvOK(perlret) || !SvROK(perlret) ||
 			SvTYPE(SvRV(perlret)) != SVt_PVHV)
@@ -1789,35 +2146,26 @@ plperl_func_handler(PG_FUNCTION_ARGS)
 							"that cannot accept type record")));
 		}
 
-		attinmeta = TupleDescGetAttInMetadata(td);
-		tup = plperl_build_tuple_result((HV *) SvRV(perlret), attinmeta);
-		retval = HeapTupleGetDatum(tup);
+		retval = plperl_hash_to_datum(perlret, td);
+		has_retval = true;
 	}
-	else
+
+	if (!has_retval)
 	{
-		/* Return a perl string converted to a Datum */
-		char	*str;
+		bool		isnull;
 
-		if (prodesc->fn_retisarray && SvROK(perlret) &&
-			SvTYPE(SvRV(perlret)) == SVt_PVAV)
-		{
-			array_ret = plperl_convert_to_pg_array(perlret);
-			SvREFCNT_dec(perlret);
-			perlret = array_ret;
-		}
-
-		str = sv2cstr(perlret);
-		retval = InputFunctionCall(&prodesc->result_in_func,
-								   str,
-								   prodesc->result_typioparam, -1);
-		pfree(str);
+		retval = plperl_sv_to_datum(perlret,
+									&prodesc->result_in_func,
+									prodesc->result_oid,
+									prodesc->result_typioparam, -1, &isnull);
+		fcinfo->isnull = isnull;
+		has_retval = true;
 	}
 
 	/* Restore the previous error callback */
 	error_context_stack = pl_error_context.previous;
 
-	if (array_ret == NULL)
-		SvREFCNT_dec(perlret);
+	SvREFCNT_dec(perlret);
 
 	return retval;
 }
@@ -2172,6 +2520,12 @@ compile_plperl_function(Oid fn_oid, bool is_trigger)
 								   &(prodesc->arg_out_func[i]));
 				}
 
+				/* Identify array attributes */
+				if (typeStruct->typelem != 0 && typeStruct->typlen == -1)
+					prodesc->arg_arraytype[i] = procStruct->proargtypes.values[i];
+				else
+					prodesc->arg_arraytype[i] = InvalidOid;
+
 				ReleaseSysCache(typeTup);
 			}
 		}
@@ -2225,14 +2579,43 @@ compile_plperl_function(Oid fn_oid, bool is_trigger)
 	return prodesc;
 }
 
+/* Build a hash from a given composite/row datum */
+static SV  *
+plperl_hash_from_datum(Datum attr)
+{
+	HeapTupleHeader td;
+	Oid			tupType;
+	int32		tupTypmod;
+	TupleDesc	tupdesc;
+	HeapTupleData tmptup;
+	SV		   *sv;
+
+	td = DatumGetHeapTupleHeader(attr);
+
+	/* Extract rowtype info and find a tupdesc */
+	tupType = HeapTupleHeaderGetTypeId(td);
+	tupTypmod = HeapTupleHeaderGetTypMod(td);
+	tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
+
+	/* Build a temporary HeapTuple control structure */
+	tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+	tmptup.t_data = td;
+
+	sv = plperl_hash_from_tuple(&tmptup, tupdesc);
+	ReleaseTupleDesc(tupdesc);
+
+	return sv;
+}
 
 /* Build a hash from all attributes of a given tuple. */
-
 static SV  *
 plperl_hash_from_tuple(HeapTuple tuple, TupleDesc tupdesc)
 {
 	HV		   *hv;
 	int			i;
+
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
 
 	hv = newHV();
 	hv_ksplit(hv, tupdesc->natts);		/* pre-grow the hash */
@@ -2240,11 +2623,10 @@ plperl_hash_from_tuple(HeapTuple tuple, TupleDesc tupdesc)
 	for (i = 0; i < tupdesc->natts; i++)
 	{
 		Datum		attr;
-		bool		isnull;
+		bool		isnull,
+					typisvarlena;
 		char	   *attname;
-		char	   *outputstr;
 		Oid			typoutput;
-		bool		typisvarlena;
 
 		if (tupdesc->attrs[i]->attisdropped)
 			continue;
@@ -2255,21 +2637,38 @@ plperl_hash_from_tuple(HeapTuple tuple, TupleDesc tupdesc)
 		if (isnull)
 		{
 			/* Store (attname => undef) and move on. */
-			hv_store_string(hv, attname, newSV(0));
+			hv_store_string(hv, attname, &PL_sv_undef);
 			continue;
 		}
 
-		/* XXX should have a way to cache these lookups */
-		getTypeOutputInfo(tupdesc->attrs[i]->atttypid,
-						  &typoutput, &typisvarlena);
+		if (type_is_rowtype(tupdesc->attrs[i]->atttypid))
+		{
+			SV		   *sv = plperl_hash_from_datum(attr);
 
-		outputstr = OidOutputFunctionCall(typoutput, attr);
+			hv_store_string(hv, attname, sv);
+		}
+		else
+		{
+			SV		   *sv;
 
-		hv_store_string(hv, attname, cstr2sv(outputstr));
+			if (OidIsValid(get_base_element_type(tupdesc->attrs[i]->atttypid)))
+				sv = plperl_ref_from_pg_array(attr, tupdesc->attrs[i]->atttypid);
+			else
+			{
+				char	   *outputstr;
 
-		pfree(outputstr);
+				/* XXX should have a way to cache these lookups */
+				getTypeOutputInfo(tupdesc->attrs[i]->atttypid,
+								  &typoutput, &typisvarlena);
+
+				outputstr = OidOutputFunctionCall(typoutput, attr);
+				sv = cstr2sv(outputstr);
+				pfree(outputstr);
+			}
+
+			hv_store_string(hv, attname, sv);
+		}
 	}
-
 	return newRV_noinc((SV *) hv);
 }
 
@@ -2498,29 +2897,11 @@ plperl_return_next(SV *sv)
 		Datum		ret;
 		bool		isNull;
 
-		if (SvOK(sv))
-		{
-			char	*str;
-
-			if (prodesc->fn_retisarray && SvROK(sv) &&
-				SvTYPE(SvRV(sv)) == SVt_PVAV)
-			{
-				sv = plperl_convert_to_pg_array(sv);
-			}
-
-			str = sv2cstr(sv);
-			ret = InputFunctionCall(&prodesc->result_in_func,
-									str,
-									prodesc->result_typioparam, -1);
-			isNull = false;
-			pfree(str);
-		}
-		else
-		{
-			ret = InputFunctionCall(&prodesc->result_in_func, NULL,
-									prodesc->result_typioparam, -1);
-			isNull = true;
-		}
+		ret = plperl_sv_to_datum(sv,
+								 &prodesc->result_in_func,
+								 prodesc->result_oid,
+								 prodesc->result_typioparam,
+								 -1, &isNull);
 
 		tuplestore_putvalues(current_call_data->tuple_store,
 							 current_call_data->ret_tdesc,
@@ -2754,7 +3135,7 @@ plperl_spi_prepare(char *query, int argc, SV **argv)
 						typInput,
 						typIOParam;
 			int32		typmod;
-			char		*typstr;
+			char	   *typstr;
 
 			typstr = sv2cstr(argv[i]);
 			parseTypeString(typstr, &typId, &typmod);
@@ -2901,7 +3282,7 @@ plperl_spi_exec_prepared(char *query, HV *attr, int argc, SV **argv)
 		if (attr != NULL)
 		{
 			sv = hv_fetch_string(attr, "limit");
-			if (*sv && SvIOK(*sv))
+			if (sv && *sv && SvIOK(*sv))
 				limit = SvIV(*sv);
 		}
 		/************************************************************
@@ -2920,24 +3301,14 @@ plperl_spi_exec_prepared(char *query, HV *attr, int argc, SV **argv)
 
 		for (i = 0; i < argc; i++)
 		{
-			if (SvOK(argv[i]))
-			{
-				char	*str = sv2cstr(argv[i]);
-				argvalues[i] = InputFunctionCall(&qdesc->arginfuncs[i],
-												 str,
-												 qdesc->argtypioparams[i],
-												 -1);
-				nulls[i] = ' ';
-				pfree(str);
-			}
-			else
-			{
-				argvalues[i] = InputFunctionCall(&qdesc->arginfuncs[i],
-												 NULL,
-												 qdesc->argtypioparams[i],
-												 -1);
-				nulls[i] = 'n';
-			}
+			bool		isnull;
+
+			argvalues[i] = plperl_sv_to_datum(argv[i],
+											  &qdesc->arginfuncs[i],
+											  qdesc->argtypes[i],
+											  qdesc->argtypioparams[i],
+											  -1, &isnull);
+			nulls[i] = isnull ? 'n' : ' ';
 		}
 
 		/************************************************************
@@ -3055,24 +3426,14 @@ plperl_spi_query_prepared(char *query, int argc, SV **argv)
 
 		for (i = 0; i < argc; i++)
 		{
-			if (SvOK(argv[i]))
-			{
-				char	*str = sv2cstr(argv[i]);
-				argvalues[i] = InputFunctionCall(&qdesc->arginfuncs[i],
-												 str,
-												 qdesc->argtypioparams[i],
-												 -1);
-				nulls[i] = ' ';
-				pfree(str);
-			}
-			else
-			{
-				argvalues[i] = InputFunctionCall(&qdesc->arginfuncs[i],
-												 NULL,
-												 qdesc->argtypioparams[i],
-												 -1);
-				nulls[i] = 'n';
-			}
+			bool		isnull;
+
+			argvalues[i] = plperl_sv_to_datum(argv[i],
+											  &qdesc->arginfuncs[i],
+											  qdesc->argtypes[i],
+											  qdesc->argtypioparams[i],
+											  -1, &isnull);
+			nulls[i] = isnull ? 'n' : ' ';
 		}
 
 		/************************************************************
@@ -3177,10 +3538,12 @@ static SV **
 hv_store_string(HV *hv, const char *key, SV *val)
 {
 	int32		hlen;
-	char		*hkey;
-	SV			**ret;
+	char	   *hkey;
+	SV		  **ret;
 
-	hkey = (char*)pg_do_encoding_conversion((unsigned char *)key, strlen(key), GetDatabaseEncoding(), PG_UTF8);
+	hkey = (char *)
+		pg_do_encoding_conversion((unsigned char *) key, strlen(key),
+								  GetDatabaseEncoding(), PG_UTF8);
 
 	/*
 	 * This seems nowhere documented, but under Perl 5.8.0 and up, hv_store()
@@ -3205,16 +3568,18 @@ static SV **
 hv_fetch_string(HV *hv, const char *key)
 {
 	int32		hlen;
-	char		*hkey;
-	SV			**ret;
+	char	   *hkey;
+	SV		  **ret;
 
-	hkey = (char*)pg_do_encoding_conversion((unsigned char *)key, strlen(key), GetDatabaseEncoding(), PG_UTF8);
+	hkey = (char *)
+		pg_do_encoding_conversion((unsigned char *) key, strlen(key),
+								  GetDatabaseEncoding(), PG_UTF8);
 
 	/* See notes in hv_store_string */
 	hlen = -strlen(hkey);
 	ret = hv_fetch(hv, hkey, hlen, 0);
 
-	if(hkey != key)
+	if (hkey != key)
 		pfree(hkey);
 
 	return ret;

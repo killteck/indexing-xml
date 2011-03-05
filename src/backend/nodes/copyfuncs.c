@@ -23,6 +23,7 @@
 #include "postgres.h"
 
 #include "miscadmin.h"
+#include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
@@ -79,6 +80,7 @@ _copyPlannedStmt(PlannedStmt *from)
 
 	COPY_SCALAR_FIELD(commandType);
 	COPY_SCALAR_FIELD(hasReturning);
+	COPY_SCALAR_FIELD(hasModifyingCTE);
 	COPY_SCALAR_FIELD(canSetTag);
 	COPY_SCALAR_FIELD(transientPlan);
 	COPY_NODE_FIELD(planTree);
@@ -173,7 +175,9 @@ _copyModifyTable(ModifyTable *from)
 	 * copy remainder of node
 	 */
 	COPY_SCALAR_FIELD(operation);
+	COPY_SCALAR_FIELD(canSetTag);
 	COPY_NODE_FIELD(resultRelations);
+	COPY_SCALAR_FIELD(resultRelIndex);
 	COPY_NODE_FIELD(plans);
 	COPY_NODE_FIELD(returningLists);
 	COPY_NODE_FIELD(rowMarks);
@@ -550,6 +554,43 @@ _copyWorkTableScan(WorkTableScan *from)
 }
 
 /*
+ * _copyForeignScan
+ */
+static ForeignScan *
+_copyForeignScan(ForeignScan *from)
+{
+	ForeignScan *newnode = makeNode(ForeignScan);
+
+	/*
+	 * copy node superclass fields
+	 */
+	CopyScanFields((Scan *) from, (Scan *) newnode);
+
+	/*
+	 * copy remainder of node
+	 */
+	COPY_SCALAR_FIELD(fsSystemCol);
+	COPY_NODE_FIELD(fdwplan);
+
+	return newnode;
+}
+
+/*
+ * _copyFdwPlan
+ */
+static FdwPlan *
+_copyFdwPlan(FdwPlan *from)
+{
+	FdwPlan *newnode = makeNode(FdwPlan);
+
+	COPY_SCALAR_FIELD(startup_cost);
+	COPY_SCALAR_FIELD(total_cost);
+	COPY_NODE_FIELD(fdw_private);
+
+	return newnode;
+}
+
+/*
  * CopyJoinFields
  *
  *		This function copies the fields of the Join node.  It is used by
@@ -906,6 +947,7 @@ _copyPlanRowMark(PlanRowMark *from)
 
 	COPY_SCALAR_FIELD(rti);
 	COPY_SCALAR_FIELD(prti);
+	COPY_SCALAR_FIELD(rowmarkId);
 	COPY_SCALAR_FIELD(markType);
 	COPY_SCALAR_FIELD(noWait);
 	COPY_SCALAR_FIELD(isParent);
@@ -1888,6 +1930,7 @@ _copyRangeTblEntry(RangeTblEntry *from)
 
 	COPY_SCALAR_FIELD(rtekind);
 	COPY_SCALAR_FIELD(relid);
+	COPY_SCALAR_FIELD(relkind);
 	COPY_NODE_FIELD(subquery);
 	COPY_SCALAR_FIELD(jointype);
 	COPY_NODE_FIELD(joinaliasvars);
@@ -2344,6 +2387,7 @@ _copyQuery(Query *from)
 	COPY_SCALAR_FIELD(hasSubLinks);
 	COPY_SCALAR_FIELD(hasDistinctOn);
 	COPY_SCALAR_FIELD(hasRecursive);
+	COPY_SCALAR_FIELD(hasModifyingCTE);
 	COPY_SCALAR_FIELD(hasForUpdate);
 	COPY_NODE_FIELD(cteList);
 	COPY_NODE_FIELD(rtable);
@@ -3256,7 +3300,33 @@ _copyCreateExtensionStmt(CreateExtensionStmt *from)
 	CreateExtensionStmt *newnode = makeNode(CreateExtensionStmt);
 
 	COPY_STRING_FIELD(extname);
+	COPY_SCALAR_FIELD(if_not_exists);
 	COPY_NODE_FIELD(options);
+
+	return newnode;
+}
+
+static AlterExtensionStmt *
+_copyAlterExtensionStmt(AlterExtensionStmt *from)
+{
+	AlterExtensionStmt *newnode = makeNode(AlterExtensionStmt);
+
+	COPY_STRING_FIELD(extname);
+	COPY_NODE_FIELD(options);
+
+	return newnode;
+}
+
+static AlterExtensionContentsStmt *
+_copyAlterExtensionContentsStmt(AlterExtensionContentsStmt *from)
+{
+	AlterExtensionContentsStmt *newnode = makeNode(AlterExtensionContentsStmt);
+
+	COPY_STRING_FIELD(extname);
+	COPY_SCALAR_FIELD(action);
+	COPY_SCALAR_FIELD(objtype);
+	COPY_NODE_FIELD(objname);
+	COPY_NODE_FIELD(objargs);
 
 	return newnode;
 }
@@ -3267,7 +3337,7 @@ _copyCreateFdwStmt(CreateFdwStmt *from)
 	CreateFdwStmt *newnode = makeNode(CreateFdwStmt);
 
 	COPY_STRING_FIELD(fdwname);
-	COPY_NODE_FIELD(validator);
+	COPY_NODE_FIELD(func_options);
 	COPY_NODE_FIELD(options);
 
 	return newnode;
@@ -3279,8 +3349,7 @@ _copyAlterFdwStmt(AlterFdwStmt *from)
 	AlterFdwStmt *newnode = makeNode(AlterFdwStmt);
 
 	COPY_STRING_FIELD(fdwname);
-	COPY_NODE_FIELD(validator);
-	COPY_SCALAR_FIELD(change_validator);
+	COPY_NODE_FIELD(func_options);
 	COPY_NODE_FIELD(options);
 
 	return newnode;
@@ -3825,6 +3894,12 @@ copyObject(void *from)
 		case T_WorkTableScan:
 			retval = _copyWorkTableScan(from);
 			break;
+		case T_ForeignScan:
+			retval = _copyForeignScan(from);
+			break;
+		case T_FdwPlan:
+			retval = _copyFdwPlan(from);
+			break;
 		case T_Join:
 			retval = _copyJoin(from);
 			break;
@@ -4265,6 +4340,12 @@ copyObject(void *from)
 			break;
 		case T_CreateExtensionStmt:
 			retval = _copyCreateExtensionStmt(from);
+			break;
+		case T_AlterExtensionStmt:
+			retval = _copyAlterExtensionStmt(from);
+			break;
+		case T_AlterExtensionContentsStmt:
+			retval = _copyAlterExtensionContentsStmt(from);
 			break;
 		case T_CreateFdwStmt:
 			retval = _copyCreateFdwStmt(from);

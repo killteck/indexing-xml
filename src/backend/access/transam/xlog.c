@@ -62,6 +62,7 @@
 /* File path names (all relative to $PGDATA) */
 #define RECOVERY_COMMAND_FILE	"recovery.conf"
 #define RECOVERY_COMMAND_DONE	"recovery.done"
+#define PROMOTE_SIGNAL_FILE	"promote"
 
 
 /* User-settable parameters */
@@ -157,6 +158,11 @@ static XLogRecPtr LastRec;
  * known, need to check the shared state".
  */
 static bool LocalRecoveryInProgress = true;
+/*
+ * Local copy of SharedHotStandbyActive variable. False actually means "not
+ * known, need to check the shared state".
+ */
+static bool LocalHotStandbyActive = false;
 
 /*
  * Local state for XLogInsertAllowed():
@@ -405,6 +411,12 @@ typedef struct XLogCtlData
 	bool		SharedRecoveryInProgress;
 
 	/*
+	 * SharedHotStandbyActive indicates if we're still in crash or archive
+	 * recovery.  Protected by info_lck.
+	 */
+	bool		SharedHotStandbyActive;
+
+	/*
 	 * recoveryWakeupLatch is used to wake up the startup process to
 	 * continue WAL replay, if it is waiting for WAL to arrive or failover
 	 * trigger file to appear.
@@ -565,6 +577,7 @@ typedef struct xl_restore_point
  */
 static volatile sig_atomic_t got_SIGHUP = false;
 static volatile sig_atomic_t shutdown_requested = false;
+static volatile sig_atomic_t promote_triggered = false;
 
 /*
  * Flag set when executing a restore command, to tell SIGTERM signal handler
@@ -4915,6 +4928,7 @@ XLOGShmemInit(void)
 	 */
 	XLogCtl->XLogCacheBlck = XLOGbuffers - 1;
 	XLogCtl->SharedRecoveryInProgress = true;
+	XLogCtl->SharedHotStandbyActive = false;
 	XLogCtl->Insert.currpage = (XLogPageHeader) (XLogCtl->pages);
 	SpinLockInit(&XLogCtl->info_lck);
 	InitSharedLatch(&XLogCtl->recoveryWakeupLatch);
@@ -5228,7 +5242,7 @@ readRecoveryCommandFile(void)
 			if (strlen(recoveryTargetName) >= MAXFNAMELEN)
 				ereport(FATAL,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("recovery_target_name is too long")));
+						 errmsg("recovery_target_name is too long (maximum %d characters)", MAXFNAMELEN - 1)));
 
 			ereport(DEBUG2,
 					(errmsg("recovery_target_name = '%s'",
@@ -5448,7 +5462,7 @@ exitArchiveRecovery(TimeLineID endTLI, uint32 endLogId, uint32 endLogSeg)
  * Returns TRUE if we are stopping, FALSE otherwise.  On TRUE return,
  * *includeThis is set TRUE if we should apply this record before stopping.
  *
- * We also track the timestamp of the latest applied COMMIT/ABORT/RESTORE POINT
+ * We also track the timestamp of the latest applied COMMIT/ABORT
  * record in XLogCtl->recoveryLastXTime, for logging purposes.
  * Also, some information is saved in recoveryStopXid et al for use in
  * annotating the new timeline's history file.
@@ -5493,14 +5507,19 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 	/* Do we have a PITR target at all? */
 	if (recoveryTarget == RECOVERY_TARGET_UNSET)
 	{
-		SetLatestXTime(recordXtime);
+		/*
+		 * Save timestamp of latest transaction commit/abort if this is
+		 * a transaction record
+		 */
+		if (record->xl_rmid == RM_XACT_ID)
+			SetLatestXTime(recordXtime);
 		return false;
 	}
 
 	if (recoveryTarget == RECOVERY_TARGET_XID)
 	{
 		/*
-		 * there can be only one transaction end record with this exact
+		 * There can be only one transaction end record with this exact
 		 * transactionid
 		 *
 		 * when testing for an xid, we MUST test for equality only, since
@@ -5515,13 +5534,13 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 	else if (recoveryTarget == RECOVERY_TARGET_NAME)
 	{
 		/*
-		 * there can be many restore points that share the same name, so we stop
+		 * There can be many restore points that share the same name, so we stop
 		 * at the first one
 		 */
 		stopsHere = (strcmp(recordRPName, recoveryTargetName) == 0);
 
 		/*
-		 * ignore recoveryTargetInclusive because this is not a transaction
+		 * Ignore recoveryTargetInclusive because this is not a transaction
 		 * record
 		 */
 		*includeThis = false;
@@ -5529,7 +5548,7 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 	else
 	{
 		/*
-		 * there can be many transactions that share the same commit time, so
+		 * There can be many transactions that share the same commit time, so
 		 * we stop after the last one, if we are inclusive, or stop at the
 		 * first one if we are exclusive
 		 */
@@ -5583,10 +5602,15 @@ recoveryStopsHere(XLogRecord *record, bool *includeThis)
 								timestamptz_to_str(recoveryStopTime))));
 		}
 
-		if (recoveryStopAfter)
+		/*
+		 * Note that if we use a RECOVERY_TARGET_TIME then we can stop
+		 * at a restore point since they are timestamped, though the latest
+		 * transaction time is not updated.
+		 */
+		if (record->xl_rmid == RM_XACT_ID && recoveryStopAfter)
 			SetLatestXTime(recordXtime);
 	}
-	else
+	else if (record->xl_rmid == RM_XACT_ID)
 		SetLatestXTime(recordXtime);
 
 	return stopsHere;
@@ -6778,8 +6802,6 @@ StartupXLOG(void)
 static void
 CheckRecoveryConsistency(void)
 {
-	static bool backendsAllowed = false;
-
 	/*
 	 * Have we passed our safe starting point?
 	 */
@@ -6799,11 +6821,19 @@ CheckRecoveryConsistency(void)
 	 * enabling connections.
 	 */
 	if (standbyState == STANDBY_SNAPSHOT_READY &&
-		!backendsAllowed &&
+		!LocalHotStandbyActive &&
 		reachedMinRecoveryPoint &&
 		IsUnderPostmaster)
 	{
-		backendsAllowed = true;
+		/* use volatile pointer to prevent code rearrangement */
+		volatile XLogCtlData *xlogctl = XLogCtl;
+
+		SpinLockAcquire(&xlogctl->info_lck);
+		xlogctl->SharedHotStandbyActive = true;
+		SpinLockRelease(&xlogctl->info_lck);
+
+		LocalHotStandbyActive = true;
+
 		SendPostmasterSignal(PMSIGNAL_BEGIN_HOT_STANDBY);
 	}
 }
@@ -6847,6 +6877,38 @@ RecoveryInProgress(void)
 			InitXLOGAccess();
 
 		return LocalRecoveryInProgress;
+	}
+}
+
+/*
+ * Is HotStandby active yet? This is only important in special backends
+ * since normal backends won't ever be able to connect until this returns
+ * true. Postmaster knows this by way of signal, not via shared memory.
+ *
+ * Unlike testing standbyState, this works in any process that's connected to
+ * shared memory.
+ */
+bool
+HotStandbyActive(void)
+{
+	/*
+	 * We check shared state each time only until Hot Standby is active. We
+	 * can't de-activate Hot Standby, so there's no need to keep checking after
+	 * the shared variable has once been seen true.
+	 */
+	if (LocalHotStandbyActive)
+		return true;
+	else
+	{
+		/* use volatile pointer to prevent code rearrangement */
+		volatile XLogCtlData *xlogctl = XLogCtl;
+
+		/* spinlock is essential on machines with weak memory ordering! */
+		SpinLockAcquire(&xlogctl->info_lck);
+		LocalHotStandbyActive = xlogctl->SharedHotStandbyActive;
+		SpinLockRelease(&xlogctl->info_lck);
+
+		return LocalHotStandbyActive;
 	}
 }
 
@@ -8082,6 +8144,10 @@ XLogRestorePoint(const char *rpName)
 
 	RecPtr = XLogInsert(RM_XLOG_ID, XLOG_RESTORE_POINT, &rdata);
 
+	ereport(LOG,
+			(errmsg("restore point \"%s\" created at %X/%X",
+					rpName,	RecPtr.xlogid, RecPtr.xrecoff)));
+
 	return RecPtr;
 }
 
@@ -8865,7 +8931,7 @@ pg_stop_backup(PG_FUNCTION_ARGS)
 	XLogRecPtr	stoppoint;
 	char		stopxlogstr[MAXFNAMELEN];
 
-	stoppoint = do_pg_stop_backup(NULL);
+	stoppoint = do_pg_stop_backup(NULL, true);
 
 	snprintf(stopxlogstr, sizeof(stopxlogstr), "%X/%X",
 			 stoppoint.xlogid, stoppoint.xrecoff);
@@ -8880,7 +8946,7 @@ pg_stop_backup(PG_FUNCTION_ARGS)
  * the non-exclusive backup specified by 'labelfile'.
  */
 XLogRecPtr
-do_pg_stop_backup(char *labelfile)
+do_pg_stop_backup(char *labelfile, bool waitforarchive)
 {
 	bool		exclusive = (labelfile == NULL);
 	XLogRecPtr	startpoint;
@@ -9079,7 +9145,7 @@ do_pg_stop_backup(char *labelfile)
 	 * wish to wait, you can set statement_timeout.  Also, some notices are
 	 * issued to clue in anyone who might be doing this interactively.
 	 */
-	if (XLogArchivingActive())
+	if (waitforarchive && XLogArchivingActive())
 	{
 		XLByteToPrevSeg(stoppoint, _logId, _logSeg);
 		XLogFileName(lastxlogfilename, ThisTimeLineID, _logId, _logSeg);
@@ -9120,7 +9186,7 @@ do_pg_stop_backup(char *labelfile)
 		ereport(NOTICE,
 				(errmsg("pg_stop_backup complete, all required WAL segments have been archived")));
 	}
-	else
+	else if (waitforarchive)
 		ereport(NOTICE,
 				(errmsg("WAL archiving is not enabled; you must ensure that all required WAL segments are copied through other means to complete the backup")));
 
@@ -9220,7 +9286,7 @@ pg_create_restore_point(PG_FUNCTION_ARGS)
 	if (strlen(restore_name_str) >= MAXFNAMELEN)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("value too long for restore point")));
+				 errmsg("value too long for restore point (maximum %d characters)", MAXFNAMELEN - 1)));
 
 	restorepoint = XLogRestorePoint(restore_name_str);
 
@@ -9318,6 +9384,25 @@ pg_last_xlog_receive_location(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Get latest redo apply position.
+ *
+ * Exported to allow WALReceiver to read the pointer directly.
+ */
+XLogRecPtr
+GetXLogReplayRecPtr(void)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+	XLogRecPtr	recptr;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	recptr = xlogctl->recoveryLastRecPtr;
+	SpinLockRelease(&xlogctl->info_lck);
+
+	return recptr;
+}
+
+/*
  * Report the last WAL replay location (same format as pg_start_backup etc)
  *
  * This is useful for determining how much of WAL is visible to read-only
@@ -9326,14 +9411,10 @@ pg_last_xlog_receive_location(PG_FUNCTION_ARGS)
 Datum
 pg_last_xlog_replay_location(PG_FUNCTION_ARGS)
 {
-	/* use volatile pointer to prevent code rearrangement */
-	volatile XLogCtlData *xlogctl = XLogCtl;
 	XLogRecPtr	recptr;
 	char		location[MAXFNAMELEN];
 
-	SpinLockAcquire(&xlogctl->info_lck);
-	recptr = xlogctl->recoveryLastRecPtr;
-	SpinLockRelease(&xlogctl->info_lck);
+	recptr = GetXLogReplayRecPtr();
 
 	if (recptr.xlogid == 0 && recptr.xrecoff == 0)
 		PG_RETURN_NULL();
@@ -9644,6 +9725,14 @@ StartupProcSigUsr1Handler(SIGNAL_ARGS)
 	latch_sigusr1_handler();
 }
 
+/* SIGUSR2: set flag to finish recovery */
+static void
+StartupProcTriggerHandler(SIGNAL_ARGS)
+{
+	promote_triggered = true;
+	WakeupRecovery();
+}
+
 /* SIGHUP: set flag to re-read config file at next convenient time */
 static void
 StartupProcSigHupHandler(SIGNAL_ARGS)
@@ -9721,7 +9810,7 @@ StartupProcessMain(void)
 		pqsignal(SIGALRM, SIG_IGN);
 	pqsignal(SIGPIPE, SIG_IGN);
 	pqsignal(SIGUSR1, StartupProcSigUsr1Handler);
-	pqsignal(SIGUSR2, SIG_IGN);
+	pqsignal(SIGUSR2, StartupProcTriggerHandler);
 
 	/*
 	 * Reset some signals that are accepted by postmaster but not here
@@ -10167,9 +10256,9 @@ emode_for_corrupt_record(int emode, XLogRecPtr RecPtr)
 }
 
 /*
- * Check to see if the trigger file exists. If it does, request postmaster
- * to shut down walreceiver, wait for it to exit, remove the trigger
- * file, and return true.
+ * Check to see whether the user-specified trigger file exists and whether a
+ * promote request has arrived.  If either condition holds, request postmaster
+ * to shut down walreceiver, wait for it to exit, and return true.
  */
 static bool
 CheckForStandbyTrigger(void)
@@ -10179,6 +10268,16 @@ CheckForStandbyTrigger(void)
 
 	if (triggered)
 		return true;
+
+	if (promote_triggered)
+	{
+		ereport(LOG,
+				(errmsg("received promote request")));
+		ShutdownWalRcv();
+		promote_triggered = false;
+		triggered = true;
+		return true;
+	}
 
 	if (TriggerFile == NULL)
 		return false;
@@ -10190,6 +10289,27 @@ CheckForStandbyTrigger(void)
 		ShutdownWalRcv();
 		unlink(TriggerFile);
 		triggered = true;
+		return true;
+	}
+	return false;
+}
+
+/*
+ * Check to see if a promote request has arrived. Should be
+ * called by postmaster after receiving SIGUSR1.
+ */
+bool
+CheckPromoteSignal(void)
+{
+	struct stat stat_buf;
+
+	if (stat(PROMOTE_SIGNAL_FILE, &stat_buf) == 0)
+	{
+		/*
+		 * Since we are in a signal handler, it's not safe
+		 * to elog. We silently ignore any error from unlink.
+		 */
+		unlink(PROMOTE_SIGNAL_FILE);
 		return true;
 	}
 	return false;

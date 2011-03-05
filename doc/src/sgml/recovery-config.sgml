@@ -152,12 +152,12 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
       </indexterm>
       <listitem>
        <para>
-		This parameter specifies the named restore point, created with
-		<function>pg_create_restore_point()</> to which recovery will proceed.
-		At most one of <varname>recovery_target_name</>,
-		<xref linkend="recovery-target-time"> or
-		<xref linkend="recovery-target-xid"> can be specified.  The default is to
-		recover to the end of the WAL log.
+        This parameter specifies the named restore point, created with
+        <function>pg_create_restore_point()</> to which recovery will proceed.
+        At most one of <varname>recovery_target_name</>,
+        <xref linkend="recovery-target-time"> or
+        <xref linkend="recovery-target-xid"> can be specified.  The default is to
+        recover to the end of the WAL log.
        </para>
       </listitem>
      </varlistentry>
@@ -174,7 +174,7 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         This parameter specifies the time stamp up to which recovery
         will proceed.
         At most one of <varname>recovery_target_time</>,
-		<xref linkend="recovery-target-name"> or
+        <xref linkend="recovery-target-name"> or
         <xref linkend="recovery-target-xid"> can be specified.
         The default is to recover to the end of the WAL log.
         The precise stopping point is also influenced by
@@ -197,7 +197,7 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         The transactions that will be recovered are those that committed
         before (and optionally including) the specified one.
         At most one of <varname>recovery_target_xid</>,
-		<xref linkend="recovery-target-name"> or
+        <xref linkend="recovery-target-name"> or
         <xref linkend="recovery-target-time"> can be specified.
         The default is to recover to the end of the WAL log.
         The precise stopping point is also influenced by
@@ -343,8 +343,8 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         <listitem>
          <para>
           Specifies a trigger file whose presence ends recovery in the
-          standby. If no trigger file is specified, the standby never exits
-          recovery.
+          standby.  Even if this value is not set, you can still promote
+          the standby using <command>pg_ctl promote</>.
           This setting has no effect if <varname>standby_mode</> is <literal>off</>.
          </para>
         </listitem>

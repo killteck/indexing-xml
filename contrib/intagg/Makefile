@@ -1,6 +1,7 @@
 # contrib/intagg/Makefile
 
-DATA = int_aggregate.sql uninstall_int_aggregate.sql
+EXTENSION = intagg
+DATA = intagg--1.0.sql intagg--unpackaged--1.0.sql
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

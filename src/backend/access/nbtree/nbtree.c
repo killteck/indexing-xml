@@ -31,6 +31,7 @@
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/smgr.h"
+#include "tcop/tcopprot.h"
 #include "utils/memutils.h"
 
 
@@ -823,7 +824,6 @@ restart:
 	if (_bt_page_recyclable(page))
 	{
 		/* Okay to recycle this page */
-		Assert(!PageIsPredicateLocked(rel, blkno));
 		RecordFreeIndexPage(rel, blkno);
 		vstate->totFreePages++;
 		stats->pages_deleted++;

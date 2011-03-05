@@ -592,50 +592,7 @@ DATA(insert OID = 2970 ( txid_snapshot	PGNSP PGUID -1 f b U f t \054 0 0 2949 tx
 DESCR("txid snapshot");
 DATA(insert OID = 2949 ( _txid_snapshot PGNSP PGUID -1 f b A f t \054 0 2970 0 array_in array_out array_recv array_send - - - d x f 0 -1 0 0 _null_ _null_ ));
 
-/*
- * pseudo-types
- *
- * types with typtype='p' represent various special cases in the type system.
- *
- * These cannot be used to define table columns, but are valid as function
- * argument and result types (if supported by the function's implementation
- * language).
- *
- * Note: cstring is a borderline case; it is still considered a pseudo-type,
- * but there is now support for it in records and arrays.  Perhaps we should
- * just treat it as a regular base type?
- */
-DATA(insert OID = 2249 ( record			PGNSP PGUID -1 f p P f t \054 0 0 2287 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ ));
-#define RECORDOID		2249
-DATA(insert OID = 2287 ( _record		PGNSP PGUID -1 f p P f t \054 0 2249 0 array_in array_out array_recv array_send - - - d x f 0 -1 0 0 _null_ _null_ ));
-#define RECORDARRAYOID	2287
-DATA(insert OID = 2275 ( cstring		PGNSP PGUID -2 f p P f t \054 0 0 1263 cstring_in cstring_out cstring_recv cstring_send - - - c p f 0 -1 0 0 _null_ _null_ ));
-#define CSTRINGOID		2275
-DATA(insert OID = 2276 ( any			PGNSP PGUID  4 t p P f t \054 0 0 0 any_in any_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define ANYOID			2276
-DATA(insert OID = 2277 ( anyarray		PGNSP PGUID -1 f p P f t \054 0 0 0 anyarray_in anyarray_out anyarray_recv anyarray_send - - - d x f 0 -1 0 0 _null_ _null_ ));
-#define ANYARRAYOID		2277
-DATA(insert OID = 2278 ( void			PGNSP PGUID  4 t p P f t \054 0 0 0 void_in void_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define VOIDOID			2278
-DATA(insert OID = 2279 ( trigger		PGNSP PGUID  4 t p P f t \054 0 0 0 trigger_in trigger_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define TRIGGEROID		2279
-DATA(insert OID = 2280 ( language_handler	PGNSP PGUID  4 t p P f t \054 0 0 0 language_handler_in language_handler_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define LANGUAGE_HANDLEROID		2280
-DATA(insert OID = 2281 ( internal		PGNSP PGUID  SIZEOF_POINTER t p P f t \054 0 0 0 internal_in internal_out - - - - - ALIGNOF_POINTER p f 0 -1 0 0 _null_ _null_ ));
-#define INTERNALOID		2281
-DATA(insert OID = 2282 ( opaque			PGNSP PGUID  4 t p P f t \054 0 0 0 opaque_in opaque_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define OPAQUEOID		2282
-DATA(insert OID = 2283 ( anyelement		PGNSP PGUID  4 t p P f t \054 0 0 0 anyelement_in anyelement_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define ANYELEMENTOID	2283
-DATA(insert OID = 2776 ( anynonarray	PGNSP PGUID  4 t p P f t \054 0 0 0 anynonarray_in anynonarray_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define ANYNONARRAYOID	2776
-DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in anyenum_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define ANYENUMOID		3500
-DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  4 t p P f t \054 0 0 0 anyrange_in anyrange_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
-#define ANYRANGEOID		3831
-
-
-
+/* range types */
 
 DATA(insert OID = 3904 ( int4range		PGNSP PGUID  -1 f r R f t \054 0 0 3905 range_in range_out range_recv range_send - - - c x f 0 -1 0 0 _null_ _null_ ));
 #define INT4RANGEOID		3904
@@ -661,6 +618,51 @@ DATA(insert OID = 3926 ( int8range		PGNSP PGUID  -1 f r R f t \054 0 0 3927 rang
 #define INT8RANGEOID		3926
 DATA(insert OID = 3927 ( _int8range		PGNSP PGUID  -1 f b A f t \054 0 3926 0 array_in array_out array_recv array_send - - - i x f 0 -1 0 0 _null_ _null_ ));
 #define INT8RANGEARRAYOID		3927
+
+/*
+ * pseudo-types
+ *
+ * types with typtype='p' represent various special cases in the type system.
+ *
+ * These cannot be used to define table columns, but are valid as function
+ * argument and result types (if supported by the function's implementation
+ * language).
+ *
+ * Note: cstring is a borderline case; it is still considered a pseudo-type,
+ * but there is now support for it in records and arrays.  Perhaps we should
+ * just treat it as a regular base type?
+ */
+DATA(insert OID = 2249 ( record			PGNSP PGUID -1 f p P f t \054 0 0 2287 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ ));
+#define RECORDOID		2249
+DATA(insert OID = 2287 ( _record		PGNSP PGUID -1 f p P f t \054 0 2249 0 array_in array_out array_recv array_send - - - d x f 0 -1 0 0 _null_ _null_ ));
+#define RECORDARRAYOID	2287
+DATA(insert OID = 2275 ( cstring		PGNSP PGUID -2 f p P f t \054 0 0 1263 cstring_in cstring_out cstring_recv cstring_send - - - c p f 0 -1 0 0 _null_ _null_ ));
+#define CSTRINGOID		2275
+DATA(insert OID = 2276 ( any			PGNSP PGUID  4 t p P f t \054 0 0 0 any_in any_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define ANYOID			2276
+DATA(insert OID = 2277 ( anyarray		PGNSP PGUID -1 f p P f t \054 0 0 0 anyarray_in anyarray_out anyarray_recv anyarray_send - - - d x f 0 -1 0 0 _null_ _null_ ));
+#define ANYARRAYOID		2277
+DATA(insert OID = 2278 ( void			PGNSP PGUID  4 t p P f t \054 0 0 0 void_in void_out void_recv void_send - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define VOIDOID			2278
+DATA(insert OID = 2279 ( trigger		PGNSP PGUID  4 t p P f t \054 0 0 0 trigger_in trigger_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define TRIGGEROID		2279
+DATA(insert OID = 2280 ( language_handler	PGNSP PGUID  4 t p P f t \054 0 0 0 language_handler_in language_handler_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define LANGUAGE_HANDLEROID		2280
+DATA(insert OID = 2281 ( internal		PGNSP PGUID  SIZEOF_POINTER t p P f t \054 0 0 0 internal_in internal_out - - - - - ALIGNOF_POINTER p f 0 -1 0 0 _null_ _null_ ));
+#define INTERNALOID		2281
+DATA(insert OID = 2282 ( opaque			PGNSP PGUID  4 t p P f t \054 0 0 0 opaque_in opaque_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define OPAQUEOID		2282
+DATA(insert OID = 2283 ( anyelement		PGNSP PGUID  4 t p P f t \054 0 0 0 anyelement_in anyelement_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define ANYELEMENTOID	2283
+DATA(insert OID = 2776 ( anynonarray	PGNSP PGUID  4 t p P f t \054 0 0 0 anynonarray_in anynonarray_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define ANYNONARRAYOID	2776
+DATA(insert OID = 3500 ( anyenum		PGNSP PGUID  4 t p P f t \054 0 0 0 anyenum_in anyenum_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define ANYENUMOID		3500
+DATA(insert OID = 3115 ( fdw_handler	PGNSP PGUID  4 t p P f t \054 0 0 0 fdw_handler_in fdw_handler_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define FDW_HANDLEROID		3115
+DATA(insert OID = 3831 ( anyrange		PGNSP PGUID  4 t p P f t \054 0 0 0 anyrange_in anyrange_out - - - - - i p f 0 -1 0 0 _null_ _null_ ));
+#define ANYRANGEOID		3831
+
 
 /*
  * macros

@@ -24,6 +24,7 @@
 #include <ctype.h>
 
 #include "lib/stringinfo.h"
+#include "foreign/fdwapi.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
@@ -243,6 +244,7 @@ _outPlannedStmt(StringInfo str, PlannedStmt *node)
 
 	WRITE_ENUM_FIELD(commandType, CmdType);
 	WRITE_BOOL_FIELD(hasReturning);
+	WRITE_BOOL_FIELD(hasModifyingCTE);
 	WRITE_BOOL_FIELD(canSetTag);
 	WRITE_BOOL_FIELD(transientPlan);
 	WRITE_NODE_FIELD(planTree);
@@ -327,7 +329,9 @@ _outModifyTable(StringInfo str, ModifyTable *node)
 	_outPlanInfo(str, (Plan *) node);
 
 	WRITE_ENUM_FIELD(operation, CmdType);
+	WRITE_BOOL_FIELD(canSetTag);
 	WRITE_NODE_FIELD(resultRelations);
+	WRITE_INT_FIELD(resultRelIndex);
 	WRITE_NODE_FIELD(plans);
 	WRITE_NODE_FIELD(returningLists);
 	WRITE_NODE_FIELD(rowMarks);
@@ -535,6 +539,27 @@ _outWorkTableScan(StringInfo str, WorkTableScan *node)
 	_outScanInfo(str, (Scan *) node);
 
 	WRITE_INT_FIELD(wtParam);
+}
+
+static void
+_outForeignScan(StringInfo str, ForeignScan *node)
+{
+	WRITE_NODE_TYPE("FOREIGNSCAN");
+
+	_outScanInfo(str, (Scan *) node);
+
+	WRITE_BOOL_FIELD(fsSystemCol);
+	WRITE_NODE_FIELD(fdwplan);
+}
+
+static void
+_outFdwPlan(StringInfo str, FdwPlan *node)
+{
+	WRITE_NODE_TYPE("FDWPLAN");
+
+	WRITE_FLOAT_FIELD(startup_cost, "%.2f");
+	WRITE_FLOAT_FIELD(total_cost, "%.2f");
+	WRITE_NODE_FIELD(fdw_private);
 }
 
 static void
@@ -808,6 +833,7 @@ _outPlanRowMark(StringInfo str, PlanRowMark *node)
 
 	WRITE_UINT_FIELD(rti);
 	WRITE_UINT_FIELD(prti);
+	WRITE_UINT_FIELD(rowmarkId);
 	WRITE_ENUM_FIELD(markType, RowMarkType);
 	WRITE_BOOL_FIELD(noWait);
 	WRITE_BOOL_FIELD(isParent);
@@ -1507,6 +1533,16 @@ _outTidPath(StringInfo str, TidPath *node)
 }
 
 static void
+_outForeignPath(StringInfo str, ForeignPath *node)
+{
+	WRITE_NODE_TYPE("FOREIGNPATH");
+
+	_outPathInfo(str, (Path *) node);
+
+	WRITE_NODE_FIELD(fdwplan);
+}
+
+static void
 _outAppendPath(StringInfo str, AppendPath *node)
 {
 	WRITE_NODE_TYPE("APPENDPATH");
@@ -1606,9 +1642,11 @@ _outPlannerGlobal(StringInfo str, PlannerGlobal *node)
 	WRITE_BITMAPSET_FIELD(rewindPlanIDs);
 	WRITE_NODE_FIELD(finalrtable);
 	WRITE_NODE_FIELD(finalrowmarks);
+	WRITE_NODE_FIELD(resultRelations);
 	WRITE_NODE_FIELD(relationOids);
 	WRITE_NODE_FIELD(invalItems);
 	WRITE_UINT_FIELD(lastPHId);
+	WRITE_UINT_FIELD(lastRowMarkId);
 	WRITE_BOOL_FIELD(transientPlan);
 }
 
@@ -1623,7 +1661,6 @@ _outPlannerInfo(StringInfo str, PlannerInfo *node)
 	WRITE_UINT_FIELD(query_level);
 	WRITE_NODE_FIELD(join_rel_list);
 	WRITE_INT_FIELD(join_cur_level);
-	WRITE_NODE_FIELD(resultRelations);
 	WRITE_NODE_FIELD(init_plans);
 	WRITE_NODE_FIELD(cte_plan_ids);
 	WRITE_NODE_FIELD(eq_classes);
@@ -1698,10 +1735,12 @@ _outIndexOptInfo(StringInfo str, IndexOptInfo *node)
 	WRITE_UINT_FIELD(pages);
 	WRITE_FLOAT_FIELD(tuples, "%.0f");
 	WRITE_INT_FIELD(ncolumns);
+	WRITE_OID_FIELD(relam);
 	WRITE_NODE_FIELD(indexprs);
 	WRITE_NODE_FIELD(indpred);
 	WRITE_BOOL_FIELD(predOK);
 	WRITE_BOOL_FIELD(unique);
+	WRITE_BOOL_FIELD(hypothetical);
 }
 
 static void
@@ -2127,6 +2166,7 @@ _outQuery(StringInfo str, Query *node)
 	WRITE_BOOL_FIELD(hasSubLinks);
 	WRITE_BOOL_FIELD(hasDistinctOn);
 	WRITE_BOOL_FIELD(hasRecursive);
+	WRITE_BOOL_FIELD(hasModifyingCTE);
 	WRITE_BOOL_FIELD(hasForUpdate);
 	WRITE_NODE_FIELD(cteList);
 	WRITE_NODE_FIELD(rtable);
@@ -2239,8 +2279,8 @@ _outRangeTblEntry(StringInfo str, RangeTblEntry *node)
 	switch (node->rtekind)
 	{
 		case RTE_RELATION:
-		case RTE_SPECIAL:
 			WRITE_OID_FIELD(relid);
+			WRITE_CHAR_FIELD(relkind);
 			break;
 		case RTE_SUBQUERY:
 			WRITE_NODE_FIELD(subquery);
@@ -2668,6 +2708,12 @@ _outNode(StringInfo str, void *obj)
 			case T_WorkTableScan:
 				_outWorkTableScan(str, obj);
 				break;
+			case T_ForeignScan:
+				_outForeignScan(str, obj);
+				break;
+			case T_FdwPlan:
+				_outFdwPlan(str, obj);
+				break;
 			case T_Join:
 				_outJoin(str, obj);
 				break;
@@ -2872,6 +2918,9 @@ _outNode(StringInfo str, void *obj)
 				break;
 			case T_TidPath:
 				_outTidPath(str, obj);
+				break;
+			case T_ForeignPath:
+				_outForeignPath(str, obj);
 				break;
 			case T_AppendPath:
 				_outAppendPath(str, obj);

@@ -305,7 +305,6 @@ markTargetListOrigin(ParseState *pstate, TargetEntry *tle,
 				markTargetListOrigin(pstate, tle, aliasvar, netlevelsup);
 			}
 			break;
-		case RTE_SPECIAL:
 		case RTE_FUNCTION:
 		case RTE_VALUES:
 			/* not a simple relation, leave it unmarked */
@@ -325,10 +324,7 @@ markTargetListOrigin(ParseState *pstate, TargetEntry *tle,
 				CommonTableExpr *cte = GetCTEForRTE(pstate, rte, netlevelsup);
 				TargetEntry *ste;
 
-				/* should be analyzed by now */
-				Assert(IsA(cte->ctequery, Query));
-				ste = get_tle_by_resno(((Query *) cte->ctequery)->targetList,
-									   attnum);
+				ste = get_tle_by_resno(GetCTETargetList(cte), attnum);
 				if (ste == NULL || ste->resjunk)
 					elog(ERROR, "subquery %s does not have attribute %d",
 						 rte->eref->aliasname, attnum);
@@ -1357,7 +1353,6 @@ expandRecordVariable(ParseState *pstate, Var *var, int levelsup)
 	switch (rte->rtekind)
 	{
 		case RTE_RELATION:
-		case RTE_SPECIAL:
 		case RTE_VALUES:
 
 			/*
@@ -1417,10 +1412,7 @@ expandRecordVariable(ParseState *pstate, Var *var, int levelsup)
 				CommonTableExpr *cte = GetCTEForRTE(pstate, rte, netlevelsup);
 				TargetEntry *ste;
 
-				/* should be analyzed by now */
-				Assert(IsA(cte->ctequery, Query));
-				ste = get_tle_by_resno(((Query *) cte->ctequery)->targetList,
-									   attnum);
+				ste = get_tle_by_resno(GetCTETargetList(cte), attnum);
 				if (ste == NULL || ste->resjunk)
 					elog(ERROR, "subquery %s does not have attribute %d",
 						 rte->eref->aliasname, attnum);

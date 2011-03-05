@@ -173,8 +173,9 @@ static bool extract_query_dependencies_walker(Node *node,
  * The return value is normally the same Plan node passed in, but can be
  * different when the passed-in Plan is a SubqueryScan we decide isn't needed.
  *
- * The flattened rangetable entries are appended to glob->finalrtable,
- * and we also append rowmarks entries to glob->finalrowmarks.
+ * The flattened rangetable entries are appended to glob->finalrtable.
+ * Also, rowmarks entries are appended to glob->finalrowmarks, and the
+ * RT indexes of ModifyTable result relations to glob->resultRelations.
  * Plan dependencies are appended to glob->relationOids (for relations)
  * and glob->invalItems (for everything else).
  *
@@ -252,7 +253,7 @@ set_plan_references(PlannerGlobal *glob, Plan *plan,
 		newrc = (PlanRowMark *) palloc(sizeof(PlanRowMark));
 		memcpy(newrc, rc, sizeof(PlanRowMark));
 
-		/* adjust indexes */
+		/* adjust indexes ... but *not* the rowmarkId */
 		newrc->rti += rtoffset;
 		newrc->prti += rtoffset;
 
@@ -402,6 +403,18 @@ set_plan_refs(PlannerGlobal *glob, Plan *plan, int rtoffset)
 					fix_scan_list(glob, splan->scan.plan.qual, rtoffset);
 			}
 			break;
+		case T_ForeignScan:
+			{
+				ForeignScan *splan = (ForeignScan *) plan;
+
+				splan->scan.scanrelid += rtoffset;
+				splan->scan.plan.targetlist =
+					fix_scan_list(glob, splan->scan.plan.targetlist, rtoffset);
+				splan->scan.plan.qual =
+					fix_scan_list(glob, splan->scan.plan.qual, rtoffset);
+			}
+			break;
+
 		case T_NestLoop:
 		case T_MergeJoin:
 		case T_HashJoin:
@@ -540,6 +553,17 @@ set_plan_refs(PlannerGlobal *glob, Plan *plan, int rtoffset)
 											  (Plan *) lfirst(l),
 											  rtoffset);
 				}
+
+				/*
+				 * Append this ModifyTable node's final result relation RT
+				 * index(es) to the global list for the plan, and set its
+				 * resultRelIndex to reflect their starting position in the
+				 * global list.
+				 */
+				splan->resultRelIndex = list_length(glob->resultRelations);
+				glob->resultRelations =
+					list_concat(glob->resultRelations,
+								list_copy(splan->resultRelations));
 			}
 			break;
 		case T_Append:

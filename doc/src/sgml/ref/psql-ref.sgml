@@ -593,6 +593,17 @@ $ <userinput>psql "service=myservice sslmode=require"</userinput>
     privileges, server is not running on the targeted host, etc.),
     <application>psql</application> will return an error and terminate.
     </para>
+
+    <para>
+     If at least one of standard input or standard output are a
+     terminal, then <application>psql</application> sets the client
+     encoding to <quote>auto</quote>, which will detect the
+     appropriate client encoding from the locale settings
+     (<envar>LC_CTYPE</envar> environment variable on Unix systems).
+     If this doesn't work out as expected, the client encoding can be
+     overridden using the environment
+     variable <envar>PGCLIENTENCODING</envar>.
+    </para>
   </refsect2>
 
   <refsect2 id="R2-APP-PSQL-4">
@@ -1265,6 +1276,7 @@ testdb=&gt;
         </listitem>
       </varlistentry>
 
+
       <varlistentry>
         <term><literal>\dn[S+] [ <link linkend="APP-PSQL-patterns"><replaceable class="parameter">pattern</replaceable></link> ]</literal></term>
 
@@ -1292,6 +1304,24 @@ testdb=&gt;
         By default, only user-created objects are shown;  supply a
         pattern or the <literal>S</literal> modifier to include system
         objects.
+        </para>
+        </listitem>
+      </varlistentry>
+
+
+      <varlistentry>
+        <term><literal>\dO[S+] [ <link linkend="APP-PSQL-patterns"><replaceable class="parameter">pattern</replaceable></link> ]</literal></term>
+
+        <listitem>
+        <para>
+        Lists collations.
+        If <replaceable class="parameter">pattern</replaceable> is
+        specified, only collations whose names match the pattern are
+        listed.  By default, only user-created objects are shown;
+        supply a pattern or the <literal>S</literal> modifier to
+        include system objects.  If <literal>+</literal> is appended
+        to the command name, each object is listed with its associated
+        description, if any.
         </para>
         </listitem>
       </varlistentry>

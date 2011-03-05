@@ -1494,6 +1494,19 @@ setup_description(void)
 				"  FROM tmp_pg_shdescription t, pg_class c "
 				"   WHERE c.relname = t.classname;\n");
 
+	/* Create default descriptions for operator implementation functions */
+	PG_CMD_PUTS("WITH funcdescs AS ( "
+				"SELECT p.oid as p_oid, oprname, "
+				"coalesce(obj_description(o.oid, 'pg_operator'),'') as opdesc "
+				"FROM pg_proc p JOIN pg_operator o ON oprcode = p.oid ) "
+				"INSERT INTO pg_description "
+				"  SELECT p_oid, 'pg_proc'::regclass, 0, "
+				"    'implementation of ' || oprname || ' operator' "
+				"  FROM funcdescs "
+				"  WHERE opdesc NOT LIKE 'deprecated%' AND "
+				"  NOT EXISTS (SELECT 1 FROM pg_description "
+                "    WHERE objoid = p_oid AND classoid = 'pg_proc'::regclass);\n");
+
 	PG_CMD_CLOSE;
 
 	check_ok();
@@ -1648,10 +1661,11 @@ setup_collation(void)
 	 * matches the OS locale name, else the first name by sort order
 	 * (arbitrary choice to be deterministic).
 	 */
-	PG_CMD_PUTS("INSERT INTO pg_collation (collname, collnamespace, collencoding, collcollate, collctype) "
+	PG_CMD_PUTS("INSERT INTO pg_collation (collname, collnamespace, collowner, collencoding, collcollate, collctype) "
 				" SELECT DISTINCT ON (final_collname, collnamespace, encoding)"
 				"   COALESCE(collname, locale) AS final_collname, "
 				"   (SELECT oid FROM pg_namespace WHERE nspname = 'pg_catalog') AS collnamespace, "
+				"   (SELECT relowner FROM pg_class WHERE relname = 'pg_collation') AS collowner, "
 				"   encoding, "
 				"   locale, locale "
 				"  FROM tmp_pg_collation"
@@ -1898,7 +1912,7 @@ load_plpgsql(void)
 
 	PG_CMD_OPEN;
 
-	PG_CMD_PUTS("CREATE LANGUAGE plpgsql;\n");
+	PG_CMD_PUTS("CREATE EXTENSION plpgsql;\n");
 
 	PG_CMD_CLOSE;
 

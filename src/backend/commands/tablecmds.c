@@ -27,6 +27,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_foreign_table.h"
@@ -141,7 +142,7 @@ typedef struct AlteredTableInfo
 	List	   *constraints;	/* List of NewConstraint */
 	List	   *newvals;		/* List of NewColumnValue */
 	bool		new_notnull;	/* T if we added new NOT NULL constraints */
-	bool		new_changeoids; /* T if we added/dropped the OID column */
+	bool		rewrite;		/* T if a rewrite is forced */
 	Oid			newTableSpace;	/* new tablespace; 0 means no change */
 	/* Objects to rebuild after completing ALTER TYPE operations */
 	List	   *changedConstraintOids;	/* OIDs of constraints to rebuild */
@@ -293,7 +294,7 @@ static void ATPrepAddColumn(List **wqueue, Relation rel, bool recurse, bool recu
 				AlterTableCmd *cmd, LOCKMODE lockmode);
 static void ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 				ColumnDef *colDef, bool isOid, LOCKMODE lockmode);
-static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
+static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid, Oid collid);
 static void ATPrepAddOids(List **wqueue, Relation rel, bool recurse,
 			  AlterTableCmd *cmd, LOCKMODE lockmode);
 static void ATExecDropNotNull(Relation rel, const char *colName, LOCKMODE lockmode);
@@ -336,6 +337,7 @@ static void ATPrepAlterColumnType(List **wqueue,
 					  AlteredTableInfo *tab, Relation rel,
 					  bool recurse, bool recursing,
 					  AlterTableCmd *cmd, LOCKMODE lockmode);
+static bool ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno);
 static void ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 					  const char *colName, TypeName *typeName, LOCKMODE lockmode);
 static void ATPostAlterTypeCleanup(List **wqueue, AlteredTableInfo *tab, LOCKMODE lockmode);
@@ -993,7 +995,7 @@ ExecuteTruncate(TruncateStmt *stmt)
 
 	/*
 	 * To fire triggers, we'll need an EState as well as a ResultRelInfo for
-	 * each relation.
+	 * each relation.  We don't need to call ExecOpenIndices, though.
 	 */
 	estate = CreateExecutorState();
 	resultRelInfos = (ResultRelInfo *)
@@ -1006,7 +1008,6 @@ ExecuteTruncate(TruncateStmt *stmt)
 		InitResultRelInfo(resultRelInfo,
 						  rel,
 						  0,	/* dummy rangetable index */
-						  CMD_DELETE,	/* don't need any index info */
 						  0);
 		resultRelInfo++;
 	}
@@ -3219,10 +3220,33 @@ ATRewriteTables(List **wqueue, LOCKMODE lockmode)
 			continue;
 
 		/*
+		 * If we change column data types or add/remove OIDs, the operation
+		 * has to be propagated to tables that use this table's rowtype as a
+		 * column type.  tab->newvals will also be non-NULL in the case where
+		 * we're adding a column with a default.  We choose to forbid that
+		 * case as well, since composite types might eventually support
+		 * defaults.
+		 *
+		 * (Eventually we'll probably need to check for composite type
+		 * dependencies even when we're just scanning the table without a
+		 * rewrite, but at the moment a composite type does not enforce any
+		 * constraints, so it's not necessary/appropriate to enforce them
+		 * just during ALTER.)
+		 */
+		if (tab->newvals != NIL || tab->rewrite)
+		{
+			Relation	rel;
+
+			rel = heap_open(tab->relid, NoLock);
+			find_composite_type_dependencies(rel->rd_rel->reltype, rel, NULL);
+			heap_close(rel, NoLock);
+		}
+
+		/*
 		 * We only need to rewrite the table if at least one column needs to
 		 * be recomputed, or we are adding/removing the OID column.
 		 */
-		if (tab->newvals != NIL || tab->new_changeoids)
+		if (tab->rewrite)
 		{
 			/* Build a temporary relation and copy data */
 			Relation	OldHeap;
@@ -3409,23 +3433,6 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	}
 
 	/*
-	 * If we change column data types or add/remove OIDs, the operation has to
-	 * be propagated to tables that use this table's rowtype as a column type.
-	 * newrel will also be non-NULL in the case where we're adding a column
-	 * with a default.  We choose to forbid that case as well, since composite
-	 * types might eventually support defaults.
-	 *
-	 * (Eventually we'll probably need to check for composite type
-	 * dependencies even when we're just scanning the table without a rewrite,
-	 * but at the moment a composite type does not enforce any constraints,
-	 * so it's not necessary/appropriate to enforce them just during ALTER.)
-	 */
-	if (newrel)
-		find_composite_type_dependencies(oldrel->rd_rel->reltype,
-										 oldrel->rd_rel->relkind,
-										 RelationGetRelationName(oldrel));
-
-	/*
 	 * Generate the constraint and default execution states
 	 */
 
@@ -3491,6 +3498,15 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		List	   *dropped_attrs = NIL;
 		ListCell   *lc;
 
+		if (newrel)
+			ereport(DEBUG1,
+					(errmsg("rewriting table \"%s\"",
+							RelationGetRelationName(oldrel))));
+		else
+			ereport(DEBUG1,
+					(errmsg("verifying table \"%s\"",
+							RelationGetRelationName(oldrel))));
+
 		econtext = GetPerTupleExprContext(estate);
 
 		/*
@@ -3533,7 +3549,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 
 		while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 		{
-			if (newrel)
+			if (tab->rewrite)
 			{
 				Oid			tupOid = InvalidOid;
 
@@ -3891,8 +3907,8 @@ ATTypedTableRecursion(List **wqueue, Relation rel, AlterTableCmd *cmd,
  * to reject the ALTER.  (How safe is this really?)
  */
 void
-find_composite_type_dependencies(Oid typeOid, char origRelkind,
-								 const char *origRelname)
+find_composite_type_dependencies(Oid typeOid, Relation origRelation,
+								 const char *origTypeName)
 {
 	Relation	depRel;
 	ScanKeyData key[2];
@@ -3936,16 +3952,20 @@ find_composite_type_dependencies(Oid typeOid, char origRelkind,
 		if (rel->rd_rel->relkind == RELKIND_RELATION)
 		{
 			const char *msg;
-			if (origRelkind == RELKIND_COMPOSITE_TYPE)
+
+			if (origTypeName
+				|| origRelation->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
 				msg = gettext_noop("cannot alter type \"%s\" because column \"%s\".\"%s\" uses it");
-			else if (origRelkind == RELKIND_FOREIGN_TABLE)
+			else if (origRelation->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
 				msg = gettext_noop("cannot alter foreign table \"%s\" because column \"%s\".\"%s\" uses its rowtype");
 			else
 				msg = gettext_noop("cannot alter table \"%s\" because column \"%s\".\"%s\" uses its rowtype");
+
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg(msg,
-							origRelname,
+							origTypeName ? origTypeName
+								: RelationGetRelationName(origRelation),
 							RelationGetRelationName(rel),
 							NameStr(att->attname))));
 		}
@@ -3956,7 +3976,7 @@ find_composite_type_dependencies(Oid typeOid, char origRelkind,
 			 * recursively check for indirect dependencies via its rowtype.
 			 */
 			find_composite_type_dependencies(rel->rd_rel->reltype,
-											 origRelkind, origRelname);
+											 origRelation, origTypeName);
 		}
 
 		relation_close(rel, AccessShareLock);
@@ -3972,7 +3992,7 @@ find_composite_type_dependencies(Oid typeOid, char origRelkind,
 	 */
 	arrayOid = get_array_type(typeOid);
 	if (OidIsValid(arrayOid))
-		find_composite_type_dependencies(arrayOid, origRelkind, origRelname);
+		find_composite_type_dependencies(arrayOid, origRelation, origTypeName);
 }
 
 
@@ -4186,7 +4206,7 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 	typeOid = HeapTupleGetOid(typeTuple);
 
 	/* make sure datatype is legal for a column */
-	CheckAttributeType(colDef->colname, typeOid, false);
+	CheckAttributeType(colDef->colname, typeOid, collOid, false);
 
 	/* construct new attribute's pg_attribute entry */
 	attribute.attrelid = myrelid;
@@ -4327,6 +4347,7 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 			newval->expr = defval;
 
 			tab->newvals = lappend(tab->newvals, newval);
+			tab->rewrite = true;
 		}
 
 		/*
@@ -4343,19 +4364,19 @@ ATExecAddColumn(AlteredTableInfo *tab, Relation rel,
 	 * table to fix that.
 	 */
 	if (isOid)
-		tab->new_changeoids = true;
+		tab->rewrite = true;
 
 	/*
 	 * Add needed dependency entries for the new column.
 	 */
-	add_column_datatype_dependency(myrelid, newattnum, attribute.atttypid);
+	add_column_datatype_dependency(myrelid, newattnum, attribute.atttypid, attribute.attcollation);
 }
 
 /*
  * Install a column's dependency on its datatype.
  */
 static void
-add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid)
+add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid, Oid collid)
 {
 	ObjectAddress myself,
 				referenced;
@@ -4367,6 +4388,14 @@ add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid)
 	referenced.objectId = typid;
 	referenced.objectSubId = 0;
 	recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+
+	if (collid)
+	{
+		referenced.classId = CollationRelationId;
+		referenced.objectId = collid;
+		referenced.objectSubId = 0;
+		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+	}
 }
 
 /*
@@ -5016,7 +5045,7 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
 		tab = ATGetQueueEntry(wqueue, rel);
 
 		/* Tell Phase 3 to physically remove the OID column */
-		tab->new_changeoids = true;
+		tab->rewrite = true;
 	}
 }
 
@@ -5040,7 +5069,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	/* suppress schema rights check when rebuilding existing index */
 	check_rights = !is_rebuild;
 	/* skip index build if phase 3 will have to rewrite table anyway */
-	skip_build = (tab->newvals != NIL);
+	skip_build = tab->rewrite;
 	/* suppress notices when rebuilding existing index */
 	quiet = is_rebuild;
 
@@ -5999,6 +6028,9 @@ validateForeignKeyConstraint(char *conname,
 	HeapTuple	tuple;
 	Trigger		trig;
 
+	ereport(DEBUG1,
+			(errmsg("validating foreign key constraint \"%s\"", conname)));
+
 	/*
 	 * Build a trigger call structure; we'll need it either way.
 	 */
@@ -6483,7 +6515,7 @@ ATPrepAlterColumnType(List **wqueue,
 	typenameTypeIdModColl(NULL, typeName, &targettype, &targettypmod, &targetcollid);
 
 	/* make sure datatype is legal for a column */
-	CheckAttributeType(colName, targettype, false);
+	CheckAttributeType(colName, targettype, targetcollid, false);
 
 	if (tab->relkind == RELKIND_RELATION)
 	{
@@ -6557,6 +6589,8 @@ ATPrepAlterColumnType(List **wqueue,
 		newval->expr = (Expr *) transform;
 
 		tab->newvals = lappend(tab->newvals, newval);
+		if (ATColumnChangeRequiresRewrite(transform, attnum))
+			tab->rewrite = true;
 	}
 	else if (tab->relkind == RELKIND_FOREIGN_TABLE)
 	{
@@ -6573,9 +6607,7 @@ ATPrepAlterColumnType(List **wqueue,
 		 * For composite types, do this check now.  Tables will check
 		 * it later when the table is being rewritten.
 		 */
-		find_composite_type_dependencies(rel->rd_rel->reltype,
-										 rel->rd_rel->relkind,
-										 RelationGetRelationName(rel));
+		find_composite_type_dependencies(rel->rd_rel->reltype, rel, NULL);
 	}
 
 	ReleaseSysCache(tuple);
@@ -6596,6 +6628,41 @@ ATPrepAlterColumnType(List **wqueue,
 
 	if (tab->relkind == RELKIND_COMPOSITE_TYPE)
 		ATTypedTableRecursion(wqueue, rel, cmd, lockmode);
+}
+
+/*
+ * When the data type of a column is changed, a rewrite might not be required
+ * if the new type is sufficiently identical to the old one, and the USING
+ * clause isn't trying to insert some other value.  It's safe to skip the
+ * rewrite if the old type is binary coercible to the new type, or if the
+ * new type is an unconstrained domain over the old type.  In the case of a
+ * constrained domain, we could get by with scanning the table and checking
+ * the constraint rather than actually rewriting it, but we don't currently
+ * try to do that.
+ */
+static bool
+ATColumnChangeRequiresRewrite(Node *expr, AttrNumber varattno)
+{
+	Assert(expr != NULL);
+
+	for (;;)
+	{
+		/* only one varno, so no need to check that */
+		if (IsA(expr, Var) && ((Var *) expr)->varattno == varattno)
+			return false;
+		else if (IsA(expr, RelabelType))
+			expr = (Node *) ((RelabelType *) expr)->arg;
+		else if (IsA(expr, CoerceToDomain))
+		{
+			CoerceToDomain *d = (CoerceToDomain *) expr;
+
+			if (GetDomainConstraints(d->resulttype) != NIL)
+				return true;
+			expr = (Node *) d->arg;
+		}
+		else
+			return true;
+	}
 }
 
 static void
@@ -6830,6 +6897,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 			case OCLASS_PROC:
 			case OCLASS_TYPE:
 			case OCLASS_CAST:
+			case OCLASS_COLLATION:
 			case OCLASS_CONVERSION:
 			case OCLASS_LANGUAGE:
 			case OCLASS_LARGEOBJECT:
@@ -6871,7 +6939,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 	/*
 	 * Now scan for dependencies of this column on other things.  The only
 	 * thing we should find is the dependency on the column datatype, which we
-	 * want to remove.
+	 * want to remove, and possibly an associated collation.
 	 */
 	ScanKeyInit(&key[0],
 				Anum_pg_depend_classid,
@@ -6896,8 +6964,10 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 		if (foundDep->deptype != DEPENDENCY_NORMAL)
 			elog(ERROR, "found unexpected dependency type '%c'",
 				 foundDep->deptype);
-		if (foundDep->refclassid != TypeRelationId ||
-			foundDep->refobjid != attTup->atttypid)
+		if (!(foundDep->refclassid == TypeRelationId &&
+			  foundDep->refobjid == attTup->atttypid) &&
+			!(foundDep->refclassid == CollationRelationId &&
+			  foundDep->refobjid == attTup->attcollation))
 			elog(ERROR, "found unexpected dependency for column");
 
 		simple_heap_delete(depRel, &depTup->t_self);
@@ -6930,7 +7000,7 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 	heap_close(attrelation, RowExclusiveLock);
 
 	/* Install dependency on new datatype */
-	add_column_datatype_dependency(RelationGetRelid(rel), attnum, targettype);
+	add_column_datatype_dependency(RelationGetRelid(rel), attnum, targettype, targetcollid);
 
 	/*
 	 * Drop any pg_statistic entry for the column, since it's now wrong type

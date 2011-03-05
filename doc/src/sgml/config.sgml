@@ -1939,8 +1939,11 @@ SET ENABLE_SEQSCAN TO OFF;
         Specifies the delay between activity rounds for WAL sender processes.
         In each round the WAL sender sends any WAL accumulated since the last
         round to the standby server. It then sleeps for
-        <varname>wal_sender_delay</> milliseconds, and repeats. The default
-        value is 200 milliseconds (<literal>200ms</>).
+        <varname>wal_sender_delay</> milliseconds, and repeats. The sleep
+        is interrupted by transaction commit, so the effects of a committed
+        transaction are sent to standby servers as soon as the commit
+        happens, regardless of this setting. The default value is one second
+        (<literal>1s</>).
         Note that on many systems, the effective resolution of sleep delays is
         10 milliseconds; setting <varname>wal_sender_delay</> to a value that
         is not a multiple of 10 might have the same results as setting it to
@@ -2005,6 +2008,10 @@ SET ENABLE_SEQSCAN TO OFF;
         grace time will be made available to standby queries.
         This parameter can only be set in the <filename>postgresql.conf</>
         file or on the server command line.
+       </para>
+       <para>
+        You should also consider setting <varname>hot_standby_feedback</>
+        as an alternative to using this parameter.
        </para>
       </listitem>
      </varlistentry>
@@ -2094,6 +2101,46 @@ SET ENABLE_SEQSCAN TO OFF;
         resulted in significant delay, subsequent conflicting queries will
         have much less grace time until the standby server has caught up
         again.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-wal-receiver-status-interval" xreflabel="wal_receiver_status_interval">
+      <term><varname>wal_receiver_status_interval</varname> (<type>integer</type>)</term>
+      <indexterm>
+       <primary><varname>wal_receiver_status_interval</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+      <para>
+       Specifies the minimum frequency, in seconds, for the WAL receiver
+       process on the standby to send information about replication progress
+       to the primary, where they can be seen using the
+       <literal>pg_stat_replication</literal> view.  The standby will report
+       the last transaction log position it has written, the last position it
+       has flushed to disk, and the last position it has applied.  Updates are
+       sent each time the write or flush positions changed, or at least as
+       often as specified by this parameter.  Thus, the apply position may
+       lag slightly behind the true position.  Setting this parameter to zero
+       disables status updates completely.  This parameter can only be set in
+       the <filename>postgresql.conf</> file or on the server command line.
+       The default value is 10 seconds.
+      </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-hot-standby-feedback" xreflabel="hot_standby">
+      <term><varname>hot_standby_feedback</varname> (<type>boolean</type>)</term>
+      <indexterm>
+       <primary><varname>hot_standby_feedback</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies whether or not a hot standby will send feedback to the primary
+        about queries currently executing on the standby. This parameter can
+        be used to eliminate query cancels caused by cleanup records, but 
+        can cause database bloat on the primary for some workloads.
+        The default value is <literal>off</literal>.  Feedback messages will not
+        be sent more frequently than once per <varname>wal_receiver_status_interval</>.
        </para>
       </listitem>
      </varlistentry>
@@ -5165,15 +5212,15 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
       </listitem>
      </varlistentry>
 
-     <varlistentry id="guc-max-predicate-locks-per-transaction" xreflabel="max_predicate_locks_per_transaction">
-      <term><varname>max_predicate_locks_per_transaction</varname> (<type>integer</type>)</term>
+     <varlistentry id="guc-max-pred-locks-per-transaction" xreflabel="max_pred_locks_per_transaction">
+      <term><varname>max_pred_locks_per_transaction</varname> (<type>integer</type>)</term>
       <indexterm>
-       <primary><varname>max_predicate_locks_per_transaction</> configuration parameter</primary>
+       <primary><varname>max_pred_locks_per_transaction</> configuration parameter</primary>
       </indexterm>
       <listitem>
        <para>
         The shared predicate lock table tracks locks on
-        <varname>max_predicate_locks_per_transaction</varname> * (<xref
+        <varname>max_pred_locks_per_transaction</varname> * (<xref
         linkend="guc-max-connections"> + <xref
         linkend="guc-max-prepared-transactions">) objects (e.g., tables);
         hence, no more than this many distinct objects can be locked at

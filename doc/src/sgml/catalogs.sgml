@@ -1895,6 +1895,13 @@
      </row>
 
      <row>
+      <entry><structfield>convalidated</structfield></entry>
+      <entry><type>bool</type></entry>
+      <entry></entry>
+      <entry>Has the constraint been validated? Can only be false for foreign keys</entry>
+     </row>
+
+     <row>
       <entry><structfield>conrelid</structfield></entry>
       <entry><type>oid</type></entry>
       <entry><literal><link linkend="catalog-pg-class"><structname>pg_class</structname></link>.oid</literal></entry>
@@ -2115,10 +2122,29 @@
      </row>
 
      <row>
+      <entry><structfield>collowner</structfield></entry>
+      <entry><type>oid</type></entry>
+      <entry><literal><link linkend="catalog-pg-authid"><structname>pg_authid</structname></link>.oid</literal></entry>
+      <entry>Owner of the collation</entry>
+     </row>
+
+     <row>
       <entry><structfield>collencoding</structfield></entry>
       <entry><type>int4</type></entry>
       <entry></entry>
-      <entry>Encoding to which the collation is applicable</entry>
+      <entry>
+       Encoding to which the collation is applicable.  SQL-level
+       commands such as <command>ALTER COLLATION</command> only
+       operate on the collation belonging to the current database
+       encoding.  But this field is necessary because when this
+       catalog is initialized, the encoding of future databases is not
+       yet known.  For practical purposes, collations that do not
+       match the current database encoding should be considered
+       invalid or invisible.  It could be useful, however, to create
+       collations whose encoding does not match the database encoding
+       in template databases.  This would currently have to be done
+       manually.
+      </entry>
      </row>
 
      <row>
@@ -2927,7 +2953,7 @@
       <entry><structfield>extversion</structfield></entry>
       <entry><type>text</type></entry>
       <entry></entry>
-      <entry>Version string for the extension, or <literal>NULL</> if none</entry>
+      <entry>Version name for the extension</entry>
      </row>
 
      <row>
@@ -3006,15 +3032,26 @@
      </row>
 
      <row>
+      <entry><structfield>fdwhandler</structfield></entry>
+      <entry><type>oid</type></entry>
+      <entry><literal><link linkend="catalog-pg-proc"><structname>pg_proc</structname></link>.oid</literal></entry>
+      <entry>
+       References a handler function that is responsible for
+       supplying execution routines for the foreign-data wrapper.
+       Zero if no handler is provided
+      </entry>
+     </row>
+
+     <row>
       <entry><structfield>fdwvalidator</structfield></entry>
       <entry><type>oid</type></entry>
       <entry><literal><link linkend="catalog-pg-proc"><structname>pg_proc</structname></link>.oid</literal></entry>
       <entry>
        References a validator function that is responsible for
-       checking the validity of the generic options given to the
-       foreign-data wrapper, as well as to foreign servers and user
+       checking the validity of the options given to the
+       foreign-data wrapper, as well as options for foreign servers and user
        mappings using the foreign-data wrapper.  Zero if no validator
-       is provided.
+       is provided
       </entry>
      </row>
 
@@ -3053,8 +3090,8 @@
 
   <para>
    The catalog <structname>pg_foreign_server</structname> stores
-   foreign server definitions.  A foreign server describes the
-   connection to a remote server, managing external data.  Foreign
+   foreign server definitions.  A foreign server describes a source
+   of external data, such as a remote server.  Foreign
    servers are accessed via foreign-data wrappers.
   </para>
 
@@ -3090,7 +3127,7 @@
       <entry><structfield>srvfdw</structfield></entry>
       <entry><type>oid</type></entry>
       <entry><literal><link linkend="catalog-pg-foreign-data-wrapper"><structname>pg_foreign_data_wrapper</structname></link>.oid</literal></entry>
-      <entry>The OID of the foreign-data wrapper of this foreign server</entry>
+      <entry>OID of the foreign-data wrapper of this foreign server</entry>
      </row>
 
      <row>
@@ -3141,9 +3178,12 @@
   </indexterm>
 
   <para>
-   The catalog <structname>pg_foreign_table</structname> contains part
-   of the information about foreign tables.
-   The rest is mostly in <structname>pg_class</structname>.
+   The catalog <structname>pg_foreign_table</structname> contains
+   auxiliary information about foreign tables.  A foreign table is
+   primarily represented by a <structname>pg_class</structname> entry,
+   just like a regular table.  Its <structname>pg_foreign_table</structname>
+   entry contains the information that is pertinent only to foreign tables
+   and not any other kind of relation.
   </para>
 
   <table>
@@ -3164,14 +3204,14 @@
       <entry><structfield>ftrelid</structfield></entry>
       <entry><type>oid</type></entry>
       <entry><literal><link linkend="catalog-pg-class"><structname>pg_class</structname></link>.oid</literal></entry>
-      <entry>The OID of the <structname>pg_class</> entry for this foreign table</entry>
+      <entry>OID of the <structname>pg_class</> entry for this foreign table</entry>
      </row>
 
      <row>
       <entry><structfield>ftserver</structfield></entry>
       <entry><type>oid</type></entry>
       <entry><literal><link linkend="catalog-pg-foreign-server"><structname>pg_foreign_server</structname></link>.oid</literal></entry>
-      <entry>The OID of the foreign server for this foreign table</entry>
+      <entry>OID of the foreign server for this foreign table</entry>
      </row>
 
      <row>
@@ -3179,7 +3219,7 @@
       <entry><type>text[]</type></entry>
       <entry></entry>
       <entry>
-       Foreign table options, as <quote>keyword=value</> strings.
+       Foreign table options, as <quote>keyword=value</> strings
       </entry>
      </row>
     </tbody>
@@ -6312,6 +6352,11 @@
      </row>
 
      <row>
+      <entry><link linkend="view-pg-available-extension-versions"><structname>pg_available_extension_versions</structname></link></entry>
+      <entry>available versions of extensions</entry>
+     </row>
+
+     <row>
       <entry><link linkend="view-pg-cursors"><structname>pg_cursors</structname></link></entry>
       <entry>open cursors</entry>
      </row>
@@ -6415,8 +6460,8 @@
 
   <para>
    The <structname>pg_available_extensions</structname> view lists the
-   extensions that are available for installation.  This view can only
-   be read by superusers.  See also the
+   extensions that are available for installation.
+   See also the
    <link linkend="catalog-pg-extension"><structname>pg_extension</structname></link>
    catalog, which shows the extensions currently installed.
   </para>
@@ -6441,29 +6486,17 @@
      </row>
 
      <row>
-      <entry><structfield>version</structfield></entry>
+      <entry><structfield>default_version</structfield></entry>
       <entry><type>text</type></entry>
-      <entry>Version string from the extension's control file</entry>
+      <entry>Name of default version, or <literal>NULL</literal> if none is
+       specified</entry>
      </row>
 
      <row>
-      <entry><structfield>installed</structfield></entry>
+      <entry><structfield>installed_version</structfield></entry>
       <entry><type>text</type></entry>
       <entry>Currently installed version of the extension,
        or <literal>NULL</literal> if not installed</entry>
-     </row>
-
-     <row>
-      <entry><structfield>schema</structfield></entry>
-      <entry><type>name</type></entry>
-      <entry>Name of the schema where the extension is installed,
-       or <literal>NULL</literal> if not installed</entry>
-     </row>
-
-     <row>
-      <entry><structfield>relocatable</structfield></entry>
-      <entry><type>bool</type></entry>
-      <entry>True if extension can be relocated to another schema</entry>
      </row>
 
      <row>
@@ -6478,7 +6511,94 @@
   <para>
    The <structname>pg_available_extensions</structname> view is read only.
   </para>
+ </sect1>
 
+ <sect1 id="view-pg-available-extension-versions">
+  <title><structname>pg_available_extension_versions</structname></title>
+
+  <indexterm zone="view-pg-available-extension-versions">
+   <primary>pg_available_extension_versions</primary>
+  </indexterm>
+
+  <para>
+   The <structname>pg_available_extension_versions</structname> view lists the
+   specific extension versions that are available for installation.
+   See also the <link
+   linkend="catalog-pg-extension"><structname>pg_extension</structname></link>
+   catalog, which shows the extensions currently installed.
+  </para>
+
+  <table>
+   <title><structname>pg_available_extension_versions</> Columns</title>
+
+   <tgroup cols="3">
+    <thead>
+     <row>
+      <entry>Name</entry>
+      <entry>Type</entry>
+      <entry>Description</entry>
+     </row>
+    </thead>
+
+    <tbody>
+     <row>
+      <entry><structfield>name</structfield></entry>
+      <entry><type>name</type></entry>
+      <entry>Extension name</entry>
+     </row>
+
+     <row>
+      <entry><structfield>version</structfield></entry>
+      <entry><type>text</type></entry>
+      <entry>Version name</entry>
+     </row>
+
+     <row>
+      <entry><structfield>installed</structfield></entry>
+      <entry><type>bool</type></entry>
+      <entry>True if this version of this extension is currently
+       installed</entry>
+     </row>
+
+     <row>
+      <entry><structfield>superuser</structfield></entry>
+      <entry><type>bool</type></entry>
+      <entry>True if only superusers are allowed to install this extension</entry>
+     </row>
+
+     <row>
+      <entry><structfield>relocatable</structfield></entry>
+      <entry><type>bool</type></entry>
+      <entry>True if extension can be relocated to another schema</entry>
+     </row>
+
+     <row>
+      <entry><structfield>schema</structfield></entry>
+      <entry><type>name</type></entry>
+      <entry>Name of the schema that the extension must be installed into,
+       or <literal>NULL</literal> if partially or fully relocatable</entry>
+     </row>
+
+     <row>
+      <entry><structfield>requires</structfield></entry>
+      <entry><type>name[]</type></entry>
+      <entry>Names of prerequisite extensions,
+       or <literal>NULL</literal> if none</entry>
+     </row>
+
+     <row>
+      <entry><structfield>comment</structfield></entry>
+      <entry><type>text</type></entry>
+      <entry>Comment string from the extension's control file</entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <para>
+   The <structname>pg_available_extension_versions</structname> view is read
+   only.
+  </para>
  </sect1>
 
  <sect1 id="view-pg-cursors">

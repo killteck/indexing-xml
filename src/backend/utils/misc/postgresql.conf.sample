@@ -188,7 +188,7 @@
 
 #max_wal_senders = 0		# max number of walsender processes
 				# (change requires restart)
-#wal_sender_delay = 200ms	# walsender cycle time, 1-10000 milliseconds
+#wal_sender_delay = 1s		# walsender cycle time, 1-10000 milliseconds
 #wal_keep_segments = 0		# in logfile segments, 16MB each; 0 disables
 #vacuum_defer_cleanup_age = 0	# number of xacts by which cleanup is delayed
 
@@ -196,12 +196,14 @@
 
 #hot_standby = off			# "on" allows queries during recovery
 					# (change requires restart)
+#hot_standby_feedback = off	# info from standby to prevent query conflicts
 #max_standby_archive_delay = 30s	# max delay before canceling queries
 					# when reading WAL from archive;
 					# -1 allows indefinite delay
 #max_standby_streaming_delay = 30s	# max delay before canceling queries
 					# when reading streaming WAL;
 					# -1 allows indefinite delay
+#wal_receiver_status_interval = 10s	# replies at least this often, 0 disables
 
 
 #------------------------------------------------------------------------------
@@ -502,7 +504,7 @@
 # Note:  Each lock table slot uses ~270 bytes of shared memory, and there are
 # max_locks_per_transaction * (max_connections + max_prepared_transactions)
 # lock table slots.
-#max_predicate_locks_per_transaction = 64	# min 10
+#max_pred_locks_per_transaction = 64	# min 10
 					# (change requires restart)
 
 #------------------------------------------------------------------------------

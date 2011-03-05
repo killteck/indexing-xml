@@ -39,6 +39,7 @@
 
 #include "funcapi.h"
 #include "access/xlog_internal.h"
+#include "access/transam.h"
 #include "catalog/pg_type.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -51,6 +52,8 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
+#include "storage/proc.h"
+#include "storage/procarray.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -70,7 +73,7 @@ bool		am_walsender = false;		/* Am I a walsender process ? */
 
 /* User-settable parameters for walsender */
 int			max_wal_senders = 0;	/* the maximum number of concurrent walsenders */
-int			WalSndDelay = 200;	/* max sleep time between some actions */
+int			WalSndDelay = 1000;	/* max sleep time between some actions */
 
 /*
  * These variables are used similarly to openLogFile/Id/Seg/Off,
@@ -86,6 +89,11 @@ static uint32 sendOff = 0;
  * MyWalSnd->sentPtr.  (Actually, this is the next WAL location to send.)
  */
 static XLogRecPtr sentPtr = {0, 0};
+
+/*
+ * Buffer for processing reply messages.
+ */
+static StringInfoData reply_message;
 
 /* Flags set by signal handlers for later service in main loop */
 static volatile sig_atomic_t got_SIGHUP = false;
@@ -106,9 +114,12 @@ static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
 static bool XLogSend(char *msgbuf, bool *caughtup);
-static void CheckClosedConnection(void);
 static void IdentifySystem(void);
 static void StartReplication(StartReplicationCmd * cmd);
+static void ProcessStandbyMessage(void);
+static void ProcessStandbyReplyMessage(void);
+static void ProcessStandbyHSFeedbackMessage(void);
+static void ProcessRepliesIfAny(void);
 
 
 /* Main entry point for walsender process */
@@ -358,6 +369,16 @@ StartReplication(StartReplicationCmd * cmd)
 				(errcode(ERRCODE_CANNOT_CONNECT_NOW),
 		errmsg("standby connections not allowed because wal_level=minimal")));
 
+	/*
+	 * When we first start replication the standby will be behind the primary.
+	 * For some applications, for example, synchronous replication, it is
+	 * important to have a clear state for this initial catchup mode, so we
+	 * can trigger actions when we change streaming state later. We may stay
+	 * in this state for a long time, which is exactly why we want to be
+	 * able to monitor whether or not we are still here.
+	 */
+	WalSndSetState(WALSNDSTATE_CATCHUP);
+
 	/* Send a CopyBothResponse message, and start streaming */
 	pq_beginmessage(&buf, 'W');
 	pq_sendbyte(&buf, 0);
@@ -442,40 +463,205 @@ HandleReplicationCommand(const char *cmd_string)
  * Check if the remote end has closed the connection.
  */
 static void
-CheckClosedConnection(void)
+ProcessRepliesIfAny(void)
 {
 	unsigned char firstchar;
 	int			r;
 
-	r = pq_getbyte_if_available(&firstchar);
-	if (r < 0)
+	for (;;)
 	{
-		/* unexpected error or EOF */
+		r = pq_getbyte_if_available(&firstchar);
+		if (r < 0)
+		{
+			/* unexpected error or EOF */
+			ereport(COMMERROR,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("unexpected EOF on standby connection")));
+			proc_exit(0);
+		}
+		if (r == 0)
+		{
+			/* no data available without blocking */
+			return;
+		}
+
+		/* Handle the very limited subset of commands expected in this phase */
+		switch (firstchar)
+		{
+				/*
+				 * 'd' means a standby reply wrapped in a CopyData packet.
+				 */
+			case 'd':
+				ProcessStandbyMessage();
+				break;
+
+				/*
+				 * 'X' means that the standby is closing down the socket.
+				 */
+			case 'X':
+				proc_exit(0);
+
+			default:
+				ereport(FATAL,
+						(errcode(ERRCODE_PROTOCOL_VIOLATION),
+						 errmsg("invalid standby closing message type %d",
+								firstchar)));
+		}
+	}
+}
+
+/*
+ * Process a status update message received from standby.
+ */
+static void
+ProcessStandbyMessage(void)
+{
+	char msgtype;
+
+	resetStringInfo(&reply_message);
+
+	/*
+	 * Read the message contents.
+	 */
+	if (pq_getmessage(&reply_message, 0))
+	{
 		ereport(COMMERROR,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("unexpected EOF on standby connection")));
 		proc_exit(0);
 	}
-	if (r == 0)
-	{
-		/* no data available without blocking */
-		return;
-	}
 
-	/* Handle the very limited subset of commands expected in this phase */
-	switch (firstchar)
+	/*
+	 * Check message type from the first byte. At the moment, there is only
+	 * one type.
+	 */
+	msgtype = pq_getmsgbyte(&reply_message);
+
+	switch (msgtype)
 	{
-			/*
-			 * 'X' means that the standby is closing down the socket.
-			 */
-		case 'X':
-			proc_exit(0);
+		case 'r':
+			ProcessStandbyReplyMessage();
+			break;
+
+		case 'h':
+			ProcessStandbyHSFeedbackMessage();
+			break;
 
 		default:
-			ereport(FATAL,
+			ereport(COMMERROR,
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
-					 errmsg("invalid standby closing message type %d",
-							firstchar)));
+					 errmsg("unexpected message type %c", msgtype)));
+			proc_exit(0);
+	}
+}
+
+/*
+ * Regular reply from standby advising of WAL positions on standby server.
+ */
+static void
+ProcessStandbyReplyMessage(void)
+{
+	StandbyReplyMessage	reply;
+
+	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyReplyMessage));
+
+	elog(DEBUG2, "write %X/%X flush %X/%X apply %X/%X",
+		 reply.write.xlogid, reply.write.xrecoff,
+		 reply.flush.xlogid, reply.flush.xrecoff,
+		 reply.apply.xlogid, reply.apply.xrecoff);
+
+	/*
+	 * Update shared state for this WalSender process
+	 * based on reply data from standby.
+	 */
+	{
+		/* use volatile pointer to prevent code rearrangement */
+		volatile WalSnd *walsnd = MyWalSnd;
+
+		SpinLockAcquire(&walsnd->mutex);
+		walsnd->write = reply.write;
+		walsnd->flush = reply.flush;
+		walsnd->apply = reply.apply;
+		SpinLockRelease(&walsnd->mutex);
+	}
+}
+
+/*
+ * Hot Standby feedback
+ */
+static void
+ProcessStandbyHSFeedbackMessage(void)
+{
+	StandbyHSFeedbackMessage	reply;
+	TransactionId newxmin = InvalidTransactionId;
+
+	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyHSFeedbackMessage));
+
+	elog(DEBUG2, "hot standby feedback xmin %u epoch %u",
+		 reply.xmin,
+		 reply.epoch);
+
+	/*
+	 * Update the WalSender's proc xmin to allow it to be visible
+	 * to snapshots. This will hold back the removal of dead rows
+	 * and thereby prevent the generation of cleanup conflicts
+	 * on the standby server.
+	 */
+	if (TransactionIdIsValid(reply.xmin))
+	{
+		TransactionId	nextXid;
+		uint32			nextEpoch;
+		bool			epochOK = false;
+
+		GetNextXidAndEpoch(&nextXid, &nextEpoch);
+
+		/*
+		 * Epoch of oldestXmin should be same as standby or
+		 * if the counter has wrapped, then one less than reply.
+		 */
+		if (reply.xmin <= nextXid)
+		{
+			if (reply.epoch == nextEpoch)
+				epochOK = true;
+		}
+		else
+		{
+			if (nextEpoch > 0 && reply.epoch == nextEpoch - 1)
+				epochOK = true;
+		}
+
+		/*
+		 * Feedback from standby must not go backwards, nor should it go
+		 * forwards further than our most recent xid.
+		 */
+		if (epochOK && TransactionIdPrecedesOrEquals(reply.xmin, nextXid))
+		{
+			if (!TransactionIdIsValid(MyProc->xmin))
+			{
+				TransactionId oldestXmin = GetOldestXmin(true, true);
+				if (TransactionIdPrecedes(oldestXmin, reply.xmin))
+					newxmin = reply.xmin;
+				else
+					newxmin = oldestXmin;
+			}
+			else
+			{
+				if (TransactionIdPrecedes(MyProc->xmin, reply.xmin))
+					newxmin = reply.xmin;
+				else
+					newxmin = MyProc->xmin; /* stay the same */
+			}
+		}
+	}
+
+	/*
+	 * Grab the ProcArrayLock to set xmin, or invalidate for bad reply
+	 */
+	if (MyProc->xmin != newxmin)
+	{
+		LWLockAcquire(ProcArrayLock, LW_SHARED);
+		MyProc->xmin = newxmin;
+		LWLockRelease(ProcArrayLock);
 	}
 }
 
@@ -492,6 +678,12 @@ WalSndLoop(void)
 	 * enough for maximum-sized messages.
 	 */
 	output_message = palloc(1 + sizeof(WalDataMessageHeader) + MAX_SEND_SIZE);
+
+	/*
+	 * Allocate buffer that will be used for processing reply messages.  As
+	 * above, do this just once to reduce palloc overhead.
+	 */
+	initStringInfo(&reply_message);
 
 	/* Loop forever, unless we get an error */
 	for (;;)
@@ -518,6 +710,7 @@ WalSndLoop(void)
 		{
 			if (!XLogSend(output_message, &caughtup))
 				break;
+			ProcessRepliesIfAny();
 			if (caughtup)
 				walsender_shutdown_requested = true;
 		}
@@ -561,9 +754,6 @@ WalSndLoop(void)
 				WaitLatchOrSocket(&MyWalSnd->latch, MyProcPort->sock,
 								  WalSndDelay * 1000L);
 			}
-
-			/* Check if the connection was closed */
-			CheckClosedConnection();
 		}
 		else
 		{
@@ -572,8 +762,18 @@ WalSndLoop(void)
 				break;
 		}
 
-		/* Update our state to indicate if we're behind or not */
-		WalSndSetState(caughtup ? WALSNDSTATE_STREAMING : WALSNDSTATE_CATCHUP);
+		/*
+		 * If we're in catchup state, see if its time to move to streaming.
+		 * This is an important state change for users, since before this
+		 * point data loss might occur if the primary dies and we need to
+		 * failover to the standby. The state change is also important for
+		 * synchronous replication, since commits that started to wait at
+		 * that point might wait for some time.
+		 */
+		if (MyWalSnd->state == WALSNDSTATE_CATCHUP && caughtup)
+			WalSndSetState(WALSNDSTATE_STREAMING);
+
+		ProcessRepliesIfAny();
 	}
 
 	/*
@@ -1104,7 +1304,7 @@ WalSndGetStateString(WalSndState state)
 Datum
 pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_WAL_SENDERS_COLS 	3
+#define PG_STAT_GET_WAL_SENDERS_COLS 	6
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	TupleDesc			tupdesc;
 	Tuplestorestate	   *tupstore;
@@ -1141,8 +1341,11 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 	{
 		/* use volatile pointer to prevent code rearrangement */
 		volatile WalSnd *walsnd = &WalSndCtl->walsnds[i];
-		char		sent_location[MAXFNAMELEN];
+		char		location[MAXFNAMELEN];
 		XLogRecPtr	sentPtr;
+		XLogRecPtr	write;
+		XLogRecPtr	flush;
+		XLogRecPtr	apply;
 		WalSndState	state;
 		Datum		values[PG_STAT_GET_WAL_SENDERS_COLS];
 		bool		nulls[PG_STAT_GET_WAL_SENDERS_COLS];
@@ -1153,13 +1356,14 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 		SpinLockAcquire(&walsnd->mutex);
 		sentPtr = walsnd->sentPtr;
 		state = walsnd->state;
+		write = walsnd->write;
+		flush = walsnd->flush;
+		apply = walsnd->apply;
 		SpinLockRelease(&walsnd->mutex);
-
-		snprintf(sent_location, sizeof(sent_location), "%X/%X",
-					sentPtr.xlogid, sentPtr.xrecoff);
 
 		memset(nulls, 0, sizeof(nulls));
 		values[0] = Int32GetDatum(walsnd->pid);
+
 		if (!superuser())
 		{
 			/*
@@ -1168,11 +1372,35 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 			 */
 			nulls[1] = true;
 			nulls[2] = true;
+			nulls[3] = true;
+			nulls[4] = true;
+			nulls[5] = true;
 		}
 		else
 		{
 			values[1] = CStringGetTextDatum(WalSndGetStateString(state));
-			values[2] = CStringGetTextDatum(sent_location);
+
+			snprintf(location, sizeof(location), "%X/%X",
+					 sentPtr.xlogid, sentPtr.xrecoff);
+			values[2] = CStringGetTextDatum(location);
+
+			if (write.xlogid == 0 && write.xrecoff == 0)
+				nulls[3] = true;
+			snprintf(location, sizeof(location), "%X/%X",
+					 write.xlogid, write.xrecoff);
+			values[3] = CStringGetTextDatum(location);
+
+			if (flush.xlogid == 0 && flush.xrecoff == 0)
+				nulls[4] = true;
+			snprintf(location, sizeof(location), "%X/%X",
+					flush.xlogid, flush.xrecoff);
+			values[4] = CStringGetTextDatum(location);
+
+			if (apply.xlogid == 0 && apply.xrecoff == 0)
+				nulls[5] = true;
+			snprintf(location, sizeof(location), "%X/%X",
+					 apply.xlogid, apply.xrecoff);
+			values[5] = CStringGetTextDatum(location);
 		}
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);

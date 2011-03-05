@@ -2223,6 +2223,7 @@ pgstat_fetch_global(void)
 
 static PgBackendStatus *BackendStatusArray = NULL;
 static PgBackendStatus *MyBEEntry = NULL;
+static char *BackendClientHostnameBuffer = NULL;
 static char *BackendAppnameBuffer = NULL;
 static char *BackendActivityBuffer = NULL;
 
@@ -2240,11 +2241,13 @@ BackendStatusShmemSize(void)
 					mul_size(NAMEDATALEN, MaxBackends));
 	size = add_size(size,
 					mul_size(pgstat_track_activity_query_size, MaxBackends));
+	size = add_size(size,
+					mul_size(NAMEDATALEN, MaxBackends));
 	return size;
 }
 
 /*
- * Initialize the shared status array and activity/appname string buffers
+ * Initialize the shared status array and several string buffers
  * during postmaster startup.
  */
 void
@@ -2282,6 +2285,24 @@ CreateSharedBackendStatus(void)
 		for (i = 0; i < MaxBackends; i++)
 		{
 			BackendStatusArray[i].st_appname = buffer;
+			buffer += NAMEDATALEN;
+		}
+	}
+
+	/* Create or attach to the shared client hostname buffer */
+	size = mul_size(NAMEDATALEN, MaxBackends);
+	BackendClientHostnameBuffer = (char *)
+		ShmemInitStruct("Backend Client Host Name Buffer", size, &found);
+
+	if (!found)
+	{
+		MemSet(BackendClientHostnameBuffer, 0, size);
+
+		/* Initialize st_clienthostname pointers. */
+		buffer = BackendClientHostnameBuffer;
+		for (i = 0; i < MaxBackends; i++)
+		{
+			BackendStatusArray[i].st_clienthostname = buffer;
 			buffer += NAMEDATALEN;
 		}
 	}
@@ -2386,15 +2407,20 @@ pgstat_bestart(void)
 	beentry->st_databaseid = MyDatabaseId;
 	beentry->st_userid = userid;
 	beentry->st_clientaddr = clientaddr;
+	beentry->st_clienthostname[0] = '\0';
 	beentry->st_waiting = false;
 	beentry->st_appname[0] = '\0';
 	beentry->st_activity[0] = '\0';
 	/* Also make sure the last byte in each string area is always 0 */
+	beentry->st_clienthostname[NAMEDATALEN - 1] = '\0';
 	beentry->st_appname[NAMEDATALEN - 1] = '\0';
 	beentry->st_activity[pgstat_track_activity_query_size - 1] = '\0';
 
 	beentry->st_changecount++;
 	Assert((beentry->st_changecount & 1) == 0);
+
+	if (MyProcPort && MyProcPort->remote_hostname)
+		strlcpy(beentry->st_clienthostname, MyProcPort->remote_hostname, NAMEDATALEN);
 
 	/* Update app name to current GUC setting */
 	if (application_name)
@@ -3160,6 +3186,8 @@ pgstat_get_db_entry(Oid databaseid, bool create)
 		result->n_conflict_bufferpin = 0;
 		result->n_conflict_startup_deadlock = 0;
 
+		result->stat_reset_timestamp = GetCurrentTimestamp();
+
 		memset(&hash_ctl, 0, sizeof(hash_ctl));
 		hash_ctl.keysize = sizeof(Oid);
 		hash_ctl.entrysize = sizeof(PgStat_StatTabEntry);
@@ -3438,6 +3466,12 @@ pgstat_read_statsfile(Oid onlydb, bool permanent)
 	 * load an existing statsfile.
 	 */
 	memset(&globalStats, 0, sizeof(globalStats));
+
+	/*
+	 * Set the current timestamp (will be kept only in case we can't load an
+	 * existing statsfile.
+	 */
+	globalStats.stat_reset_timestamp = GetCurrentTimestamp();
 
 	/*
 	 * Try to open the status file. If it doesn't exist, the backends simply
@@ -4052,6 +4086,8 @@ pgstat_recv_resetcounter(PgStat_MsgResetcounter *msg, int len)
 	dbentry->n_tuples_deleted = 0;
 	dbentry->last_autovac_time = 0;
 
+	dbentry->stat_reset_timestamp = GetCurrentTimestamp();
+
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(Oid);
 	hash_ctl.entrysize = sizeof(PgStat_StatTabEntry);
@@ -4083,6 +4119,7 @@ pgstat_recv_resetsharedcounter(PgStat_MsgResetsharedcounter *msg, int len)
 	{
 		/* Reset the global background writer statistics for the cluster. */
 		memset(&globalStats, 0, sizeof(globalStats));
+		globalStats.stat_reset_timestamp = GetCurrentTimestamp();
 	}
 
 	/*
@@ -4107,6 +4144,8 @@ pgstat_recv_resetsinglecounter(PgStat_MsgResetsinglecounter *msg, int len)
 	if (!dbentry)
 		return;
 
+	/* Set the reset timestamp for the whole database */
+	dbentry->stat_reset_timestamp = GetCurrentTimestamp();
 
 	/* Remove object if it exists, ignore it if not */
 	if (msg->m_resettype == RESET_TABLE)

@@ -188,6 +188,7 @@ typedef enum AclObjectKind
 	ACL_KIND_NAMESPACE,			/* pg_namespace */
 	ACL_KIND_OPCLASS,			/* pg_opclass */
 	ACL_KIND_OPFAMILY,			/* pg_opfamily */
+	ACL_KIND_COLLATION,			/* pg_collation */
 	ACL_KIND_CONVERSION,		/* pg_conversion */
 	ACL_KIND_TABLESPACE,		/* pg_tablespace */
 	ACL_KIND_TSDICTIONARY,		/* pg_ts_dict */
@@ -195,6 +196,7 @@ typedef enum AclObjectKind
 	ACL_KIND_FDW,				/* pg_foreign_data_wrapper */
 	ACL_KIND_FOREIGN_SERVER,	/* pg_foreign_server */
 	ACL_KIND_FOREIGN_TABLE,		/* pg_foreign_table */
+	ACL_KIND_EXTENSION,			/* pg_extension */
 	MAX_ACL_KIND				/* MUST BE LAST */
 } AclObjectKind;
 
@@ -309,9 +311,11 @@ extern bool pg_tablespace_ownercheck(Oid spc_oid, Oid roleid);
 extern bool pg_opclass_ownercheck(Oid opc_oid, Oid roleid);
 extern bool pg_opfamily_ownercheck(Oid opf_oid, Oid roleid);
 extern bool pg_database_ownercheck(Oid db_oid, Oid roleid);
+extern bool pg_collation_ownercheck(Oid coll_oid, Oid roleid);
 extern bool pg_conversion_ownercheck(Oid conv_oid, Oid roleid);
 extern bool pg_ts_dict_ownercheck(Oid dict_oid, Oid roleid);
 extern bool pg_ts_config_ownercheck(Oid cfg_oid, Oid roleid);
 extern bool pg_foreign_server_ownercheck(Oid srv_oid, Oid roleid);
+extern bool pg_extension_ownercheck(Oid ext_oid, Oid roleid);
 
 #endif   /* ACL_H */

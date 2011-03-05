@@ -118,6 +118,7 @@ typedef struct Query
 	bool		hasSubLinks;	/* has subquery SubLink */
 	bool		hasDistinctOn;	/* distinctClause is from DISTINCT ON */
 	bool		hasRecursive;	/* WITH RECURSIVE was specified */
+	bool		hasModifyingCTE;	/* has INSERT/UPDATE/DELETE in WITH */
 	bool		hasForUpdate;	/* FOR UPDATE or FOR SHARE was specified */
 
 	List	   *cteList;		/* WITH list (of CommonTableExpr's) */
@@ -597,6 +598,9 @@ typedef struct XmlSerialize
  *	  like outer joins and join-output-column aliasing.)  Other special
  *	  RTE types also exist, as indicated by RTEKind.
  *
+ *	  Note that we consider RTE_RELATION to cover anything that has a pg_class
+ *	  entry.  relkind distinguishes the sub-cases.
+ *
  *	  alias is an Alias node representing the AS alias-clause attached to the
  *	  FROM expression, or NULL if no clause.
  *
@@ -643,7 +647,7 @@ typedef struct XmlSerialize
  *	  indicates no permissions checking).  If checkAsUser is not zero,
  *	  then do the permissions checks using the access rights of that user,
  *	  not the current effective user ID.  (This allows rules to act as
- *	  setuid gateways.)
+ *	  setuid gateways.)  Permissions checks only apply to RELATION RTEs.
  *
  *	  For SELECT/INSERT/UPDATE permissions, if the user doesn't have
  *	  table-wide permissions then it is sufficient to have the permissions
@@ -660,7 +664,6 @@ typedef enum RTEKind
 	RTE_RELATION,				/* ordinary relation reference */
 	RTE_SUBQUERY,				/* subquery in FROM */
 	RTE_JOIN,					/* join */
-	RTE_SPECIAL,				/* special rule relation (NEW or OLD) */
 	RTE_FUNCTION,				/* function in FROM */
 	RTE_VALUES,					/* VALUES (<exprlist>), (<exprlist>), ... */
 	RTE_CTE						/* common table expr (WITH list element) */
@@ -682,6 +685,7 @@ typedef struct RangeTblEntry
 	 * Fields valid for a plain relation RTE (else zero):
 	 */
 	Oid			relid;			/* OID of the relation */
+	char		relkind;		/* relation kind (see pg_class.relkind) */
 
 	/*
 	 * Fields valid for a subquery RTE (else NULL):
@@ -881,7 +885,8 @@ typedef struct CommonTableExpr
 	NodeTag		type;
 	char	   *ctename;		/* query name (never qualified) */
 	List	   *aliascolnames;	/* optional list of column names */
-	Node	   *ctequery;		/* subquery (SelectStmt or Query) */
+	/* SelectStmt/InsertStmt/etc before parse analysis, Query afterwards: */
+	Node	   *ctequery;		/* the CTE's subquery */
 	int			location;		/* token location, or -1 if unknown */
 	/* These fields are set during parse analysis: */
 	bool		cterecursive;	/* is this CTE actually recursive? */
@@ -892,6 +897,14 @@ typedef struct CommonTableExpr
 	List	   *ctecoltypmods;	/* integer list of output column typmods */
 	List	   *ctecolcollations; /* OID list of column collation OIDs */
 } CommonTableExpr;
+
+/* Convenience macro to get the output tlist of a CTE's query */
+#define GetCTETargetList(cte) \
+	(AssertMacro(IsA((cte)->ctequery, Query)), \
+	 ((Query *) (cte)->ctequery)->commandType == CMD_SELECT ? \
+	 ((Query *) (cte)->ctequery)->targetList : \
+	 ((Query *) (cte)->ctequery)->returningList)
+
 
 /*****************************************************************************
  *		Optimizable Statements
@@ -1060,16 +1073,17 @@ typedef struct SetOperationStmt
 /*
  * When a command can act on several kinds of objects with only one
  * parse structure required, use these constants to designate the
- * object type.
+ * object type.  Note that commands typically don't support all the types.
  */
 
 typedef enum ObjectType
 {
 	OBJECT_AGGREGATE,
-	OBJECT_ATTRIBUTE,			/* type's attribute, when distinct from column */
+	OBJECT_ATTRIBUTE,		/* type's attribute, when distinct from column */
 	OBJECT_CAST,
 	OBJECT_COLUMN,
 	OBJECT_CONSTRAINT,
+	OBJECT_COLLATION,
 	OBJECT_CONVERSION,
 	OBJECT_DATABASE,
 	OBJECT_DOMAIN,
@@ -1535,7 +1549,7 @@ typedef struct AlterTableSpaceOptionsStmt
 } AlterTableSpaceOptionsStmt;
 
 /* ----------------------
- *		Create Extension Statement
+ *		Create/Alter Extension Statements
  * ----------------------
  */
 
@@ -1543,8 +1557,27 @@ typedef struct CreateExtensionStmt
 {
 	NodeTag		type;
 	char	   *extname;
+	bool		if_not_exists;	/* just do nothing if it already exists? */
 	List	   *options;		/* List of DefElem nodes */
 } CreateExtensionStmt;
+
+/* Only used for ALTER EXTENSION UPDATE; later might need an action field */
+typedef struct AlterExtensionStmt
+{
+	NodeTag		type;
+	char	   *extname;
+	List	   *options;		/* List of DefElem nodes */
+} AlterExtensionStmt;
+
+typedef struct AlterExtensionContentsStmt
+{
+	NodeTag		type;
+	char	   *extname;		/* Extension's name */
+	int			action;			/* +1 = add object, -1 = drop object */
+	ObjectType	objtype;		/* Object's type */
+	List	   *objname;		/* Qualified name of the object */
+	List	   *objargs;		/* Arguments if needed (eg, for functions) */
+} AlterExtensionContentsStmt;
 
 /* ----------------------
  *		Create/Drop FOREIGN DATA WRAPPER Statements
@@ -1555,7 +1588,7 @@ typedef struct CreateFdwStmt
 {
 	NodeTag		type;
 	char	   *fdwname;		/* foreign-data wrapper name */
-	List	   *validator;		/* optional validator function (qual. name) */
+	List	   *func_options;	/* HANDLER/VALIDATOR options */
 	List	   *options;		/* generic options to FDW */
 } CreateFdwStmt;
 
@@ -1563,8 +1596,7 @@ typedef struct AlterFdwStmt
 {
 	NodeTag		type;
 	char	   *fdwname;		/* foreign-data wrapper name */
-	List	   *validator;		/* optional validator function (qual. name) */
-	bool		change_validator;
+	List	   *func_options;	/* HANDLER/VALIDATOR options */
 	List	   *options;		/* generic options to FDW */
 } AlterFdwStmt;
 

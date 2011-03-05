@@ -559,6 +559,19 @@ describeOperators(const char *pattern, bool showSystem)
 
 	initPQExpBuffer(&buf);
 
+	/*
+	 * Note: before Postgres 9.1, we did not assign comments to any built-in
+	 * operators, preferring to let the comment on the underlying function
+	 * suffice.  The coalesce() on the obj_description() calls below supports
+	 * this convention by providing a fallback lookup of a comment on the
+	 * operator's function.  As of 9.1 there is a policy that every built-in
+	 * operator should have a comment; so the coalesce() is no longer
+	 * necessary so far as built-in operators are concerned.  We keep it
+	 * anyway, for now, because (1) third-party modules may still be following
+	 * the old convention, and (2) we'd need to do it anyway when talking to a
+	 * pre-9.1 server.
+	 */
+
 	printfPQExpBuffer(&buf,
 					  "SELECT n.nspname as \"%s\",\n"
 					  "  o.oprname AS \"%s\",\n"
@@ -627,7 +640,7 @@ listAllDbs(bool verbose)
 		appendPQExpBuffer(&buf,
 						  "       d.datcollate as \"%s\",\n"
 						  "       d.datctype as \"%s\",\n",
-						  gettext_noop("Collation"),
+						  gettext_noop("Collate"),
 						  gettext_noop("Ctype"));
 	appendPQExpBuffer(&buf, "       ");
 	printACLColumn(&buf, "d.datacl");
@@ -877,7 +890,7 @@ objectDescription(const char *pattern, bool showSystem)
 						  "n.nspname", "p.proname", NULL,
 						  "pg_catalog.pg_function_is_visible(p.oid)");
 
-	/* Operator descriptions (only if operator has its own comment) */
+	/* Operator descriptions */
 	appendPQExpBuffer(&buf,
 					  "UNION ALL\n"
 					  "  SELECT o.oid as oid, o.tableoid as tableoid,\n"
@@ -896,7 +909,7 @@ objectDescription(const char *pattern, bool showSystem)
 						  "n.nspname", "o.oprname", NULL,
 						  "pg_catalog.pg_operator_is_visible(o.oid)");
 
-	/* Type description */
+	/* Type descriptions */
 	appendPQExpBuffer(&buf,
 					  "UNION ALL\n"
 					  "  SELECT t.oid as oid, t.tableoid as tableoid,\n"
@@ -942,7 +955,7 @@ objectDescription(const char *pattern, bool showSystem)
 						  "n.nspname", "c.relname", NULL,
 						  "pg_catalog.pg_table_is_visible(c.oid)");
 
-	/* Rule description (ignore rules for views) */
+	/* Rule descriptions (ignore rules for views) */
 	appendPQExpBuffer(&buf,
 					  "UNION ALL\n"
 					  "  SELECT r.oid as oid, r.tableoid as tableoid,\n"
@@ -964,7 +977,7 @@ objectDescription(const char *pattern, bool showSystem)
 						  "n.nspname", "r.rulename", NULL,
 						  "pg_catalog.pg_table_is_visible(c.oid)");
 
-	/* Trigger description */
+	/* Trigger descriptions */
 	appendPQExpBuffer(&buf,
 					  "UNION ALL\n"
 					  "  SELECT t.oid as oid, t.tableoid as tableoid,\n"
@@ -1297,7 +1310,7 @@ describeOneTableDetails(const char *schemaname,
 	{
 		case 'r':
 			if (tableinfo.relpersistence == 'u')
-				printfPQExpBuffer(&title, _("Unlogged Table \"%s.%s\""),
+				printfPQExpBuffer(&title, _("Unlogged table \"%s.%s\""),
 								  schemaname, relationname);
 			else
 				printfPQExpBuffer(&title, _("Table \"%s.%s\""),
@@ -1313,7 +1326,7 @@ describeOneTableDetails(const char *schemaname,
 			break;
 		case 'i':
 			if (tableinfo.relpersistence == 'u')
-				printfPQExpBuffer(&title, _("Unlogged Index \"%s.%s\""),
+				printfPQExpBuffer(&title, _("Unlogged index \"%s.%s\""),
 								  schemaname, relationname);
 			else
 				printfPQExpBuffer(&title, _("Index \"%s.%s\""),
@@ -1754,7 +1767,7 @@ describeOneTableDetails(const char *schemaname,
 									  PQgetvalue(result, i, 0),
 									  PQgetvalue(result, i, 1));
 
-					if (strcmp(PQgetvalue(result, i, 2), "f") == 0)
+					if (pset.sversion >= 90100 && strcmp(PQgetvalue(result, i, 2), "f") == 0)
 						appendPQExpBuffer(&buf, " NOT VALID");
 
 					printTableAddFooter(&cont, buf.data);
@@ -2342,7 +2355,7 @@ describeRoles(const char *pattern, bool verbose)
 			add_role_attribute(&buf, _("Cannot login"));
 
 		if (pset.sversion >= 90100)
-			if (strcmp(PQgetvalue(res, i, 8), "t") == 0)
+			if (strcmp(PQgetvalue(res, i, (verbose ? 9 : 8)), "t") == 0)
 				add_role_attribute(&buf, _("Replication"));
 
 		conns = atoi(PQgetvalue(res, i, 6));
@@ -2847,6 +2860,66 @@ listCasts(const char *pattern)
 
 	myopt.nullPrint = NULL;
 	myopt.title = _("List of casts");
+	myopt.translate_header = true;
+	myopt.translate_columns = translate_columns;
+
+	printQuery(res, &myopt, pset.queryFout, pset.logfile);
+
+	PQclear(res);
+	return true;
+}
+
+/*
+ * \dO
+ *
+ * Describes collations
+ */
+bool
+listCollations(const char *pattern, bool verbose, bool showSystem)
+{
+	PQExpBufferData buf;
+	PGresult   *res;
+	printQueryOpt myopt = pset.popt;
+	static const bool translate_columns[] = {false, false, false, false, false};
+
+	initPQExpBuffer(&buf);
+
+	printfPQExpBuffer(&buf,
+					  "SELECT n.nspname AS \"%s\",\n"
+					  "       c.collname AS \"%s\",\n"
+					  "       c.collcollate AS \"%s\",\n"
+					  "       c.collctype AS \"%s\"",
+					  gettext_noop("Schema"),
+					  gettext_noop("Name"),
+					  gettext_noop("Collate"),
+					  gettext_noop("Ctype"));
+
+	if (verbose)
+		appendPQExpBuffer(&buf,
+		  ",\n  pg_catalog.obj_description(c.oid, 'pg_collation') AS \"%s\"",
+						  gettext_noop("Description"));
+
+	appendPQExpBuffer(&buf,
+					  "FROM pg_catalog.pg_collation c, pg_catalog.pg_namespace n\n"
+					  "WHERE n.oid = c.collnamespace\n");
+
+	if (!showSystem && !pattern)
+		appendPQExpBuffer(&buf, "      AND n.nspname <> 'pg_catalog'\n"
+						  "      AND n.nspname <> 'information_schema'\n");
+
+	processSQLNamePattern(pset.db, &buf, pattern, true, false,
+						  "n.nspname", "c.collname", NULL,
+						  "pg_catalog.pg_collation_is_visible(c.oid)");
+
+	appendPQExpBuffer(&buf, "ORDER BY 1, 2;");
+
+	res = PSQLexec(buf.data, false);
+	termPQExpBuffer(&buf);
+	if (!res)
+		return false;
+
+	myopt.nullPrint = NULL;
+	myopt.title = _("List of collations");
 	myopt.translate_header = true;
 	myopt.translate_columns = translate_columns;
 
@@ -3502,10 +3575,15 @@ listForeignDataWrappers(const char *pattern, bool verbose)
 	initPQExpBuffer(&buf);
 	printfPQExpBuffer(&buf,
 					  "SELECT fdwname AS \"%s\",\n"
-					  "  pg_catalog.pg_get_userbyid(fdwowner) AS \"%s\",\n"
-					  "  fdwvalidator::pg_catalog.regproc AS \"%s\"",
+					  "  pg_catalog.pg_get_userbyid(fdwowner) AS \"%s\",\n",
 					  gettext_noop("Name"),
-					  gettext_noop("Owner"),
+					  gettext_noop("Owner"));
+	if (pset.sversion >= 90100)
+		appendPQExpBuffer(&buf,
+						  "  fdwhandler::pg_catalog.regproc AS \"%s\",\n",
+						  gettext_noop("Handler"));
+	appendPQExpBuffer(&buf,
+					  "  fdwvalidator::pg_catalog.regproc AS \"%s\"",
 					  gettext_noop("Validator"));
 
 	if (verbose)

@@ -163,9 +163,11 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	glob->rewindPlanIDs = NULL;
 	glob->finalrtable = NIL;
 	glob->finalrowmarks = NIL;
+	glob->resultRelations = NIL;
 	glob->relationOids = NIL;
 	glob->invalItems = NIL;
 	glob->lastPHId = 0;
+	glob->lastRowMarkId = 0;
 	glob->transientPlan = false;
 
 	/* Determine what fraction of the plan is likely to be scanned */
@@ -213,6 +215,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	/* final cleanup of the plan */
 	Assert(glob->finalrtable == NIL);
 	Assert(glob->finalrowmarks == NIL);
+	Assert(glob->resultRelations == NIL);
 	top_plan = set_plan_references(glob, top_plan,
 								   root->parse->rtable,
 								   root->rowMarks);
@@ -238,11 +241,12 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 
 	result->commandType = parse->commandType;
 	result->hasReturning = (parse->returningList != NIL);
+	result->hasModifyingCTE = parse->hasModifyingCTE;
 	result->canSetTag = parse->canSetTag;
 	result->transientPlan = glob->transientPlan;
 	result->planTree = top_plan;
 	result->rtable = glob->finalrtable;
-	result->resultRelations = root->resultRelations;
+	result->resultRelations = glob->resultRelations;
 	result->utilityStmt = parse->utilityStmt;
 	result->intoClause = parse->intoClause;
 	result->subplans = glob->subplans;
@@ -570,7 +574,8 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 				rowMarks = root->rowMarks;
 
 			plan = (Plan *) make_modifytable(parse->commandType,
-										   copyObject(root->resultRelations),
+											 parse->canSetTag,
+											 list_make1_int(parse->resultRelation),
 											 list_make1(plan),
 											 returningLists,
 											 rowMarks,
@@ -786,7 +791,7 @@ inheritance_planner(PlannerInfo *root)
 		/* Make sure any initplans from this rel get into the outer list */
 		root->init_plans = list_concat(root->init_plans, subroot.init_plans);
 
-		/* Build target-relations list for the executor */
+		/* Build list of target-relation RT indexes */
 		resultRelations = lappend_int(resultRelations, appinfo->child_relid);
 
 		/* Build list of per-relation RETURNING targetlists */
@@ -802,8 +807,6 @@ inheritance_planner(PlannerInfo *root)
 		}
 	}
 
-	root->resultRelations = resultRelations;
-
 	/* Mark result as unordered (probably unnecessary) */
 	root->query_pathkeys = NIL;
 
@@ -813,7 +816,6 @@ inheritance_planner(PlannerInfo *root)
 	 */
 	if (subplans == NIL)
 	{
-		root->resultRelations = list_make1_int(parentRTindex);
 		/* although dummy, it must have a valid tlist for executor */
 		tlist = preprocess_targetlist(root, parse->targetList);
 		return (Plan *) make_result(root,
@@ -848,7 +850,8 @@ inheritance_planner(PlannerInfo *root)
 
 	/* And last, tack on a ModifyTable node to do the UPDATE/DELETE work */
 	return (Plan *) make_modifytable(parse->commandType,
-									 copyObject(root->resultRelations),
+									 parse->canSetTag,
+									 resultRelations,
 									 subplans,
 									 returningLists,
 									 rowMarks,
@@ -1724,12 +1727,6 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 										  count_est);
 	}
 
-	/* Compute result-relations list if needed */
-	if (parse->resultRelation)
-		root->resultRelations = list_make1_int(parse->resultRelation);
-	else
-		root->resultRelations = NIL;
-
 	/*
 	 * Return the actual output ordering in query_pathkeys for possible use by
 	 * an outer query level.
@@ -1885,6 +1882,7 @@ preprocess_rowmarks(PlannerInfo *root)
 
 		newrc = makeNode(PlanRowMark);
 		newrc->rti = newrc->prti = rc->rti;
+		newrc->rowmarkId = ++(root->glob->lastRowMarkId);
 		if (rc->forUpdate)
 			newrc->markType = ROW_MARK_EXCLUSIVE;
 		else
@@ -1910,8 +1908,10 @@ preprocess_rowmarks(PlannerInfo *root)
 
 		newrc = makeNode(PlanRowMark);
 		newrc->rti = newrc->prti = i;
+		newrc->rowmarkId = ++(root->glob->lastRowMarkId);
 		/* real tables support REFERENCE, anything else needs COPY */
-		if (rte->rtekind == RTE_RELATION)
+		if (rte->rtekind == RTE_RELATION &&
+			rte->relkind != RELKIND_FOREIGN_TABLE)
 			newrc->markType = ROW_MARK_REFERENCE;
 		else
 			newrc->markType = ROW_MARK_COPY;
@@ -3074,6 +3074,7 @@ plan_cluster_use_sort(Oid tableOid, Oid indexOid)
 	rte = makeNode(RangeTblEntry);
 	rte->rtekind = RTE_RELATION;
 	rte->relid = tableOid;
+	rte->relkind = RELKIND_RELATION;
 	rte->inh = false;
 	rte->inFromCl = true;
 	query->rtable = list_make1(rte);

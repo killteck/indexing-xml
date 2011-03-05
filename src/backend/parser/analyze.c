@@ -288,6 +288,7 @@ transformDeleteStmt(ParseState *pstate, DeleteStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	/* set up range table with just the result rel */
@@ -358,6 +359,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	/*
@@ -853,6 +855,7 @@ transformSelectStmt(ParseState *pstate, SelectStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	/* make FOR UPDATE/FOR SHARE info available to addRangeTableEntry */
@@ -999,6 +1002,7 @@ transformValuesClause(ParseState *pstate, SelectStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	/*
@@ -1220,6 +1224,7 @@ transformSetOperationStmt(ParseState *pstate, SelectStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	/*
@@ -1816,6 +1821,7 @@ transformUpdateStmt(ParseState *pstate, UpdateStmt *stmt)
 	{
 		qry->hasRecursive = stmt->withClause->recursive;
 		qry->cteList = transformWithClause(pstate, stmt->withClause);
+		qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
 	}
 
 	qry->resultRelation = setTargetTable(pstate, stmt->relation,
@@ -2043,6 +2049,16 @@ transformDeclareCursorStmt(ParseState *pstate, DeclareCursorStmt *stmt)
 				 parser_errposition(pstate,
 								exprLocation((Node *) result->intoClause))));
 
+	/*
+	 * We also disallow data-modifying WITH in a cursor.  (This could be
+	 * allowed, but the semantics of when the updates occur might be
+	 * surprising.)
+	 */
+	if (result->hasModifyingCTE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("DECLARE CURSOR must not contain data-modifying statements in WITH")));
+
 	/* FOR UPDATE and WITH HOLD are not compatible */
 	if (result->rowMarks != NIL && (stmt->options & CURSOR_OPT_HOLD))
 		ereport(ERROR,
@@ -2176,6 +2192,9 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 			switch (rte->rtekind)
 			{
 				case RTE_RELATION:
+					/* ignore foreign tables */
+					if (rte->relkind == RELKIND_FOREIGN_TABLE)
+						break;
 					applyLockingClause(qry, i,
 									   lc->forUpdate, lc->noWait, pushedDown);
 					rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
@@ -2225,6 +2244,12 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 					switch (rte->rtekind)
 					{
 						case RTE_RELATION:
+							if (rte->relkind == RELKIND_FOREIGN_TABLE)
+								ereport(ERROR,
+										(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										 errmsg("SELECT FOR UPDATE/SHARE cannot be used with foreign table \"%s\"",
+												rte->eref->aliasname),
+										 parser_errposition(pstate, thisrel->location)));
 							applyLockingClause(qry, i,
 											   lc->forUpdate, lc->noWait,
 											   pushedDown);
@@ -2242,12 +2267,6 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("SELECT FOR UPDATE/SHARE cannot be applied to a join"),
-							 parser_errposition(pstate, thisrel->location)));
-							break;
-						case RTE_SPECIAL:
-							ereport(ERROR,
-									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("SELECT FOR UPDATE/SHARE cannot be applied to NEW or OLD"),
 							 parser_errposition(pstate, thisrel->location)));
 							break;
 						case RTE_FUNCTION:

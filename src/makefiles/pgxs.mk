@@ -25,9 +25,10 @@
 #
 # The following variables can also be set:
 #
-#   MODULEDIR -- subdirectory into which EXTENSION, DATA and DOCS files
-#     should be installed (if not set, default is "contrib")
 #   EXTENSION -- name of extension (there must be a $EXTENSION.control file)
+#   MODULEDIR -- subdirectory of $PREFIX/share into which DATA and DOCS files
+#     should be installed (if not set, default is "extension" if EXTENSION
+#     is set, or "contrib" if not)
 #   DATA -- random files to install into $PREFIX/share/$MODULEDIR
 #   DATA_built -- random files to install into $PREFIX/share/$MODULEDIR,
 #     which need to be built first
@@ -72,11 +73,16 @@ override CFLAGS += $(CFLAGS_SL)
 endif
 
 ifdef MODULEDIR
-datamoduledir = $(MODULEDIR)
-docmoduledir = $(MODULEDIR)
+datamoduledir := $(MODULEDIR)
+docmoduledir := $(MODULEDIR)
 else
-datamoduledir = contrib
-docmoduledir = contrib
+ifdef EXTENSION
+datamoduledir := extension
+docmoduledir := extension
+else
+datamoduledir := contrib
+docmoduledir := contrib
+endif
 endif
 
 ifdef PG_CPPFLAGS
@@ -96,8 +102,14 @@ endif # MODULE_big
 
 
 install: all installdirs
-ifneq (,$(DATA)$(DATA_built)$(EXTENSION))
-	@for file in $(addprefix $(srcdir)/, $(DATA)) $(DATA_built) $(addsuffix .control, $(EXTENSION)); do \
+ifneq (,$(EXTENSION))
+	@for file in $(addprefix $(srcdir)/, $(addsuffix .control, $(EXTENSION))); do \
+	  echo "$(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/extension'"; \
+	  $(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/extension'; \
+	done
+endif # EXTENSION
+ifneq (,$(DATA)$(DATA_built))
+	@for file in $(addprefix $(srcdir)/, $(DATA)) $(DATA_built); do \
 	  echo "$(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/$(datamoduledir)'"; \
 	  $(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/$(datamoduledir)'; \
 	done
@@ -168,8 +180,11 @@ endif # MODULE_big
 
 
 uninstall:
-ifneq (,$(DATA)$(DATA_built)$(EXTENSION))
-	rm -f $(addprefix '$(DESTDIR)$(datadir)/$(datamoduledir)'/, $(notdir $(DATA) $(DATA_built) $(addsuffix .control, $(EXTENSION))))
+ifneq (,$(EXTENSION))
+	rm -f $(addprefix '$(DESTDIR)$(datadir)/extension'/, $(notdir $(addsuffix .control, $(EXTENSION))))
+endif
+ifneq (,$(DATA)$(DATA_built))
+	rm -f $(addprefix '$(DESTDIR)$(datadir)/$(datamoduledir)'/, $(notdir $(DATA) $(DATA_built)))
 endif
 ifneq (,$(DATA_TSEARCH))
 	rm -f $(addprefix '$(DESTDIR)$(datadir)/tsearch_data'/, $(notdir $(DATA_TSEARCH)))
@@ -216,8 +231,7 @@ ifdef EXTRA_CLEAN
 endif
 ifdef REGRESS
 # things created by various check targets
-	rm -rf results tmp_check log
-	rm -f regression.diffs regression.out regress.out run_check.out
+	rm -rf $(pg_regress_clean_files)
 ifeq ($(PORTNAME), win)
 	rm -f regress.def
 endif
@@ -265,12 +279,11 @@ endif
 
 # against installed postmaster
 installcheck: submake
-	$(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --psqldir=$(PSQLDIR) $(REGRESS_OPTS) $(REGRESS)
+	$(pg_regress_installcheck) $(REGRESS_OPTS) $(REGRESS)
 
 # in-tree test doesn't work yet (no way to install my shared library)
 #check: all submake
-#	$(top_builddir)/src/test/regress/pg_regress --temp-install \
-#	  --top-builddir=$(top_builddir) $(REGRESS_OPTS) $(REGRESS)
+#	$(pg_regress_check) $(REGRESS_OPTS) $(REGRESS)
 check:
 	@echo "'make check' is not supported."
 	@echo "Do 'make install', then 'make installcheck' instead."

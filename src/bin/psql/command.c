@@ -425,6 +425,9 @@ exec_command(const char *cmd,
 			case 'o':
 				success = describeOperators(pattern, show_system);
 				break;
+			case 'O':
+				success = listCollations(pattern, show_verbose, show_system);
+				break;
 			case 'p':
 				success = permissionsList(pattern);
 				break;
@@ -1484,7 +1487,7 @@ do_connect(char *dbname, char *user, char *host, char *port)
 
 	while (true)
 	{
-#define PARAMS_ARRAY_SIZE	7
+#define PARAMS_ARRAY_SIZE	8
 		const char **keywords = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
 		const char **values = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
 
@@ -1500,8 +1503,10 @@ do_connect(char *dbname, char *user, char *host, char *port)
 		values[4] = dbname;
 		keywords[5] = "fallback_application_name";
 		values[5] = pset.progname;
-		keywords[6] = NULL;
-		values[6] = NULL;
+		keywords[6] = "client_encoding";
+		values[6] = (pset.notty || getenv("PGCLIENTENCODING")) ? NULL : "auto";
+		keywords[7] = NULL;
+		values[7] = NULL;
 
 		n_conn = PQconnectdbParams(keywords, values, true);
 

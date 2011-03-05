@@ -58,6 +58,7 @@ case $host_os in
     bsdi*) template=bsdi ;;
   cygwin*) template=cygwin ;;
   darwin*) template=darwin ;;
+dragonfly*) template=netbsd ;;
     dgux*) template=dgux ;;
  freebsd*) template=freebsd ;;
     hpux*) template=hpux ;;
@@ -1765,6 +1766,14 @@ if test "$with_tcl" = yes; then
     CPPFLAGS="$TCL_INCLUDE_SPEC $CPPFLAGS"
     AC_CHECK_HEADER(tcl.h, [], [AC_MSG_ERROR([header file <tcl.h> is required for Tcl])])
     CPPFLAGS=$ac_save_CPPFLAGS
+fi
+
+# check for <Python.h>
+if test "$with_python" = yes; then
+  ac_save_CPPFLAGS=$CPPFLAGS
+  CPPFLAGS="$python_includespec $CPPFLAGS"
+  AC_CHECK_HEADER(Python.h, [], [AC_MSG_ERROR([header file <Python.h> is required for Python])])
+  CPPFLAGS=$ac_save_CPPFLAGS
 fi
 
 #

@@ -6,20 +6,25 @@
  * INTERFACE ROUTINES
  *	ExecutorStart()
  *	ExecutorRun()
+ *	ExecutorFinish()
  *	ExecutorEnd()
  *
- *	The old ExecutorMain() has been replaced by ExecutorStart(),
- *	ExecutorRun() and ExecutorEnd()
- *
- *	These three procedures are the external interfaces to the executor.
+ *	These four procedures are the external interface to the executor.
  *	In each case, the query descriptor is required as an argument.
  *
- *	ExecutorStart() must be called at the beginning of execution of any
- *	query plan and ExecutorEnd() should always be called at the end of
- *	execution of a plan.
+ *	ExecutorStart must be called at the beginning of execution of any
+ *	query plan and ExecutorEnd must always be called at the end of
+ *	execution of a plan (unless it is aborted due to error).
  *
  *	ExecutorRun accepts direction and count arguments that specify whether
  *	the plan is to be executed forwards, backwards, and for how many tuples.
+ *	In some cases ExecutorRun may be called multiple times to process all
+ *	the tuples for a plan.  It is also acceptable to stop short of executing
+ *	the whole plan (but only if it is a SELECT).
+ *
+ *	ExecutorFinish must be called after the final ExecutorRun call and
+ *	before ExecutorEnd.  This can be omitted only in case of EXPLAIN,
+ *	which should also omit ExecutorRun.
  *
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -58,9 +63,10 @@
 #include "utils/tqual.h"
 
 
-/* Hooks for plugins to get control in ExecutorStart/Run/End() */
+/* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 ExecutorStart_hook_type ExecutorStart_hook = NULL;
 ExecutorRun_hook_type ExecutorRun_hook = NULL;
+ExecutorFinish_hook_type ExecutorFinish_hook = NULL;
 ExecutorEnd_hook_type ExecutorEnd_hook = NULL;
 
 /* Hook for plugin to get control in ExecCheckRTPerms() */
@@ -68,6 +74,7 @@ ExecutorCheckPerms_hook_type ExecutorCheckPerms_hook = NULL;
 
 /* decls for local routines only used within this module */
 static void InitPlan(QueryDesc *queryDesc, int eflags);
+static void ExecPostprocessPlan(EState *estate);
 static void ExecEndPlan(PlanState *planstate, EState *estate);
 static void ExecutePlan(EState *estate, PlanState *planstate,
 			CmdType operation,
@@ -95,8 +102,8 @@ static void intorel_destroy(DestReceiver *self);
  *		This routine must be called at the beginning of any execution of any
  *		query plan
  *
- * Takes a QueryDesc previously created by CreateQueryDesc (it's not real
- * clear why we bother to separate the two functions, but...).	The tupDesc
+ * Takes a QueryDesc previously created by CreateQueryDesc (which is separate
+ * only because some places use QueryDescs for utility commands).  The tupDesc
  * field of the QueryDesc is filled in to describe the tuples that will be
  * returned, and the internal fields (estate and planstate) are set up.
  *
@@ -161,10 +168,23 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	switch (queryDesc->operation)
 	{
 		case CMD_SELECT:
-			/* SELECT INTO and SELECT FOR UPDATE/SHARE need to mark tuples */
+			/*
+			 * SELECT INTO, SELECT FOR UPDATE/SHARE and modifying CTEs need to
+			 * mark tuples
+			 */
 			if (queryDesc->plannedstmt->intoClause != NULL ||
-				queryDesc->plannedstmt->rowMarks != NIL)
+				queryDesc->plannedstmt->rowMarks != NIL ||
+				queryDesc->plannedstmt->hasModifyingCTE)
 				estate->es_output_cid = GetCurrentCommandId(true);
+
+			/*
+			 * A SELECT without modifying CTEs can't possibly queue triggers,
+			 * so force skip-triggers mode. This is just a marginal efficiency
+			 * hack, since AfterTriggerBeginQuery/AfterTriggerEndQuery aren't
+			 * all that expensive, but we might as well do it.
+			 */
+			if (!queryDesc->plannedstmt->hasModifyingCTE)
+				eflags |= EXEC_FLAG_SKIP_TRIGGERS;
 			break;
 
 		case CMD_INSERT:
@@ -184,12 +204,20 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	 */
 	estate->es_snapshot = RegisterSnapshot(queryDesc->snapshot);
 	estate->es_crosscheck_snapshot = RegisterSnapshot(queryDesc->crosscheck_snapshot);
+	estate->es_top_eflags = eflags;
 	estate->es_instrument = queryDesc->instrument_options;
 
 	/*
 	 * Initialize the plan state tree
 	 */
 	InitPlan(queryDesc, eflags);
+
+	/*
+	 * Set up an AFTER-trigger statement context, unless told not to, or
+	 * unless it's EXPLAIN-only mode (when ExecutorFinish won't be called).
+	 */
+	if (!(eflags & (EXEC_FLAG_SKIP_TRIGGERS | EXEC_FLAG_EXPLAIN_ONLY)))
+		AfterTriggerBeginQuery();
 
 	MemoryContextSwitchTo(oldcontext);
 }
@@ -247,13 +275,14 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 	estate = queryDesc->estate;
 
 	Assert(estate != NULL);
+	Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
 	/*
 	 * Switch into per-query memory context
 	 */
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
-	/* Allow instrumentation of ExecutorRun overall runtime */
+	/* Allow instrumentation of Executor overall runtime */
 	if (queryDesc->totaltime)
 		InstrStartNode(queryDesc->totaltime);
 
@@ -300,6 +329,68 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 }
 
 /* ----------------------------------------------------------------
+ *		ExecutorFinish
+ *
+ *		This routine must be called after the last ExecutorRun call.
+ *		It performs cleanup such as firing AFTER triggers.  It is
+ *		separate from ExecutorEnd because EXPLAIN ANALYZE needs to
+ *		include these actions in the total runtime.
+ *
+ *		We provide a function hook variable that lets loadable plugins
+ *		get control when ExecutorFinish is called.  Such a plugin would
+ *		normally call standard_ExecutorFinish().
+ *
+ * ----------------------------------------------------------------
+ */
+void
+ExecutorFinish(QueryDesc *queryDesc)
+{
+	if (ExecutorFinish_hook)
+		(*ExecutorFinish_hook) (queryDesc);
+	else
+		standard_ExecutorFinish(queryDesc);
+}
+
+void
+standard_ExecutorFinish(QueryDesc *queryDesc)
+{
+	EState	   *estate;
+	MemoryContext oldcontext;
+
+	/* sanity checks */
+	Assert(queryDesc != NULL);
+
+	estate = queryDesc->estate;
+
+	Assert(estate != NULL);
+	Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
+
+	/* This should be run once and only once per Executor instance */
+	Assert(!estate->es_finished);
+
+	/* Switch into per-query memory context */
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+	/* Allow instrumentation of Executor overall runtime */
+	if (queryDesc->totaltime)
+		InstrStartNode(queryDesc->totaltime);
+
+	/* Run ModifyTable nodes to completion */
+	ExecPostprocessPlan(estate);
+
+	/* Execute queued AFTER triggers, unless told not to */
+	if (!(estate->es_top_eflags & EXEC_FLAG_SKIP_TRIGGERS))
+		AfterTriggerEndQuery(estate);
+
+	if (queryDesc->totaltime)
+		InstrStopNode(queryDesc->totaltime, 0);
+
+	MemoryContextSwitchTo(oldcontext);
+
+	estate->es_finished = true;
+}
+
+/* ----------------------------------------------------------------
  *		ExecutorEnd
  *
  *		This routine must be called at the end of execution of any
@@ -332,6 +423,14 @@ standard_ExecutorEnd(QueryDesc *queryDesc)
 	estate = queryDesc->estate;
 
 	Assert(estate != NULL);
+
+	/*
+	 * Check that ExecutorFinish was called, unless in EXPLAIN-only mode.
+	 * This Assert is needed because ExecutorFinish is new as of 9.1, and
+	 * callers might forget to call it.
+	 */
+	Assert(estate->es_finished ||
+		   (estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
 	/*
 	 * Switch into per-query memory context to run ExecEndPlan
@@ -681,7 +780,6 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 			InitResultRelInfo(resultRelInfo,
 							  resultRelation,
 							  resultRelationIndex,
-							  operation,
 							  estate->es_instrument);
 			resultRelInfo++;
 		}
@@ -738,10 +836,18 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 				break;
 		}
 
+		/* if foreign table, tuples can't be locked */
+		if (relation && relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("SELECT FOR UPDATE/SHARE cannot be used with foreign table \"%s\"",
+							RelationGetRelationName(relation))));
+
 		erm = (ExecRowMark *) palloc(sizeof(ExecRowMark));
 		erm->relation = relation;
 		erm->rti = rc->rti;
 		erm->prti = rc->prti;
+		erm->rowmarkId = rc->rowmarkId;
 		erm->markType = rc->markType;
 		erm->noWait = rc->noWait;
 		ItemPointerSetInvalid(&(erm->curCtid));
@@ -865,24 +971,18 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 }
 
 /*
- * Initialize ResultRelInfo data for one result relation
+ * Check that a proposed result relation is a legal target for the operation
+ *
+ * In most cases parser and/or planner should have noticed this already, but
+ * let's make sure.  In the view case we do need a test here, because if the
+ * view wasn't rewritten by a rule, it had better have an INSTEAD trigger.
  */
 void
-InitResultRelInfo(ResultRelInfo *resultRelInfo,
-				  Relation resultRelationDesc,
-				  Index resultRelationIndex,
-				  CmdType operation,
-				  int instrument_options)
+CheckValidResultRel(Relation resultRel, CmdType operation)
 {
-	TriggerDesc	*trigDesc = resultRelationDesc->trigdesc;
+	TriggerDesc	*trigDesc = resultRel->trigdesc;
 
-	/*
-	 * Check valid relkind ... in most cases parser and/or planner should have
-	 * noticed this already, but let's make sure.  In the view case we do need
-	 * a test here, because if the view wasn't rewritten by a rule, it had
-	 * better have an INSTEAD trigger.
-	 */
-	switch (resultRelationDesc->rd_rel->relkind)
+	switch (resultRel->rd_rel->relkind)
 	{
 		case RELKIND_RELATION:
 			/* OK */
@@ -891,13 +991,13 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot change sequence \"%s\"",
-							RelationGetRelationName(resultRelationDesc))));
+							RelationGetRelationName(resultRel))));
 			break;
 		case RELKIND_TOASTVALUE:
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot change TOAST relation \"%s\"",
-							RelationGetRelationName(resultRelationDesc))));
+							RelationGetRelationName(resultRel))));
 			break;
 		case RELKIND_VIEW:
 			switch (operation)
@@ -907,7 +1007,7 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 						ereport(ERROR,
 								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 								 errmsg("cannot insert into view \"%s\"",
-										RelationGetRelationName(resultRelationDesc)),
+										RelationGetRelationName(resultRel)),
 								 errhint("You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.")));
 					break;
 				case CMD_UPDATE:
@@ -915,7 +1015,7 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 						ereport(ERROR,
 								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 								 errmsg("cannot update view \"%s\"",
-										RelationGetRelationName(resultRelationDesc)),
+										RelationGetRelationName(resultRel)),
 								 errhint("You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.")));
 					break;
 				case CMD_DELETE:
@@ -923,7 +1023,7 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 						ereport(ERROR,
 								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 								 errmsg("cannot delete from view \"%s\"",
-										RelationGetRelationName(resultRelationDesc)),
+										RelationGetRelationName(resultRel)),
 								 errhint("You need an unconditional ON DELETE DO INSTEAD rule or an INSTEAD OF DELETE trigger.")));
 					break;
 				default:
@@ -935,17 +1035,30 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot change foreign table \"%s\"",
-							RelationGetRelationName(resultRelationDesc))));
+							RelationGetRelationName(resultRel))));
 			break;
 		default:
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot change relation \"%s\"",
-							RelationGetRelationName(resultRelationDesc))));
+							RelationGetRelationName(resultRel))));
 			break;
 	}
+}
 
-	/* OK, fill in the node */
+/*
+ * Initialize ResultRelInfo data for one result relation
+ *
+ * Caution: before Postgres 9.1, this function included the relkind checking
+ * that's now in CheckValidResultRel, and it also did ExecOpenIndices if
+ * appropriate.  Be sure callers cover those needs.
+ */
+void
+InitResultRelInfo(ResultRelInfo *resultRelInfo,
+				  Relation resultRelationDesc,
+				  Index resultRelationIndex,
+				  int instrument_options)
+{
 	MemSet(resultRelInfo, 0, sizeof(ResultRelInfo));
 	resultRelInfo->type = T_ResultRelInfo;
 	resultRelInfo->ri_RangeTableIndex = resultRelationIndex;
@@ -954,7 +1067,7 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 	resultRelInfo->ri_IndexRelationDescs = NULL;
 	resultRelInfo->ri_IndexRelationInfo = NULL;
 	/* make a copy so as not to depend on relcache info not changing... */
-	resultRelInfo->ri_TrigDesc = CopyTriggerDesc(trigDesc);
+	resultRelInfo->ri_TrigDesc = CopyTriggerDesc(resultRelationDesc->trigdesc);
 	if (resultRelInfo->ri_TrigDesc)
 	{
 		int			n = resultRelInfo->ri_TrigDesc->numtriggers;
@@ -975,16 +1088,6 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
 	resultRelInfo->ri_ConstraintExprs = NULL;
 	resultRelInfo->ri_junkFilter = NULL;
 	resultRelInfo->ri_projectReturning = NULL;
-
-	/*
-	 * If there are indices on the result relation, open them and save
-	 * descriptors in the result relation info, so that we can add new index
-	 * entries for the tuples we add/update.  We need not do this for a
-	 * DELETE, however, since deletion doesn't affect indexes.
-	 */
-	if (resultRelationDesc->rd_rel->relhasindex &&
-		operation != CMD_DELETE)
-		ExecOpenIndices(resultRelInfo);
 }
 
 /*
@@ -1034,25 +1137,28 @@ ExecGetTriggerResultRel(EState *estate, Oid relid)
 	/*
 	 * Open the target relation's relcache entry.  We assume that an
 	 * appropriate lock is still held by the backend from whenever the trigger
-	 * event got queued, so we need take no new lock here.
+	 * event got queued, so we need take no new lock here.  Also, we need
+	 * not recheck the relkind, so no need for CheckValidResultRel.
 	 */
 	rel = heap_open(relid, NoLock);
 
 	/*
-	 * Make the new entry in the right context.  Currently, we don't need any
-	 * index information in ResultRelInfos used only for triggers, so tell
-	 * InitResultRelInfo it's a DELETE.
+	 * Make the new entry in the right context.
 	 */
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 	rInfo = makeNode(ResultRelInfo);
 	InitResultRelInfo(rInfo,
 					  rel,
 					  0,		/* dummy rangetable index */
-					  CMD_DELETE,
 					  estate->es_instrument);
 	estate->es_trig_target_relations =
 		lappend(estate->es_trig_target_relations, rInfo);
 	MemoryContextSwitchTo(oldcontext);
+
+	/*
+	 * Currently, we don't need any index information in ResultRelInfos used
+	 * only for triggers, so no need to call ExecOpenIndices.
+	 */
 
 	return rInfo;
 }
@@ -1112,6 +1218,46 @@ ExecContextForcesOids(PlanState *planstate, bool *hasoids)
 	}
 
 	return false;
+}
+
+/* ----------------------------------------------------------------
+ *		ExecPostprocessPlan
+ *
+ *		Give plan nodes a final chance to execute before shutdown
+ * ----------------------------------------------------------------
+ */
+static void
+ExecPostprocessPlan(EState *estate)
+{
+	ListCell   *lc;
+
+	/*
+	 * Make sure nodes run forward.
+	 */
+	estate->es_direction = ForwardScanDirection;
+
+	/*
+	 * Run any secondary ModifyTable nodes to completion, in case the main
+	 * query did not fetch all rows from them.  (We do this to ensure that
+	 * such nodes have predictable results.)
+	 */
+	foreach(lc, estate->es_auxmodifytables)
+	{
+		PlanState *ps = (PlanState *) lfirst(lc);
+
+		for (;;)
+		{
+			TupleTableSlot *slot;
+
+			/* Reset the per-output-tuple exprcontext each time */
+			ResetPerTupleExprContext(estate);
+
+			slot = ExecProcNode(ps);
+
+			if (TupIsNull(slot))
+				break;
+		}
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -1425,23 +1571,29 @@ ExecBuildAuxRowMark(ExecRowMark *erm, List *targetlist)
 		/* if child rel, need tableoid */
 		if (erm->rti != erm->prti)
 		{
-			snprintf(resname, sizeof(resname), "tableoid%u", erm->prti);
+			snprintf(resname, sizeof(resname), "tableoid%u", erm->rowmarkId);
 			aerm->toidAttNo = ExecFindJunkAttributeInTlist(targetlist,
 														   resname);
+			if (!AttributeNumberIsValid(aerm->toidAttNo))
+				elog(ERROR, "could not find junk %s column", resname);
 		}
 
 		/* always need ctid for real relations */
-		snprintf(resname, sizeof(resname), "ctid%u", erm->prti);
+		snprintf(resname, sizeof(resname), "ctid%u", erm->rowmarkId);
 		aerm->ctidAttNo = ExecFindJunkAttributeInTlist(targetlist,
 													   resname);
+		if (!AttributeNumberIsValid(aerm->ctidAttNo))
+			elog(ERROR, "could not find junk %s column", resname);
 	}
 	else
 	{
 		Assert(erm->markType == ROW_MARK_COPY);
 
-		snprintf(resname, sizeof(resname), "wholerow%u", erm->prti);
+		snprintf(resname, sizeof(resname), "wholerow%u", erm->rowmarkId);
 		aerm->wholeAttNo = ExecFindJunkAttributeInTlist(targetlist,
 														resname);
+		if (!AttributeNumberIsValid(aerm->wholeAttNo))
+			elog(ERROR, "could not find junk %s column", resname);
 	}
 
 	return aerm;
@@ -2009,9 +2161,11 @@ EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
 	estate->es_result_relation_info = parentestate->es_result_relation_info;
 	/* es_trig_target_relations must NOT be copied */
 	estate->es_rowMarks = parentestate->es_rowMarks;
+	estate->es_top_eflags = parentestate->es_top_eflags;
 	estate->es_instrument = parentestate->es_instrument;
 	estate->es_select_into = parentestate->es_select_into;
 	estate->es_into_oids = parentestate->es_into_oids;
+	/* es_auxmodifytables must NOT be copied */
 
 	/*
 	 * The external param list is simply shared from parent.  The internal
@@ -2066,7 +2220,11 @@ EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
 	 * ExecInitSubPlan expects to be able to find these entries. Some of the
 	 * SubPlans might not be used in the part of the plan tree we intend to
 	 * run, but since it's not easy to tell which, we just initialize them
-	 * all.
+	 * all.  (However, if the subplan is headed by a ModifyTable node, then
+	 * it must be a data-modifying CTE, which we will certainly not need to
+	 * re-run, so we can skip initializing it.  This is just an efficiency
+	 * hack; it won't skip data-modifying CTEs for which the ModifyTable node
+	 * is not at the top.)
 	 */
 	Assert(estate->es_subplanstates == NIL);
 	foreach(l, parentestate->es_plannedstmt->subplans)
@@ -2074,7 +2232,11 @@ EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
 		Plan	   *subplan = (Plan *) lfirst(l);
 		PlanState  *subplanstate;
 
-		subplanstate = ExecInitNode(subplan, estate, 0);
+		/* Don't initialize ModifyTable subplans, per comment above */
+		if (IsA(subplan, ModifyTable))
+			subplanstate = NULL;
+		else
+			subplanstate = ExecInitNode(subplan, estate, 0);
 
 		estate->es_subplanstates = lappend(estate->es_subplanstates,
 										   subplanstate);

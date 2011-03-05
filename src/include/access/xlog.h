@@ -289,8 +289,10 @@ extern void xlog_desc(StringInfo buf, uint8 xl_info, char *rec);
 extern void issue_xlog_fsync(int fd, uint32 log, uint32 seg);
 
 extern bool RecoveryInProgress(void);
+extern bool HotStandbyActive(void);
 extern bool XLogInsertAllowed(void);
 extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
+extern XLogRecPtr GetXLogReplayRecPtr(void);
 
 extern void UpdateControlFile(void);
 extern uint64 GetSystemIdentifier(void);
@@ -312,13 +314,14 @@ extern TimeLineID GetRecoveryTargetTLI(void);
 
 extern void HandleStartupProcInterrupts(void);
 extern void StartupProcessMain(void);
+extern bool CheckPromoteSignal(void);
 extern void WakeupRecovery(void);
 
 /*
  * Starting/stopping a base backup
  */
 extern XLogRecPtr do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile);
-extern XLogRecPtr do_pg_stop_backup(char *labelfile);
+extern XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive);
 extern void do_pg_abort_backup(void);
 
 /* File path names (all relative to $PGDATA) */

@@ -36,6 +36,7 @@
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
@@ -351,6 +352,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->atthasdef = false;
 			to->attislocal = true;
 			to->attinhcount = 0;
+
+			to->attcollation = collationObjectId[i];
 		}
 		else
 		{
@@ -387,6 +390,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			to->atttypmod = -1;
 			to->attislocal = true;
 
+			to->attcollation = collationObjectId[i];
+
 			ReleaseSysCache(tuple);
 
 			/*
@@ -398,10 +403,8 @@ ConstructTupleDescriptor(Relation heapRelation,
 			 * whether a table column is of a safe type (which is why we
 			 * needn't check for the non-expression case).
 			 */
-			CheckAttributeType(NameStr(to->attname), to->atttypid, false);
+			CheckAttributeType(NameStr(to->attname), to->atttypid, to->attcollation, false);
 		}
-
-		to->attcollation = collationObjectId[i];
 
 		/*
 		 * We do not yet have the correct relation OID for the index, so just
@@ -960,6 +963,19 @@ index_create(Relation heapRelation,
 			Assert(!initdeferred);
 		}
 
+		/* Store dependency on collations */
+		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+		{
+			if (OidIsValid(collationObjectId[i]))
+			{
+				referenced.classId = CollationRelationId;
+				referenced.objectId = collationObjectId[i];
+				referenced.objectSubId = 0;
+
+				recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+			}
+		}
+
 		/* Store dependency on operator classes */
 		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 		{
@@ -1283,6 +1299,12 @@ index_drop(Oid indexId)
 	userHeapRelation = heap_open(heapId, AccessExclusiveLock);
 
 	userIndexRelation = index_open(indexId, AccessExclusiveLock);
+
+	/*
+	 * There can no longer be anyone *else* touching the index, but we
+	 * might still have open queries using it in our own session.
+	 */
+	CheckTableNotInUse(userIndexRelation, "DROP INDEX");
 
 	/*
 	 * Schedule physical removal of the files
@@ -1684,6 +1706,11 @@ index_build(Relation heapRelation,
 
 	procedure = indexRelation->rd_am->ambuild;
 	Assert(RegProcedureIsValid(procedure));
+
+	ereport(DEBUG1,
+			(errmsg("building index \"%s\" on table \"%s\"",
+					RelationGetRelationName(indexRelation),
+					RelationGetRelationName(heapRelation))));
 
 	/*
 	 * Switch to the table owner's userid, so that any index functions are run

@@ -1,9 +1,9 @@
 <!-- doc/src/sgml/release-9.1.sgml -->
 
-<!-- This is up-to-date with commits through 2010-12-28 -->
+<!-- This is (hopefully) up-to-date with commits through 2011-03-05 -->
 
 <sect1 id="release-9-1-alpha">
-  <title>Release 9.1alpha3</title>
+  <title>Release 9.1alpha4</title>
   <sect2>
     <title>Overview</title>
     <para>
@@ -72,17 +72,16 @@
 
        <listitem>
         <para>
-         <emphasis>Add ALTER ... SET SCHEMA support for conversions,
+         Add ALTER ... SET SCHEMA support for conversions,
          operators, operator classes, operator families, text search
          configurations, text search dictionaries, text search
-         parsers, and text search templates</emphasis>
+         parsers, and text search templates
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Make TRUNCATE ... RESTART IDENTITY restart
-         sequences transactionally</emphasis>
+         Make TRUNCATE ... RESTART IDENTITY restart sequences transactionally
         </para>
 
         <para>
@@ -96,8 +95,8 @@
 
        <listitem>
         <para>
-         <emphasis>Prevent invoking I/O conversion casts via
-         functional/attribute notation</emphasis>
+         Prevent invoking I/O conversion casts via
+         functional/attribute notation
         </para>
         <para>
          This was found to be confusing in some cases.  The
@@ -132,11 +131,12 @@
          Allow WITH clauses to be attached to INSERT, UPDATE, DELETE
          statements
         </para>
+       </listitem>
 
+       <listitem>
         <para>
-         This is not the hoped-for facility of using
-         INSERT/UPDATE/DELETE inside a WITH, but rather the other way
-         around.
+         <emphasis>Allow INSERT/UPDATE/DELETE to be used inside a WITH
+         clause</emphasis>
         </para>
        </listitem>
 
@@ -164,6 +164,98 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Allow a table's row type to be cast to the table's supertype
+         if it's a type table.</emphasis>
+        </para>
+        <para>
+         This is analagous to the existing facility that allows casting a row
+         type to a supertable's row type.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Make foreign data wrappers functional, and support FOREIGN
+         TABLEs.</emphasis>
+        </para>
+        <para>
+         Foreign tables are component of SQL/MED, and provide a framework to
+         allow data stored outside the database to be accessed via SQL.
+         contrib/file_fdw is provided as a sample foreign data wrapper.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow a unique or primary key constraint to be created
+         using an existing index.</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Implement a truly serializable isolation level</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow foreign key constraints to be added as initially
+         NOT VALID, and validated later</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow multiple collations to be used within a single
+         database</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Support extensions, which provide a cleaner method for
+         installing and upgrading add-on modules, such as those in contrib
+         </emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Teach ALTER TABLE .. SET DATA TYPE to avoid a table write
+         in some cases where it isn't necessary
+         </emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add ENCODING option to COPY TO/FROM</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow binary I/O of type "void"</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Rearrange snapshot handlling to make rule expansion more
+         consistent</emphasis>
+        </para>
+        <para>
+         Portals, SQL functions, and SPI all now agree that a completely new
+         MVCC snapshot should be obtained only after fully executing each
+         original query.  This is equivalent to the prior behavior of EXPLAIN
+         ANALYZE.  It eliminates one source of concurrency hazards for
+         rules, and should also be marginally faster.
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -172,28 +264,29 @@
 
        <listitem>
         <para>
-         <emphasis>Optimize the commit_siblings configuration parameter</emphasis>
+         Optimize the commit_siblings configuration parameter
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>KNN GiST, otherwise known as order-by-operator support for GiST</emphasis>
+         KNN GiST, otherwise known as order-by-operator support for GiST
         </para>
 
         <para>
          This can be used to optimize nearest-neighbor searches.
         </para>
        </listitem>
+
        <listitem>
         <para>
-         <emphasis>Improve process shutdown speed</emphasis>
+         Improve process shutdown speed
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Speed up conversion of signed integers to C strings</emphasis>
+         Speed up conversion of signed integers to C strings
         </para>
        </listitem>
 
@@ -213,6 +306,31 @@
 
        <listitem>
         <para>
+         <emphasis>Support unlogged tables.</emphasis>
+        </para>
+        <para>
+         The contents of an unlogged table are not WAL-logged; thus, they
+         are not replicated and are truncated whenever the database system
+         enters recovery.  Indexes on unlogged tables are also unlogged, but
+         GIST indexes on unlogged tables are not currently supported.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Hash joins now support right and full outer joins.</emphasis>
+        </para>
+        <para>
+         Previously, full joins could be implemented only as a merge join,
+         and left and right outer joins could only hash the table on the
+         nullable side of the join.  This optimization is particularly
+         advantageous when the non-nullable side of a left or right outer
+         join is much smaller than the nullable side.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
          Reduce the memory requirement for large ispell dictionaries
         </para>
        </listitem>
@@ -227,6 +345,20 @@
        <listitem>
         <para>
          Improve GIN indexscan cost estimation
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Fix GIN to support null keys, empty and null items, and
+         full index scans</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Teach GIN to combine duplicate keys even across different
+         quals</emphasis>
         </para>
        </listitem>
 
@@ -254,6 +386,20 @@
         <para>
          Replace the naive HYPOT() macro with a
          standards-conformant hypotenuse function
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Avoid unnecessary detoast when comparing unequal-length text
+         or bytea values for equality or inequality</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Try to compact the background writer's fsync queue when
+         it overflows, instead of doing an fsync per block written</emphasis>
         </para>
        </listitem>
 
@@ -299,6 +445,55 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Teach replication connections to respect the value of
+         log_connections</emphasis>
+        </para>
+        <para>
+         Previously, they were always logged.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Log restartpoints in the same fashion as
+         checkpoints</emphasis>
+        </para>
+        <para>
+         Previously, less information was logged for restartpoints.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>By default, set wal_buffers to a reasonable value, based
+         on the setting for shared_buffers</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add new recovery.conf parameter, pause_at_recovery_target,
+         which defaults to on.</emphasis>
+        </para>
+        <para>
+         This is a behavior change from previous releases, which entered normal
+         running upon reaching the recovery target.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add new recovery.conf parameter, recovery_target_name,
+         allowing recovery to proceed to a named restore point</emphasis>
+        </para>
+        <para>
+         Named restore points can be created using a new server function,
+         pg_create_restore_point.
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -307,13 +502,13 @@
 
        <listitem>
         <para>
-         <emphasis>Instrument checkpoint sync calls</emphasis>
+         Instrument checkpoint sync calls
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Use the same lexer for recovery.conf that has been used for postgresql.conf</emphasis>
+         Use the same lexer for recovery.conf that has been used for postgresql.conf
         </para>
 
         <para>
@@ -323,13 +518,13 @@
 
        <listitem>
         <para>
-         <emphasis>Add column buffers_backend_fsync to pg_stat_bgwriter</emphasis>
+         Add column buffers_backend_fsync to pg_stat_bgwriter
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Add monitoring function pg_last_xact_replay_timestamp()</emphasis>
+         Add monitoring function pg_last_xact_replay_timestamp()
         </para>
        </listitem>
 
@@ -376,6 +571,65 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Implement remaining fields of
+         information_schema.sequences view</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add a "conflicts" column to pg_stat_database</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>New system view pg_stat_database_conflicts</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>New system view pg_stat_replication</emphasis>
+        </para>
+        <para>
+         This view shows which replication slaves are connected to the master,
+         and reports their status and replication progress.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>When an autovacuum worker (other than one performing an
+         anti-wraparound vacuum) is unable to obtain a lock on the target
+         relation without blocking, skip the relation.</emphasis>
+        </para>
+        <para>
+         This avoids pinning down an autovacuum worker.  The next autovacuum
+         cycle will try again. 
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Track time of last statistics reset on databases and
+         bgwriter</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow standby servers to send information on running
+         transactions back to the master</emphasis>
+        </para>
+        <para>
+         When enabled, this prevents most recovery conflicts on the slave,
+         but may cause MVCC bloat on the master.
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -405,6 +659,16 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Add REPLICATION privilege for ROLEs.</emphasis>
+        </para>
+        <para>
+         This makes it possible for replication to be performed by a
+         non-superuser account.
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -413,21 +677,21 @@
 
        <listitem>
         <para>
-         <emphasis>Add pg_read_binary_file() and whole-file-at-once
-         versions of pg_read_file()</emphasis>
+         Add pg_read_binary_file() and whole-file-at-once
+         versions of pg_read_file()
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Add new function format(), for sprintf-like string formatting</emphasis>
+         Add new function format(), for sprintf-like string formatting
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Add pg_describe_object() function to obtain textual
-         descriptions of objects as stored in pg_depend</emphasis>
+         Add pg_describe_object() function to obtain textual
+         descriptions of objects as stored in pg_depend
         </para>
        </listitem>
 
@@ -481,6 +745,20 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Add pg_is_xlog_replay_paused, pg_xlog_replay_pause, and
+         pg_xlog_replay_resume functions.</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Change pg_last_xlog_receive_location not to move
+         backwards.</emphasis>
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -520,6 +798,22 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Support streaming base backups.</emphasis>
+        </para>
+        <para>
+         A new client, pg_basebackup, can be used to perform a streaming base
+         backup.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add a directory output format to pg_dump</emphasis>
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -528,7 +822,7 @@
 
        <listitem>
         <para>
-         <emphasis>Add <quote>S</quote> option to \dn command in psql</emphasis>
+         Add <quote>S</quote> option to \dn command in psql
         </para>
         <para>
          System schemas are now hidden by default by \dn.
@@ -554,7 +848,6 @@
          with (at present) no default value.
         </para>
        </listitem>
-
        <listitem>
         <para>
          Add a \sf (show function) command to psql, for those
@@ -570,6 +863,20 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>Add a \dL command to psql, to list procedural
+         languages</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow psql to automatically deduce the client encoding from
+         the locale</emphasis>
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -578,14 +885,14 @@
 
        <listitem>
         <para>
-         <emphasis>Add PQlibVersion() function</emphasis>
+         Add PQlibVersion() function
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>When reporting the server as not responding, if the
-         hostname was supplied, also print the IP address</emphasis>
+         When reporting the server as not responding, if the
+         hostname was supplied, also print the IP address
         </para>
         <para>
          This allows IPv4 and IPv6 failures to be distinguished.  Also
@@ -595,9 +902,9 @@
 
        <listitem>
         <para>
-         <emphasis>Add functions PQping and PQpingParams to allow
+         Add functions PQping and PQpingParams to allow
          detection of the server's status, including a status where
-         the server is running but refuses ordinary connections</emphasis>
+         the server is running but refuses ordinary connections
         </para>
         <para>
          pg_ctl uses the new function.  This fixes the case where
@@ -606,6 +913,17 @@
         </para>
        </listitem>
 
+      </itemizedlist>
+    </sect3>
+    <sect3>
+      <title>ecpg</title>
+      <itemizedlist>
+       <listitem>
+        <para>
+         <emphasis>Allow ecpg to accept dynamic cursor names even in WHERE
+         CURRENT OF clauses</emphasis>
+        </para>
+       </listitem>
       </itemizedlist>
     </sect3>
     <sect3>
@@ -654,16 +972,152 @@
           Allow generic record arguments to PL/Perl functions
          </para>
         </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Convert PostgreSQL arrays passed to PL/perl functions to
+          Perl arrays</emphasis>
+         </para>
+        </listitem>
+       </itemizedlist>
+      </sect4>
+
+      <sect4>
+       <title>PL/Python</title>
+       <itemizedlist>
+
+        <listitem>
+         <para>
+          <emphasis>Fix an error when a set-returning function fails halfway
+          through</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Skip dropped attributes when converting Python objects to
+          tuples</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Improve messages for errors in compiling anonymous
+          PL/Python blocks</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Improve the handling of exceptions</emphasis>
+         </para>
+         <para>
+          Fix the way that exceptions are handled by the plpy module for Python
+          3.  Get rid of the global variable holding the error state, and
+          instead arrange to report PostgreSQL errors to Python immediately.
+          Call PLy_spi_execute_fetch_result inside the try/catch block, so that
+          errors from fetching tuples are correct reported as errors in the
+          SPI call.  Use the built-in TypeError, not SPIError, for errors
+          having to do with argument counts or types.  Use SPIError, not simply
+          plpy.Error, for errors in PLy_spi_execute_plan.  Do not set
+          a Python exception if PyArg_ParseTuple failed, as it already sets
+          the correct exception.
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Do not prefix error messages with the string
+          "PL/Python: "</emphasis>
+         </para>
+         <para>
+          It is redundant, given the error context.
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Check PL/Python functions for syntax errors at creation
+          time</emphasis>
+         </para>
+         <para>
+          Previously, even gross syntax errors would not be detected until
+          the function was executed.
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Allow Python try/catch blocks to catch exceptions arising
+          from SPI calls</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Invalidate PL/python functions with composite type
+          arguments when the type changes</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Add quoting functions plpy.quote_ident, plpy.quote_literal,
+          and plpy.quote_nullable</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Support table functions</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Add a plpy.subtransaction() context manager</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Provide a separate exception class for each error code
+          the backend defines, and make it possible to get the SQLSTATE from
+          the exception object</emphasis>
+         </para>
+        </listitem>
+
+        <listitem>
+         <para>
+          <emphasis>Assorted code cleanup</emphasis>
+         </para>
+         <para>
+          We now use HTABs instead of Python dictionary objects to cache
+          procedures.  palloc is used in TopMemoryContext instead of malloc.
+          Avoid use of undocumented API PyObject_NEW.  Free plan values in
+          the PlyPlanObject dealloc function.  Add braces around an if block,
+          for readability.  Refactor PLy_spi_prepare to save two levels of
+          indentation.  Avoid palloc(0).
+         </para>
+        </listitem>
        </itemizedlist>
       </sect4>
     </sect3>
+
     <sect3>
       <title>Additional Supplied Modules</title>
       <itemizedlist>
 
        <listitem>
         <para>
-         <emphasis>New module contrib/auth_delay</emphasis>
+         New module contrib/auth_delay
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>New module contrib/sepgsql, an SE-Linux integration for
+         PostgreSQL</emphasis>
         </para>
        </listitem>
 
@@ -709,6 +1163,54 @@
         </para>
        </listitem>
 
+       <listitem>
+        <para>
+         <emphasis>New module contrib/pg_test_fsync, replacing
+         src/tools/test_fsync</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>In contrib/pageinspect, fix the heap_page_item to return
+         infomasks as 32 bit values</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>In contrib/btree_gist, support KNN GiST searches</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>In contrib/pg_trgm, support LIKE, ILIKE, and KNN GiST
+         searches</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Several improvements to contrib/intarray</emphasis>
+        </para>
+        <para>
+         Correct the behavior of array containment operators, so that an empty
+         array is contained in any other array.  Fix bogus failures where
+         operators would claim that nulls were present when they really
+         weren't.  Remove arbitrary restriction to 1-D arrays.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Fix pg_upgrade not to insist on pg_dumpall and psql in the
+         old cluster, since we don't need them, but do check for pg_resetxlog
+         in the old and new clusters, since we do.  Avoid a useless attempt
+         to call pg_config in the old cluster.</emphasis>
+        </para>
+       </listitem>
+
       </itemizedlist>
     </sect3>
     <sect3>
@@ -717,23 +1219,22 @@
 
        <listitem>
         <para>
-         <emphasis>Rewrite the GiST insertion logic so that the
+         Rewrite the GiST insertion logic so that the
          post-recovery cleanup stage to finish incomplete inserts or
-         splits is not needed anymore</emphasis>
+         splits is not needed anymore
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Add support for collecting
-         <quote>minidump</quote>-style crash dumps on
-         Windows</emphasis>
+         Add support for collecting <quote>minidump</quote>-style crash dumps
+         on Windows
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Replace pg_class.relistemp column with relpersistence</emphasis>
+         Replace pg_class.relistemp column with relpersistence
         </para>
 
         <para>
@@ -743,13 +1244,13 @@
 
        <listitem>
         <para>
-         <emphasis>GNU make 3.80 or newer is now required</emphasis>
+         GNU make 3.80 or newer is now required
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Improved support for parallel make, make -k, and make -q</emphasis>
+         Improved support for parallel make, make -k, and make -q
         </para>
        </listitem>
 
@@ -807,6 +1308,24 @@
         <para>
          Suppress some compiler warnings from
          <literal>clang</>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow make check in PL directories</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add a make check-world target</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>PGXS support for contrib/hstore</emphasis>
         </para>
        </listitem>
 

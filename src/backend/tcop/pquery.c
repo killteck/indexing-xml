@@ -143,8 +143,8 @@ FreeQueryDesc(QueryDesc *qdesc)
 
 /*
  * ProcessQuery
- *		Execute a single plannable query within a PORTAL_MULTI_QUERY
- *		or PORTAL_ONE_RETURNING portal
+ *		Execute a single plannable query within a PORTAL_MULTI_QUERY,
+ *		PORTAL_ONE_RETURNING, or PORTAL_ONE_MOD_WITH portal
  *
  *	plan: the plan tree for the query
  *	sourceText: the source text of the query
@@ -170,21 +170,11 @@ ProcessQuery(PlannedStmt *plan,
 	elog(DEBUG3, "ProcessQuery");
 
 	/*
-	 * Must always set a snapshot for plannable queries.
-	 */
-	PushActiveSnapshot(GetTransactionSnapshot());
-
-	/*
 	 * Create the QueryDesc object
 	 */
 	queryDesc = CreateQueryDesc(plan, sourceText,
 								GetActiveSnapshot(), InvalidSnapshot,
 								dest, params, 0);
-
-	/*
-	 * Set up to collect AFTER triggers
-	 */
-	AfterTriggerBeginQuery();
 
 	/*
 	 * Call ExecutorStart to prepare the plan for execution
@@ -231,14 +221,10 @@ ProcessQuery(PlannedStmt *plan,
 		}
 	}
 
-	/* Now take care of any queued AFTER triggers */
-	AfterTriggerEndQuery(queryDesc->estate);
-
-	PopActiveSnapshot();
-
 	/*
 	 * Now, we close down all the scans and free allocated resources.
 	 */
+	ExecutorFinish(queryDesc);
 	ExecutorEnd(queryDesc);
 
 	FreeQueryDesc(queryDesc);
@@ -263,6 +249,7 @@ ChoosePortalStrategy(List *stmts)
 	 * PORTAL_ONE_SELECT and PORTAL_UTIL_SELECT need only consider the
 	 * single-statement case, since there are no rewrite rules that can add
 	 * auxiliary queries to a SELECT or a utility command.
+	 * PORTAL_ONE_MOD_WITH likewise allows only one top-level statement.
 	 */
 	if (list_length(stmts) == 1)
 	{
@@ -277,7 +264,12 @@ ChoosePortalStrategy(List *stmts)
 				if (query->commandType == CMD_SELECT &&
 					query->utilityStmt == NULL &&
 					query->intoClause == NULL)
-					return PORTAL_ONE_SELECT;
+				{
+					if (query->hasModifyingCTE)
+						return PORTAL_ONE_MOD_WITH;
+					else
+						return PORTAL_ONE_SELECT;
+				}
 				if (query->commandType == CMD_UTILITY &&
 					query->utilityStmt != NULL)
 				{
@@ -297,7 +289,12 @@ ChoosePortalStrategy(List *stmts)
 				if (pstmt->commandType == CMD_SELECT &&
 					pstmt->utilityStmt == NULL &&
 					pstmt->intoClause == NULL)
-					return PORTAL_ONE_SELECT;
+				{
+					if (pstmt->hasModifyingCTE)
+						return PORTAL_ONE_MOD_WITH;
+					else
+						return PORTAL_ONE_SELECT;
+				}
 			}
 		}
 		else
@@ -520,13 +517,6 @@ PortalStart(Portal portal, ParamListInfo params, Snapshot snapshot)
 											0);
 
 				/*
-				 * We do *not* call AfterTriggerBeginQuery() here.	We assume
-				 * that a SELECT cannot queue any triggers.  It would be messy
-				 * to support triggers since the execution of the portal may
-				 * be interleaved with other queries.
-				 */
-
-				/*
 				 * If it's a scrollable cursor, executor needs to support
 				 * REWIND and backwards scan.
 				 */
@@ -562,6 +552,7 @@ PortalStart(Portal portal, ParamListInfo params, Snapshot snapshot)
 				break;
 
 			case PORTAL_ONE_RETURNING:
+			case PORTAL_ONE_MOD_WITH:
 
 				/*
 				 * We don't start the executor until we are told to run the
@@ -572,7 +563,6 @@ PortalStart(Portal portal, ParamListInfo params, Snapshot snapshot)
 
 					pstmt = (PlannedStmt *) PortalGetPrimaryStmt(portal);
 					Assert(IsA(pstmt, PlannedStmt));
-					Assert(pstmt->hasReturning);
 					portal->tupDesc =
 						ExecCleanTypeFromTL(pstmt->planTree->targetlist,
 											false);
@@ -780,12 +770,13 @@ PortalRun(Portal portal, long count, bool isTopLevel,
 		{
 			case PORTAL_ONE_SELECT:
 			case PORTAL_ONE_RETURNING:
+			case PORTAL_ONE_MOD_WITH:
 			case PORTAL_UTIL_SELECT:
 
 				/*
 				 * If we have not yet run the command, do so, storing its
-				 * results in the portal's tuplestore. Do this only for the
-				 * PORTAL_ONE_RETURNING and PORTAL_UTIL_SELECT cases.
+				 * results in the portal's tuplestore.  But we don't do that
+				 * for the PORTAL_ONE_SELECT case.
 				 */
 				if (portal->strategy != PORTAL_ONE_SELECT && !portal->holdStore)
 					FillPortalStore(portal, isTopLevel);
@@ -823,7 +814,7 @@ PortalRun(Portal portal, long count, bool isTopLevel,
 							   dest, altdest, completionTag);
 
 				/* Prevent portal's commands from being re-executed */
-				portal->status = PORTAL_DONE;
+				MarkPortalDone(portal);
 
 				/* Always complete at end of RunMulti */
 				result = true;
@@ -879,8 +870,8 @@ PortalRun(Portal portal, long count, bool isTopLevel,
 /*
  * PortalRunSelect
  *		Execute a portal's query in PORTAL_ONE_SELECT mode, and also
- *		when fetching from a completed holdStore in PORTAL_ONE_RETURNING
- *		and PORTAL_UTIL_SELECT cases.
+ *		when fetching from a completed holdStore in PORTAL_ONE_RETURNING,
+ *		PORTAL_ONE_MOD_WITH, and PORTAL_UTIL_SELECT cases.
  *
  * This handles simple N-rows-forward-or-backward cases.  For more complex
  * nonsequential access to a portal, see PortalRunFetch.
@@ -1031,7 +1022,8 @@ PortalRunSelect(Portal portal,
  * FillPortalStore
  *		Run the query and load result tuples into the portal's tuple store.
  *
- * This is used for PORTAL_ONE_RETURNING and PORTAL_UTIL_SELECT cases only.
+ * This is used for PORTAL_ONE_RETURNING, PORTAL_ONE_MOD_WITH, and
+ * PORTAL_UTIL_SELECT cases only.
  */
 static void
 FillPortalStore(Portal portal, bool isTopLevel)
@@ -1051,6 +1043,7 @@ FillPortalStore(Portal portal, bool isTopLevel)
 	switch (portal->strategy)
 	{
 		case PORTAL_ONE_RETURNING:
+		case PORTAL_ONE_MOD_WITH:
 
 			/*
 			 * Run the portal to completion just as for the default
@@ -1164,8 +1157,8 @@ PortalRunUtility(Portal portal, Node *utilityStmt, bool isTopLevel,
 	 * seems to be to enumerate those that do not need one; this is a short
 	 * list.  Transaction control, LOCK, and SET must *not* set a snapshot
 	 * since they need to be executable at the start of a transaction-snapshot
-	 * mode transaction without freezing a snapshot.  By extension we allow SHOW
-	 * not to set a snapshot.  The other stmts listed are just efficiency
+	 * mode transaction without freezing a snapshot.  By extension we allow
+	 * SHOW not to set a snapshot.  The other stmts listed are just efficiency
 	 * hacks.  Beware of listing anything that can modify the database --- if,
 	 * say, it has to update an index with expressions that invoke
 	 * user-defined functions, then it had better have a snapshot.
@@ -1219,6 +1212,7 @@ PortalRunMulti(Portal portal, bool isTopLevel,
 			   DestReceiver *dest, DestReceiver *altdest,
 			   char *completionTag)
 {
+	bool		active_snapshot_set = false;
 	ListCell   *stmtlist_item;
 
 	/*
@@ -1262,6 +1256,20 @@ PortalRunMulti(Portal portal, bool isTopLevel,
 			if (log_executor_stats)
 				ResetUsage();
 
+			/*
+			 * Must always have a snapshot for plannable queries.  First time
+			 * through, take a new snapshot; for subsequent queries in the
+			 * same portal, just update the snapshot's copy of the command
+			 * counter.
+			 */
+			if (!active_snapshot_set)
+			{
+				PushActiveSnapshot(GetTransactionSnapshot());
+				active_snapshot_set = true;
+			}
+			else
+				UpdateActiveSnapshotCommandId();
+
 			if (pstmt->canSetTag)
 			{
 				/* statement can set tag string */
@@ -1291,11 +1299,29 @@ PortalRunMulti(Portal portal, bool isTopLevel,
 			 *
 			 * These are assumed canSetTag if they're the only stmt in the
 			 * portal.
+			 *
+			 * We must not set a snapshot here for utility commands (if one is
+			 * needed, PortalRunUtility will do it).  If a utility command is
+			 * alone in a portal then everything's fine.  The only case where
+			 * a utility command can be part of a longer list is that rules
+			 * are allowed to include NotifyStmt.  NotifyStmt doesn't care
+			 * whether it has a snapshot or not, so we just leave the current
+			 * snapshot alone if we have one.
 			 */
 			if (list_length(portal->stmts) == 1)
-				PortalRunUtility(portal, stmt, isTopLevel, dest, completionTag);
+			{
+				Assert(!active_snapshot_set);
+				/* statement can set tag string */
+				PortalRunUtility(portal, stmt, isTopLevel,
+								 dest, completionTag);
+			}
 			else
-				PortalRunUtility(portal, stmt, isTopLevel, altdest, NULL);
+			{
+				Assert(IsA(stmt, NotifyStmt));
+				/* stmt added by rewrite cannot set tag */
+				PortalRunUtility(portal, stmt, isTopLevel,
+								 altdest, NULL);
+			}
 		}
 
 		/*
@@ -1312,6 +1338,10 @@ PortalRunMulti(Portal portal, bool isTopLevel,
 
 		MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
 	}
+
+	/* Pop the snapshot if we pushed one. */
+	if (active_snapshot_set)
+		PopActiveSnapshot();
 
 	/*
 	 * If a command completion tag was supplied, use it.  Otherwise use the
@@ -1392,6 +1422,7 @@ PortalRunFetch(Portal portal,
 				break;
 
 			case PORTAL_ONE_RETURNING:
+			case PORTAL_ONE_MOD_WITH:
 			case PORTAL_UTIL_SELECT:
 
 				/*
@@ -1455,6 +1486,7 @@ DoPortalRunFetch(Portal portal,
 
 	Assert(portal->strategy == PORTAL_ONE_SELECT ||
 		   portal->strategy == PORTAL_ONE_RETURNING ||
+		   portal->strategy == PORTAL_ONE_MOD_WITH ||
 		   portal->strategy == PORTAL_UTIL_SELECT);
 
 	switch (fdirection)

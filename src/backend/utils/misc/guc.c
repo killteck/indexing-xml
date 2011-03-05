@@ -55,6 +55,7 @@
 #include "postmaster/postmaster.h"
 #include "postmaster/syslogger.h"
 #include "postmaster/walwriter.h"
+#include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/bufmgr.h"
 #include "storage/standby.h"
@@ -1278,6 +1279,15 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"hot_standby_feedback", PGC_SIGHUP, WAL_STANDBY_SERVERS,
+			gettext_noop("Allows feedback from a hot standby primary that will avoid query conflicts."),
+			NULL
+		},
+		&hot_standby_feedback,
+		false, NULL, NULL
+	},
+
+	{
 		{"allow_system_table_mods", PGC_POSTMASTER, DEVELOPER_OPTIONS,
 			gettext_noop("Allows modifications of the structure of system tables."),
 			NULL,
@@ -1438,6 +1448,16 @@ static struct config_int ConfigureNamesInt[] =
 		},
 		&max_standby_streaming_delay,
 		30 * 1000, -1, INT_MAX / 1000, NULL, NULL
+	},
+
+	{
+		{"wal_receiver_status_interval", PGC_SIGHUP, WAL_STANDBY_SERVERS,
+			gettext_noop("Sets the maximum interval between WAL receiver status reports to the master."),
+			NULL,
+			GUC_UNIT_S
+		},
+		&wal_receiver_status_interval,
+		10, 0, INT_MAX/1000, NULL, NULL
 	},
 
 	{
@@ -1714,10 +1734,10 @@ static struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"max_predicate_locks_per_transaction", PGC_POSTMASTER, LOCK_MANAGEMENT,
+		{"max_pred_locks_per_transaction", PGC_POSTMASTER, LOCK_MANAGEMENT,
 			gettext_noop("Sets the maximum number of predicate locks per transaction."),
 			gettext_noop("The shared predicate lock table is sized on the assumption that "
-			  "at most max_predicate_locks_per_transaction * max_connections distinct "
+			  "at most max_pred_locks_per_transaction * max_connections distinct "
 						 "objects will need to be locked at any one time.")
 		},
 		&max_predicate_locks_per_xact,
@@ -1823,7 +1843,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_MS
 		},
 		&WalSndDelay,
-		200, 1, 10000, NULL, NULL
+		1000, 1, 10000, NULL, NULL
 	},
 
 	{

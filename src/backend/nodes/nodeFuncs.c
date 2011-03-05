@@ -1671,7 +1671,6 @@ range_table_walker(List *rtable,
 		switch (rte->rtekind)
 		{
 			case RTE_RELATION:
-			case RTE_SPECIAL:
 			case RTE_CTE:
 				/* nothing to do */
 				break;
@@ -2374,7 +2373,6 @@ range_table_mutator(List *rtable,
 		switch (rte->rtekind)
 		{
 			case RTE_RELATION:
-			case RTE_SPECIAL:
 			case RTE_CTE:
 				/* we don't bother to copy eref, aliases, etc; OK? */
 				break;
@@ -2587,6 +2585,56 @@ bool
 			foreach(temp, (List *) node)
 			{
 				if (walker((Node *) lfirst(temp), context))
+					return true;
+			}
+			break;
+		case T_InsertStmt:
+			{
+				InsertStmt *stmt = (InsertStmt *) node;
+
+				if (walker(stmt->relation, context))
+					return true;
+				if (walker(stmt->cols, context))
+					return true;
+				if (walker(stmt->selectStmt, context))
+					return true;
+				if (walker(stmt->returningList, context))
+					return true;
+				if (walker(stmt->withClause, context))
+					return true;
+			}
+			break;
+		case T_DeleteStmt:
+			{
+				DeleteStmt *stmt = (DeleteStmt *) node;
+
+				if (walker(stmt->relation, context))
+					return true;
+				if (walker(stmt->usingClause, context))
+					return true;
+				if (walker(stmt->whereClause, context))
+					return true;
+				if (walker(stmt->returningList, context))
+					return true;
+				if (walker(stmt->withClause, context))
+					return true;
+			}
+			break;
+		case T_UpdateStmt:
+			{
+				UpdateStmt *stmt = (UpdateStmt *) node;
+
+				if (walker(stmt->relation, context))
+					return true;
+				if (walker(stmt->targetList, context))
+					return true;
+				if (walker(stmt->whereClause, context))
+					return true;
+				if (walker(stmt->fromClause, context))
+					return true;
+				if (walker(stmt->returningList, context))
+					return true;
+				if (walker(stmt->withClause, context))
 					return true;
 			}
 			break;

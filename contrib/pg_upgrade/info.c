@@ -48,7 +48,7 @@ gen_db_file_maps(DbInfo *old_db, DbInfo *new_db,
 	for (relnum = 0; relnum < old_db->rel_arr.nrels; relnum++)
 	{
 		RelInfo    *old_rel = &old_db->rel_arr.rels[relnum];
-		RelInfo    *new_rel = &old_db->rel_arr.rels[relnum];
+		RelInfo    *new_rel = &new_db->rel_arr.rels[relnum];
 
 		if (old_rel->reloid != new_rel->reloid)
 			pg_log(PG_FATAL, "mismatch of relation id: database \"%s\", old relid %d, new relid %d\n",
@@ -104,6 +104,12 @@ create_rel_filename_map(const char *old_data, const char *new_data,
 	/* new_relfilenode will match old and new pg_class.oid */
 	map->new_relfilenode = new_rel->relfilenode;
 
+	if (strcmp(old_rel->nspname, new_rel->nspname) != 0 ||
+	    strcmp(old_rel->relname, new_rel->relname) != 0)
+		pg_log(PG_FATAL, "mismatch of relation id: database \"%s\", old rel %s.%s, new rel %s.%s\n",
+			old_db, old_rel->nspname, old_rel->relname,
+			new_rel->nspname, new_rel->relname);
+
 	/* used only for logging and error reporing, old/new are identical */
 	snprintf(map->nspname, sizeof(map->nspname), "%s", old_rel->nspname);
 	snprintf(map->relname, sizeof(map->relname), "%s", old_rel->relname);
@@ -141,6 +147,9 @@ get_db_and_rel_infos(ClusterInfo *cluster)
 {
 	int			dbnum;
 
+	if (cluster->dbarr.dbs != NULL)
+		free_db_and_rel_infos(&cluster->dbarr);
+
 	get_db_infos(cluster);
 
 	for (dbnum = 0; dbnum < cluster->dbarr.ndbs; dbnum++)
@@ -148,7 +157,7 @@ get_db_and_rel_infos(ClusterInfo *cluster)
 
 	if (log_opts.debug)
 	{
-		pg_log(PG_DEBUG, "%s databases\n", CLUSTER_NAME(cluster));
+		pg_log(PG_DEBUG, "\n%s databases:\n", CLUSTER_NAME(cluster));
 		print_db_infos(&cluster->dbarr);
 	}
 }
@@ -311,6 +320,7 @@ free_db_and_rel_infos(DbInfoArr *db_arr)
 	for (dbnum = 0; dbnum < db_arr->ndbs; dbnum++)
 		free_rel_infos(&db_arr->dbs[dbnum].rel_arr);
 	pg_free(db_arr->dbs);
+	db_arr->dbs = NULL;
 	db_arr->ndbs = 0;
 }
 

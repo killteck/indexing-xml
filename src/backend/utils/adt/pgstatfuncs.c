@@ -77,12 +77,14 @@ extern Datum pg_stat_get_db_conflict_snapshot(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_db_conflict_bufferpin(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_db_conflict_startup_deadlock(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_db_conflict_all(PG_FUNCTION_ARGS);
+extern Datum pg_stat_get_db_stat_reset_time(PG_FUNCTION_ARGS);
 
 extern Datum pg_stat_get_bgwriter_timed_checkpoints(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_bgwriter_requested_checkpoints(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_bgwriter_buf_written_checkpoints(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_bgwriter_buf_written_clean(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_bgwriter_maxwritten_clean(PG_FUNCTION_ARGS);
+extern Datum pg_stat_get_bgwriter_stat_reset_time(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_written_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_fsync_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_alloc(PG_FUNCTION_ARGS);
@@ -504,7 +506,7 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-		tupdesc = CreateTemplateTupleDesc(11, false);
+		tupdesc = CreateTemplateTupleDesc(12, false);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "datid", OIDOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "procpid", INT4OID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "usesysid", OIDOID, -1, 0);
@@ -515,7 +517,8 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 		TupleDescInitEntry(tupdesc, (AttrNumber) 8, "query_start", TIMESTAMPTZOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 9, "backend_start", TIMESTAMPTZOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 10, "client_addr", INETOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 11, "client_port", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 11, "client_hostname", TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 12, "client_port", INT4OID, -1, 0);
 
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -567,8 +570,8 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 	if (funcctx->call_cntr < funcctx->max_calls)
 	{
 		/* for each row */
-		Datum		values[11];
-		bool		nulls[11];
+		Datum		values[12];
+		bool		nulls[12];
 		HeapTuple	tuple;
 		PgBackendStatus *beentry;
 		SockAddr	zero_clientaddr;
@@ -645,6 +648,7 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 			{
 				nulls[9] = true;
 				nulls[10] = true;
+				nulls[11] = true;
 			}
 			else
 			{
@@ -669,13 +673,18 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 					{
 						nulls[9] = true;
 						nulls[10] = true;
+						nulls[11] = true;
 					}
 					else
 					{
 						clean_ipv6_addr(beentry->st_clientaddr.addr.ss_family, remote_host);
 						values[9] = DirectFunctionCall1(inet_in,
 											   CStringGetDatum(remote_host));
-						values[10] = Int32GetDatum(atoi(remote_port));
+						if (beentry->st_clienthostname)
+							values[10] = CStringGetTextDatum(beentry->st_clienthostname);
+						else
+							nulls[10] = true;
+						values[11] = Int32GetDatum(atoi(remote_port));
 					}
 				}
 				else if (beentry->st_clientaddr.addr.ss_family == AF_UNIX)
@@ -687,13 +696,15 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 					 * errors.
 					 */
 					nulls[9] = true;
-					values[10] = DatumGetInt32(-1);
+					nulls[10] = true;
+					values[11] = DatumGetInt32(-1);
 				}
 				else
 				{
 					/* Unknown address type, should never happen */
 					nulls[9] = true;
 					nulls[10] = true;
+					nulls[11] = true;
 				}
 			}
 		}
@@ -707,6 +718,7 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 			nulls[8] = true;
 			nulls[9] = true;
 			nulls[10] = true;
+			nulls[11] = true;
 		}
 
 		tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
@@ -1136,6 +1148,24 @@ pg_stat_get_db_tuples_deleted(PG_FUNCTION_ARGS)
 }
 
 Datum
+pg_stat_get_db_stat_reset_time(PG_FUNCTION_ARGS)
+{
+	Oid			dbid = PG_GETARG_OID(0);
+	TimestampTz result;
+	PgStat_StatDBEntry *dbentry;
+
+	if ((dbentry = pgstat_fetch_stat_dbentry(dbid)) == NULL)
+		result = 0;
+	else
+		result = dbentry->stat_reset_timestamp;
+
+	if (result == 0)
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_TIMESTAMPTZ(result);
+}
+
+Datum
 pg_stat_get_db_conflict_tablespace(PG_FUNCTION_ARGS)
 {
 	Oid			dbid = PG_GETARG_OID(0);
@@ -1258,6 +1288,12 @@ Datum
 pg_stat_get_bgwriter_maxwritten_clean(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_INT64(pgstat_fetch_global()->maxwritten_clean);
+}
+
+Datum
+pg_stat_get_bgwriter_stat_reset_time(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TIMESTAMPTZ(pgstat_fetch_global()->stat_reset_timestamp);
 }
 
 Datum

@@ -893,6 +893,7 @@ _equalQuery(Query *a, Query *b)
 	COMPARE_SCALAR_FIELD(hasSubLinks);
 	COMPARE_SCALAR_FIELD(hasDistinctOn);
 	COMPARE_SCALAR_FIELD(hasRecursive);
+	COMPARE_SCALAR_FIELD(hasModifyingCTE);
 	COMPARE_SCALAR_FIELD(hasForUpdate);
 	COMPARE_NODE_FIELD(cteList);
 	COMPARE_NODE_FIELD(rtable);
@@ -1658,7 +1659,29 @@ static bool
 _equalCreateExtensionStmt(CreateExtensionStmt *a, CreateExtensionStmt *b)
 {
 	COMPARE_STRING_FIELD(extname);
+	COMPARE_SCALAR_FIELD(if_not_exists);
 	COMPARE_NODE_FIELD(options);
+
+	return true;
+}
+
+static bool
+_equalAlterExtensionStmt(AlterExtensionStmt *a, AlterExtensionStmt *b)
+{
+	COMPARE_STRING_FIELD(extname);
+	COMPARE_NODE_FIELD(options);
+
+	return true;
+}
+
+static bool
+_equalAlterExtensionContentsStmt(AlterExtensionContentsStmt *a, AlterExtensionContentsStmt *b)
+{
+	COMPARE_STRING_FIELD(extname);
+	COMPARE_SCALAR_FIELD(action);
+	COMPARE_SCALAR_FIELD(objtype);
+	COMPARE_NODE_FIELD(objname);
+	COMPARE_NODE_FIELD(objargs);
 
 	return true;
 }
@@ -1667,7 +1690,7 @@ static bool
 _equalCreateFdwStmt(CreateFdwStmt *a, CreateFdwStmt *b)
 {
 	COMPARE_STRING_FIELD(fdwname);
-	COMPARE_NODE_FIELD(validator);
+	COMPARE_NODE_FIELD(func_options);
 	COMPARE_NODE_FIELD(options);
 
 	return true;
@@ -1677,8 +1700,7 @@ static bool
 _equalAlterFdwStmt(AlterFdwStmt *a, AlterFdwStmt *b)
 {
 	COMPARE_STRING_FIELD(fdwname);
-	COMPARE_NODE_FIELD(validator);
-	COMPARE_SCALAR_FIELD(change_validator);
+	COMPARE_NODE_FIELD(func_options);
 	COMPARE_NODE_FIELD(options);
 
 	return true;
@@ -2275,6 +2297,7 @@ _equalRangeTblEntry(RangeTblEntry *a, RangeTblEntry *b)
 {
 	COMPARE_SCALAR_FIELD(rtekind);
 	COMPARE_SCALAR_FIELD(relid);
+	COMPARE_SCALAR_FIELD(relkind);
 	COMPARE_NODE_FIELD(subquery);
 	COMPARE_SCALAR_FIELD(jointype);
 	COMPARE_NODE_FIELD(joinaliasvars);
@@ -2868,6 +2891,12 @@ equal(void *a, void *b)
 			break;
 		case T_CreateExtensionStmt:
 			retval = _equalCreateExtensionStmt(a, b);
+			break;
+		case T_AlterExtensionStmt:
+			retval = _equalAlterExtensionStmt(a, b);
+			break;
+		case T_AlterExtensionContentsStmt:
+			retval = _equalAlterExtensionContentsStmt(a, b);
 			break;
 		case T_CreateFdwStmt:
 			retval = _equalCreateFdwStmt(a, b);

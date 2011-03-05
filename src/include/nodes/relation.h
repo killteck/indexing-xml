@@ -76,11 +76,15 @@ typedef struct PlannerGlobal
 
 	List	   *finalrowmarks;	/* "flat" list of PlanRowMarks */
 
+	List	   *resultRelations;	/* "flat" list of integer RT indexes */
+
 	List	   *relationOids;	/* OIDs of relations the plan depends on */
 
 	List	   *invalItems;		/* other dependencies, as PlanInvalItems */
 
 	Index		lastPHId;		/* highest PlaceHolderVar ID assigned */
+
+	Index		lastRowMarkId;	/* highest PlanRowMark ID assigned */
 
 	bool		transientPlan;	/* redo plan when TransactionXmin changes? */
 } PlannerGlobal;
@@ -151,8 +155,6 @@ typedef struct PlannerInfo
 	 */
 	List	  **join_rel_level; /* lists of join-relation RelOptInfos */
 	int			join_cur_level; /* index of list being extended */
-
-	List	   *resultRelations;	/* integer list of RT indexes, or NIL */
 
 	List	   *init_plans;		/* init SubPlans for query */
 
@@ -453,7 +455,7 @@ typedef struct IndexOptInfo
 	int			ncolumns;		/* number of columns in index */
 	Oid		   *opfamily;		/* OIDs of operator families for columns */
 	int		   *indexkeys;		/* column numbers of index's keys, or 0 */
-	Oid		   *indexcollations;/* OIDs of the collations of the index columns */
+	Oid		   *indexcollations;	/* OIDs of collations of index columns */
 	Oid		   *opcintype;		/* OIDs of opclass declared input data types */
 	Oid		   *sortopfamily;	/* OIDs of btree opfamilies, if orderable */
 	bool	   *reverse_sort;	/* is sort order descending? */
@@ -467,6 +469,7 @@ typedef struct IndexOptInfo
 
 	bool		predOK;			/* true if predicate matches query */
 	bool		unique;			/* true if a unique index */
+	bool		hypothetical;	/* true if index doesn't really exist */
 	bool		amcanorderbyop;	/* does AM support order by operator result? */
 	bool		amoptionalkey;	/* can query omit key for the first column? */
 	bool		amsearchnulls;	/* can AM search for NULL/NOT NULL entries? */
@@ -745,6 +748,16 @@ typedef struct TidPath
 	Path		path;
 	List	   *tidquals;		/* qual(s) involving CTID = something */
 } TidPath;
+
+/*
+ * ForeignPath represents a scan of a foreign table
+ */
+typedef struct ForeignPath
+{
+	Path		path;
+	/* use struct pointer to avoid including fdwapi.h here */
+	struct FdwPlan *fdwplan;
+} ForeignPath;
 
 /*
  * AppendPath represents an Append plan, ie, successive execution of

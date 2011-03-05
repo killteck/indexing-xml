@@ -10,7 +10,7 @@ ifeq ($(PORTNAME), win32)
 LDLIBS += -lws2_32
 endif
 
-override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS)
+override CPPFLAGS := -I$(srcdir) -I$(libpq_srcdir) $(CPPFLAGS)
 override LDLIBS := $(libpq_pgport) $(LDLIBS)
 
 OBJS =  specparse.o isolationtester.o
@@ -68,7 +68,7 @@ maintainer-clean: distclean
 	rm -f specparse.c specscanner.c
 
 installcheck: all
-	./pg_isolation_regress --schedule=$(srcdir)/isolation_schedule
+	./pg_isolation_regress --inputdir=$(srcdir) --schedule=$(srcdir)/isolation_schedule
 
 check: all
-	./pg_isolation_regress --temp-install=./tmp_check --top-builddir=$(top_builddir) --schedule=$(srcdir)/isolation_schedule
+	./pg_isolation_regress --temp-install=./tmp_check --inputdir=$(srcdir) --top-builddir=$(top_builddir) --schedule=$(srcdir)/isolation_schedule
