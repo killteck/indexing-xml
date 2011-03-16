@@ -147,12 +147,6 @@ transformExpr(ParseState *pstate, Node *expr)
 			{
 				TypeCast   *tc = (TypeCast *) expr;
 
-				if (tc->typeName->collnames)
-					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("COLLATE clause not allowed in cast target"),
-							 parser_errposition(pstate, tc->typeName->location)));
-
 				/*
 				 * If the subject of the typecast is an ARRAY[] construct and
 				 * the target type is an array type, we invoke
@@ -324,6 +318,7 @@ transformExpr(ParseState *pstate, Node *expr)
 		case T_CoerceViaIO:
 		case T_ArrayCoerceExpr:
 		case T_ConvertRowtypeExpr:
+		case T_CollateExpr:
 		case T_CaseTestExpr:
 		case T_ArrayExpr:
 		case T_CoerceToDomain:
@@ -2109,23 +2104,25 @@ transformTypeCast(ParseState *pstate, TypeCast *tc)
 static Node *
 transformCollateClause(ParseState *pstate, CollateClause *c)
 {
-	CollateClause *newc;
+	CollateExpr *newc;
 	Oid		argtype;
 
-	newc = makeNode(CollateClause);
-	newc->arg = (Expr *) transformExpr(pstate, (Node *) c->arg);
+	newc = makeNode(CollateExpr);
+	newc->arg = (Expr *) transformExpr(pstate, c->arg);
 
 	argtype = exprType((Node *) newc->arg);
-	/* The unknown type is not collatable, but coerce_type() takes
-	 * care of it separately, so we'll let it go here. */
+	/*
+	 * The unknown type is not collatable, but coerce_type() takes
+	 * care of it separately, so we'll let it go here.
+	 */
 	if (!type_is_collatable(argtype) && argtype != UNKNOWNOID)
 		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("collations are not supported by type %s",
-						format_type_be(argtype))));
+						format_type_be(argtype)),
+				 parser_errposition(pstate, c->location)));
 
-	newc->collOid = LookupCollation(pstate, c->collnames, c->location);
-	newc->collnames = c->collnames;
+	newc->collOid = LookupCollation(pstate, c->collname, c->location);
 	newc->location = c->location;
 
 	return (Node *) newc;

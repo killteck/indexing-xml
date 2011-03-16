@@ -1,6 +1,6 @@
 <!-- doc/src/sgml/release-9.1.sgml -->
 
-<!-- This is (hopefully) up-to-date with commits through 2011-03-05 -->
+<!-- This is (hopefully) up-to-date with commits through 2011-03-08 -->
 
 <sect1 id="release-9-1-alpha">
   <title>Release 9.1alpha4</title>
@@ -66,6 +66,83 @@
   </sect2>
   <sect2>
     <title>Changes</title>
+
+    <sect3>
+      <title>Replication and Recovery</title>
+      <itemizedlist>
+
+       <listitem>
+        <para>
+         <emphasis>Support named restore points</emphasis>
+        </para>
+        <para>
+         Named restore points can be created using a new server function,
+         pg_create_restore_point.  A new recovery.conf parameter,
+         recovery_target_name, allows recovery to stop at a named restore
+         point.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add new recovery.conf parameter, pause_at_recovery_target,
+         which defaults to on</emphasis>
+        </para>
+        <para>
+         This is a behavior change from previous releases, which entered normal
+         running upon reaching the recovery target.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Add pg_is_xlog_replay_paused, pg_xlog_replay_pause, and
+         pg_xlog_replay_resume functions</emphasis>
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Allow standby servers to send information on running
+         transactions back to the master</emphasis>
+        </para>
+        <para>
+         When enabled, this prevents most recovery conflicts on the slave,
+         but may cause MVCC bloat on the master.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Support streaming base backups</emphasis>
+        </para>
+        <para>
+         A new client, pg_basebackup, can be used to perform a streaming base
+         backup.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>Synchronous replication</emphasis>
+        </para>
+        <para>
+         When enabled, transaction commit will wait for WAL records to be
+         replicated before informing the client that a transaction has
+         successfully committed.
+        </para>
+       </listitem>
+
+       <listitem>
+        <para>
+         <emphasis>When recovery_target_timeline='latest', periodically
+         rescan the archive for new timelines</emphasis>
+        </para>
+       </listitem>
+
+      </itemizedlist>
+    </sect3>
+
     <sect3>
       <title>SQL Features</title>
       <itemizedlist>
@@ -167,7 +244,7 @@
        <listitem>
         <para>
          <emphasis>Allow a table's row type to be cast to the table's supertype
-         if it's a type table.</emphasis>
+         if it's a type table</emphasis>
         </para>
         <para>
          This is analagous to the existing facility that allows casting a row
@@ -178,7 +255,7 @@
        <listitem>
         <para>
          <emphasis>Make foreign data wrappers functional, and support FOREIGN
-         TABLEs.</emphasis>
+         TABLEs</emphasis>
         </para>
         <para>
          Foreign tables are component of SQL/MED, and provide a framework to
@@ -190,13 +267,20 @@
        <listitem>
         <para>
          <emphasis>Allow a unique or primary key constraint to be created
-         using an existing index.</emphasis>
+         using an existing index</emphasis>
         </para>
        </listitem>
 
        <listitem>
         <para>
-         <emphasis>Implement a truly serializable isolation level</emphasis>
+         <emphasis>Implement Serializable Snapshot Isolation, in order to
+         provide a more robust serializable transaction mode</emphasis>
+        </para>
+        <para>
+         In previous releases, the REPEATABLE READ and SERIALIZABLE isolation
+         levels were identical.  The historical behavior of REPEATABLE READ is
+         unchanged in this release, but SERIALIZABLE now provides stronger
+         guarantees.
         </para>
        </listitem>
 
@@ -224,7 +308,7 @@
 
        <listitem>
         <para>
-         <emphasis>Teach ALTER TABLE .. SET DATA TYPE to avoid a table write
+         <emphasis>Teach ALTER TABLE ... SET DATA TYPE to avoid a table write
          in some cases where it isn't necessary
          </emphasis>
         </para>
@@ -306,7 +390,7 @@
 
        <listitem>
         <para>
-         <emphasis>Support unlogged tables.</emphasis>
+         <emphasis>Support unlogged tables</emphasis>
         </para>
         <para>
          The contents of an unlogged table are not WAL-logged; thus, they
@@ -318,7 +402,7 @@
 
        <listitem>
         <para>
-         <emphasis>Hash joins now support right and full outer joins.</emphasis>
+         <emphasis>Hash joins now support right and full outer joins</emphasis>
         </para>
         <para>
          Previously, full joins could be implemented only as a merge join,
@@ -472,28 +556,6 @@
         </para>
        </listitem>
 
-       <listitem>
-        <para>
-         <emphasis>Add new recovery.conf parameter, pause_at_recovery_target,
-         which defaults to on.</emphasis>
-        </para>
-        <para>
-         This is a behavior change from previous releases, which entered normal
-         running upon reaching the recovery target.
-        </para>
-       </listitem>
-
-       <listitem>
-        <para>
-         <emphasis>Add new recovery.conf parameter, recovery_target_name,
-         allowing recovery to proceed to a named restore point</emphasis>
-        </para>
-        <para>
-         Named restore points can be created using a new server function,
-         pg_create_restore_point.
-        </para>
-       </listitem>
-
       </itemizedlist>
     </sect3>
     <sect3>
@@ -537,8 +599,7 @@
 
        <listitem>
         <para>
-         Support host names and host key
-         word <literal>all</literal>
+         Support host names and host key word <literal>all</literal>
          in <filename>pg_hba.conf</filename>
         </para>
        </listitem>
@@ -604,7 +665,7 @@
         <para>
          <emphasis>When an autovacuum worker (other than one performing an
          anti-wraparound vacuum) is unable to obtain a lock on the target
-         relation without blocking, skip the relation.</emphasis>
+         relation without blocking, skip the relation</emphasis>
         </para>
         <para>
          This avoids pinning down an autovacuum worker.  The next autovacuum
@@ -616,17 +677,6 @@
         <para>
          <emphasis>Track time of last statistics reset on databases and
          bgwriter</emphasis>
-        </para>
-       </listitem>
-
-       <listitem>
-        <para>
-         <emphasis>Allow standby servers to send information on running
-         transactions back to the master</emphasis>
-        </para>
-        <para>
-         When enabled, this prevents most recovery conflicts on the slave,
-         but may cause MVCC bloat on the master.
         </para>
        </listitem>
 
@@ -661,7 +711,7 @@
 
        <listitem>
         <para>
-         <emphasis>Add REPLICATION privilege for ROLEs.</emphasis>
+         <emphasis>Add REPLICATION privilege for ROLEs</emphasis>
         </para>
         <para>
          This makes it possible for replication to be performed by a
@@ -747,15 +797,8 @@
 
        <listitem>
         <para>
-         <emphasis>Add pg_is_xlog_replay_paused, pg_xlog_replay_pause, and
-         pg_xlog_replay_resume functions.</emphasis>
-        </para>
-       </listitem>
-
-       <listitem>
-        <para>
          <emphasis>Change pg_last_xlog_receive_location not to move
-         backwards.</emphasis>
+         backwards</emphasis>
         </para>
        </listitem>
 
@@ -795,16 +838,6 @@
          behavior of the backend, and a --quote-all-identifiers argument to
          pg_dump and pg_dumpall which sets the parameter and also affects the
          quoting done internally by those applications.
-        </para>
-       </listitem>
-
-       <listitem>
-        <para>
-         <emphasis>Support streaming base backups.</emphasis>
-        </para>
-        <para>
-         A new client, pg_basebackup, can be used to perform a streaming base
-         backup.
         </para>
        </listitem>
 
@@ -995,15 +1028,14 @@
 
         <listitem>
          <para>
-          <emphasis>Skip dropped attributes when converting Python objects to
-          tuples</emphasis>
+          <emphasis>Make plpy.Fatal() raise FATAL, rather than ERROR</emphasis>
          </para>
         </listitem>
 
         <listitem>
          <para>
-          <emphasis>Improve messages for errors in compiling anonymous
-          PL/Python blocks</emphasis>
+          <emphasis>Skip dropped attributes when converting Python objects to
+          tuples</emphasis>
          </para>
         </listitem>
 
@@ -1027,11 +1059,17 @@
 
         <listitem>
          <para>
-          <emphasis>Do not prefix error messages with the string
-          "PL/Python: "</emphasis>
+          <emphasis>Improve error reporting</emphasis>
          </para>
-         <para>
-          It is redundant, given the error context.
+         <para>Better error messages for errors in compiling anonymous
+          PL/Python blocks.  Avoid prefixing error messages with the string
+          "PL/Python: ", which is redundant, given the error
+          context.  Provide a separate exception class for each error code
+          the backend defines, and make it possible to get the SQLSTATE from
+          the exception object.  Report Python errors from iterators
+          using PLy_elog, so that the Python exception is included in the
+          exception, and to avoid setting the errcode to
+          ERRCODE_DATA_EXCEPTION.
          </para>
         </listitem>
 
@@ -1076,14 +1114,6 @@
         <listitem>
          <para>
           <emphasis>Add a plpy.subtransaction() context manager</emphasis>
-         </para>
-        </listitem>
-
-        <listitem>
-         <para>
-          <emphasis>Provide a separate exception class for each error code
-          the backend defines, and make it possible to get the SQLSTATE from
-          the exception object</emphasis>
          </para>
         </listitem>
 

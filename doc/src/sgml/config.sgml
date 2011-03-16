@@ -324,7 +324,9 @@ SET ENABLE_SEQSCAN TO OFF;
          to listen for connections from client applications.
          The value takes the form of a comma-separated list of host names
          and/or numeric IP addresses.  The special entry <literal>*</>
-         corresponds to all available IP interfaces.
+         corresponds to all available IP interfaces.  The entry
+         <literal>0.0.0.0</> allows listening for all IPv4 addresses and
+         <literal>::</> allows listening for all IPv6 addresses.
          If the list is empty, the server does not listen on any IP interface
          at all, in which case only Unix-domain sockets can be used to connect
          to it.
@@ -2015,6 +2017,94 @@ SET ENABLE_SEQSCAN TO OFF;
        </para>
       </listitem>
      </varlistentry>
+     </variablelist>
+    </sect2>
+
+    <sect2 id="runtime-config-sync-rep">
+     <title>Synchronous Replication</title>
+
+     <para>
+      These settings control the behavior of the built-in
+      <firstterm>synchronous replication</> feature.
+      These parameters would be set on the primary server that is
+      to send replication data to one or more standby servers.
+     </para>
+
+     <variablelist>
+     <varlistentry id="guc-synchronous-replication" xreflabel="synchronous_replication">
+      <term><varname>synchronous_replication</varname> (<type>boolean</type>)</term>
+      <indexterm>
+       <primary><varname>synchronous_replication</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies whether transaction commit will wait for WAL records
+        to be replicated before the command returns a <quote>success</>
+        indication to the client.  The default setting is <literal>off</>.
+        When <literal>on</>, there will be a delay while the client waits
+        for confirmation of successful replication. That delay will
+        increase depending upon the physical distance and network activity
+        between primary and standby. The commit wait will last until a
+        reply from the current synchronous standby indicates it has written
+        the commit record of the transaction to durable storage.  This
+        parameter has no effect if
+        <xref linkend="guc-synchronous-standby-names"> is empty or
+        <xref linkend="guc-max-wal-senders"> is zero.
+       </para>
+       <para>
+        This parameter can be changed at any time; the
+        behavior for any one transaction is determined by the setting in
+        effect when it commits.  It is therefore possible, and useful, to have
+        some transactions replicate synchronously and others asynchronously.
+        For example, to make a single multistatement transaction commit
+        asynchronously when the default is synchronous replication, issue
+        <command>SET LOCAL synchronous_replication TO OFF</> within the
+        transaction.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-synchronous-standby-names" xreflabel="synchronous_standby_names">
+      <term><varname>synchronous_standby_names</varname> (<type>string</type>)</term>
+      <indexterm>
+       <primary><varname>synchronous_standby_names</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies a priority ordered list of standby names that can offer
+        synchronous replication.  At any one time there will be just one
+        synchronous standby that will wake sleeping users following commit.
+        The synchronous standby will be the first named standby that is
+        both currently connected and streaming in real-time to the standby
+        (as shown by a state of "STREAMING").  Other standby servers
+        with listed later will become potential synchronous standbys.
+        If the current synchronous standby disconnects for whatever reason
+        it will be replaced immediately with the next highest priority standby.
+        Specifying more than one standby name can allow very high availability.
+       </para>
+       <para>
+        The standby name is currently taken as the application_name of the
+        standby, as set in the primary_conninfo on the standby. Names are
+        not enforced for uniqueness. In case of duplicates one of the standbys
+        will be chosen to be the synchronous standby, though exactly which
+        one is indeterminate.
+       </para>
+       <para>
+        No value is set by default.
+        The special entry <literal>*</> matches any application_name, including
+        the default application name of <literal>walreceiver</>.
+       </para>
+       <para>
+        If a standby is removed from the list of servers then it will stop
+        being the synchronous standby, allowing another to take its place.
+        If the list is empty, synchronous replication will not be
+        possible, whatever the setting of <varname>synchronous_replication</>,
+        however, already waiting commits will continue to wait.
+        Standbys may also be added to the list without restarting the server.
+       </para>
+      </listitem>
+     </varlistentry>
+
      </variablelist>
     </sect2>
 
@@ -5269,7 +5359,7 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
         null values to be entered.  However, <productname>PostgreSQL</> versions
         before 8.2 did not support null values in arrays, and therefore would
         treat <literal>NULL</> as specifying a normal array element with
-        the string value <quote>NULL</>.  For backwards compatibility with
+        the string value <quote>NULL</>.  For backward compatibility with
         applications that require the old behavior, this variable can be
         turned <literal>off</>.
        </para>
@@ -5561,7 +5651,7 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
         value set to true is normally the best way to maximize the availability
         of the database.  However, in some circumstances, such as when
         <productname>PostgreSQL</> is being invoked by clusterware, it may be
-        useful to disable this behavior, so that the clusterware can gain
+        useful to disable the restart so that the clusterware can gain
         control and take any actions it deems appropriate.
        </para>
       </listitem>

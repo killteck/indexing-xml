@@ -297,7 +297,7 @@ DefineType(List *names, List *parameters)
 		Type		likeType;
 		Form_pg_type likeForm;
 
-		likeType = typenameType(NULL, defGetTypeName(likeTypeEl), NULL, NULL);
+		likeType = typenameType(NULL, defGetTypeName(likeTypeEl), NULL);
 		likeForm = (Form_pg_type) GETSTRUCT(likeType);
 		internalLength = likeForm->typlen;
 		byValue = likeForm->typbyval;
@@ -654,7 +654,7 @@ RemoveTypes(DropStmt *drop)
 		typename = makeTypeNameFromNameList(names);
 
 		/* Use LookupTypeName here so that shell types can be removed. */
-		tup = LookupTypeName(NULL, typename, NULL, NULL);
+		tup = LookupTypeName(NULL, typename, NULL);
 		if (tup == NULL)
 		{
 			if (!drop->missing_ok)
@@ -787,6 +787,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	Oid			basetypeoid;
 	Oid			domainoid;
 	Oid			old_type_oid;
+	Oid			domaincoll;
 	Form_pg_type baseType;
 	int32		basetypeMod;
 	Oid			baseColl;
@@ -820,7 +821,7 @@ DefineDomain(CreateDomainStmt *stmt)
 	/*
 	 * Look up the base type.
 	 */
-	typeTup = typenameType(NULL, stmt->typeName, &basetypeMod, &baseColl);
+	typeTup = typenameType(NULL, stmt->typeName, &basetypeMod);
 	baseType = (Form_pg_type) GETSTRUCT(typeTup);
 	basetypeoid = HeapTupleGetOid(typeTup);
 
@@ -837,6 +838,22 @@ DefineDomain(CreateDomainStmt *stmt)
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("\"%s\" is not a valid base type for a domain",
 						TypeNameToString(stmt->typeName))));
+
+	/*
+	 * Identify the collation if any
+	 */
+	baseColl = baseType->typcollation;
+	if (stmt->collClause)
+		domaincoll = get_collation_oid(stmt->collClause->collname, false);
+	else
+		domaincoll = baseColl;
+
+	/* Complain if COLLATE is applied to an uncollatable type */
+	if (OidIsValid(domaincoll) && !OidIsValid(baseColl))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("collations are not supported by type %s",
+						format_type_be(basetypeoid))));
 
 	/* passed by value */
 	byValue = baseType->typbyval;
@@ -1064,7 +1081,7 @@ DefineDomain(CreateDomainStmt *stmt)
 				   basetypeMod, /* typeMod value */
 				   typNDims,	/* Array dimensions for base type */
 				   typNotNull,	/* Type NOT NULL */
-				   baseColl);
+				   domaincoll);
 
 	/*
 	 * Process constraints which refer to the domain ID returned by TypeCreate
@@ -3010,7 +3027,7 @@ AlterTypeOwner(List *names, Oid newOwnerId)
 	typename = makeTypeNameFromNameList(names);
 
 	/* Use LookupTypeName here so that shell types can be processed */
-	tup = LookupTypeName(NULL, typename, NULL, NULL);
+	tup = LookupTypeName(NULL, typename, NULL);
 	if (tup == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),

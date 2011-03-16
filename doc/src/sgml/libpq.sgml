@@ -1313,7 +1313,7 @@ char *PQport(const PGconn *conn);
        Returns the debug <acronym>TTY</acronym> of the connection.
        (This is obsolete, since the server no longer pays attention
        to the <acronym>TTY</acronym> setting, but the function remains
-       for backwards compatibility.)
+       for backward compatibility.)
 
 <synopsis>
 char *PQtty(const PGconn *conn);
@@ -1612,7 +1612,7 @@ int PQsocket(const PGconn *conn);
       <para>
        Returns the process <acronym>ID</acronym>
        (PID)<indexterm><primary>PID</><secondary>determining PID of
-       server process</><tertiary>in libpq</></> of the backend server
+       server process</><tertiary>in libpq</></> of the backend
        process handling this connection.
 
 <synopsis>
@@ -3846,6 +3846,15 @@ PGresult *PQgetResult(PGconn *conn);
        active and the necessary response data has not yet been read by
        <function>PQconsumeInput</function>.
       </para>
+
+      <note>
+       <para>
+        Even when <function>PQresultStatus</function> indicates a fatal
+        error, <function>PQgetResult</function> should be called until it
+        returns a null pointer to allow <application>libpq</> to
+        process the error information completely.
+       </para>
+      </note>
      </listitem>
     </varlistentry>
    </variablelist>
@@ -6924,7 +6933,7 @@ ldap://ldap.acme.com/cn=dbserver,cn=hosts?pgconnectinfo?base?(objectclass=*)
    The default value for <literal>sslmode</> is <literal>prefer</>. As is shown
    in the table, this makes no sense from a security point of view, and it only
    promises performance overhead if possible. It is only provided as the default
-   for backwards compatibility, and is not recommended in secure deployments.
+   for backward compatibility, and is not recommended in secure deployments.
   </para>
 
  </sect2>

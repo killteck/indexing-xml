@@ -1100,8 +1100,8 @@ DATA(insert OID = 1078 (  bpcharcmp		   PGNSP PGUID 12 1 0 0 f f f t f i 2 0 23 
 DESCR("less-equal-greater");
 DATA(insert OID = 1080 (  hashbpchar	   PGNSP PGUID 12 1 0 0 f f f t f i 1 0 23 "1042" _null_ _null_ _null_ _null_	hashbpchar _null_ _null_ _null_ ));
 DESCR("hash");
-DATA(insert OID = 1081 (  format_type	   PGNSP PGUID 12 1 0 0 f f f f f s 3 0 25 "26 23 26" _null_ _null_ _null_ _null_ format_type _null_ _null_ _null_ ));
-DESCR("format a type OID, atttypmod, and collation OID to canonical SQL");
+DATA(insert OID = 1081 (  format_type	   PGNSP PGUID 12 1 0 0 f f f f f s 2 0 25 "26 23" _null_ _null_ _null_ _null_ format_type _null_ _null_ _null_ ));
+DESCR("format a type oid and atttypmod to canonical SQL");
 DATA(insert OID = 1084 (  date_in		   PGNSP PGUID 12 1 0 0 f f f t f s 1 0 1082 "2275" _null_ _null_ _null_ _null_ date_in _null_ _null_ _null_ ));
 DESCR("I/O");
 DATA(insert OID = 1085 (  date_out		   PGNSP PGUID 12 1 0 0 f f f t f s 1 0 2275 "1082" _null_ _null_ _null_ _null_ date_out _null_ _null_ _null_ ));
@@ -2548,7 +2548,7 @@ DATA(insert OID = 1936 (  pg_stat_get_backend_idset		PGNSP PGUID 12 1 100 0 f f 
 DESCR("statistics: currently active backend IDs");
 DATA(insert OID = 2022 (  pg_stat_get_activity			PGNSP PGUID 12 1 100 0 f f f f t s 1 0 2249 "23" "{23,26,23,26,25,25,16,1184,1184,1184,869,25,23}" "{i,o,o,o,o,o,o,o,o,o,o,o,o}" "{pid,datid,procpid,usesysid,application_name,current_query,waiting,xact_start,query_start,backend_start,client_addr,client_hostname,client_port}" _null_ pg_stat_get_activity _null_ _null_ _null_ ));
 DESCR("statistics: information about currently active backends");
-DATA(insert OID = 3099 (  pg_stat_get_wal_senders	PGNSP PGUID 12 1 10 0 f f f f t s 0 0 2249 "" "{23,25,25,25,25,25}" "{o,o,o,o,o,o}" "{procpid,state,sent_location,write_location,flush_location,replay_location}" _null_ pg_stat_get_wal_senders _null_ _null_ _null_ ));
+DATA(insert OID = 3099 (  pg_stat_get_wal_senders	PGNSP PGUID 12 1 10 0 f f f f t s 0 0 2249 "" "{23,25,25,25,25,25,23,25}" "{o,o,o,o,o,o,o,o}" "{procpid,state,sent_location,write_location,flush_location,replay_location,sync_priority,sync_state}" _null_ pg_stat_get_wal_senders _null_ _null_ _null_ ));
 DESCR("statistics: information about currently active replication");
 DATA(insert OID = 2026 (  pg_backend_pid				PGNSP PGUID 12 1 0 0 f f f t f s 0 0 23 "" _null_ _null_ _null_ _null_ pg_backend_pid _null_ _null_ _null_ ));
 DESCR("statistics: current backend PID");

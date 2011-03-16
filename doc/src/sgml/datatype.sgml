@@ -1018,7 +1018,9 @@ SELECT '52093.89'::money::numeric::float8;
     and they will be removed when converting a <type>character</type> value
     to one of the other string types.  Note that trailing spaces
     <emphasis>are</> semantically significant in
-    <type>character varying</type> and <type>text</type> values.
+    <type>character varying</type> and <type>text</type> values, and
+    when using pattern matching, e.g. <literal>LIKE</>,
+    regular expressions.
    </para>
 
    <para>

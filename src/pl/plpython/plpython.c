@@ -1157,9 +1157,7 @@ PLy_function_handler(FunctionCallInfo fcinfo, PLyProcedure *proc)
 				PLy_function_delete_args(proc);
 
 				if (has_error)
-					ereport(ERROR,
-							(errcode(ERRCODE_DATA_EXCEPTION),
-						  errmsg("error fetching next item from iterator")));
+					PLy_elog(ERROR, "error fetching next item from iterator");
 
 				/* Disconnect from the SPI manager before returning */
 				if (SPI_finish() != SPI_OK_FINISH)
@@ -1516,7 +1514,7 @@ static PLyProcedure *
 PLy_procedure_get(Oid fn_oid, bool is_trigger)
 {
 	HeapTuple	procTup;
-	PLyProcedureEntry *entry;
+	PLyProcedureEntry * volatile entry;
 	bool		found;
 
 	procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fn_oid));
@@ -3234,7 +3232,7 @@ PLy_spi_prepare(PyObject *self, PyObject *args)
 	void	   *tmpplan;
 	volatile MemoryContext oldcontext;
 	volatile ResourceOwner oldowner;
-	int			nargs;
+	volatile int nargs;
 
 	if (!PyArg_ParseTuple(args, "s|O", &query, &list))
 		return NULL;
@@ -3470,7 +3468,7 @@ PLy_spi_execute_plan(PyObject *ob, PyObject *list, long limit)
 
 	PG_TRY();
 	{
-		char	   *nulls;
+		char  * volatile nulls;
 		volatile int j;
 
 		if (nargs > 0)
@@ -4383,8 +4381,13 @@ PLy_elog(int elevel, const char *fmt,...)
 	int			position = 0;
 
 	PyErr_Fetch(&exc, &val, &tb);
-	if (exc != NULL && PyErr_GivenExceptionMatches(val, PLy_exc_spi_error))
-		PLy_get_spi_error_data(val, &detail, &hint, &query, &position);
+	if (exc != NULL)
+	{
+		if (PyErr_GivenExceptionMatches(val, PLy_exc_spi_error))
+			PLy_get_spi_error_data(val, &detail, &hint, &query, &position);
+		else if (PyErr_GivenExceptionMatches(val, PLy_exc_fatal))
+			elevel = FATAL;
+	}
 	PyErr_Restore(exc, val, tb);
 
 	xmsg = PLy_traceback(&xlevel);

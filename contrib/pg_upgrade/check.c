@@ -452,7 +452,7 @@ create_script_for_old_cluster_deletion(
  *	by value.  The schema dumps the CREATE TYPE PASSEDBYVALUE setting so
  *	it must match for the old and new servers.
  */
-void
+static void
 check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
 {
 	int			dbnum;
@@ -515,9 +515,11 @@ check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
 		PQfinish(conn);
 	}
 
+	if (script)
+			fclose(script);
+
 	if (found)
 	{
-		fclose(script);
 		pg_log(PG_REPORT, "fatal\n");
 		pg_log(PG_FATAL,
 			   "| Your installation contains \"/contrib/isn\" functions\n"
@@ -546,7 +548,7 @@ check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
  *	not preserved, and hence these data types cannot be used in user
  *	tables upgraded by pg_upgrade.
  */
-void
+static void
 check_for_reg_data_type_usage(ClusterInfo *cluster)
 {
 	int			dbnum;
@@ -616,9 +618,11 @@ check_for_reg_data_type_usage(ClusterInfo *cluster)
 		PQfinish(conn);
 	}
 
+	if (script)
+		fclose(script);
+
 	if (found)
 	{
-		fclose(script);
 		pg_log(PG_REPORT, "fatal\n");
 		pg_log(PG_FATAL,
 			   "| Your installation contains one of the reg* data types in\n"

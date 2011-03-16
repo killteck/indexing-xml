@@ -494,6 +494,16 @@ _equalConvertRowtypeExpr(ConvertRowtypeExpr *a, ConvertRowtypeExpr *b)
 }
 
 static bool
+_equalCollateExpr(CollateExpr *a, CollateExpr *b)
+{
+	COMPARE_NODE_FIELD(arg);
+	COMPARE_SCALAR_FIELD(collOid);
+	COMPARE_LOCATION_FIELD(location);
+
+	return true;
+}
+
+static bool
 _equalCaseExpr(CaseExpr *a, CaseExpr *b)
 {
 	COMPARE_SCALAR_FIELD(casetype);
@@ -1007,7 +1017,6 @@ _equalAlterTableCmd(AlterTableCmd *a, AlterTableCmd *b)
 	COMPARE_SCALAR_FIELD(subtype);
 	COMPARE_STRING_FIELD(name);
 	COMPARE_NODE_FIELD(def);
-	COMPARE_NODE_FIELD(transform);
 	COMPARE_SCALAR_FIELD(behavior);
 	COMPARE_SCALAR_FIELD(missing_ok);
 
@@ -1470,6 +1479,7 @@ _equalCreateDomainStmt(CreateDomainStmt *a, CreateDomainStmt *b)
 {
 	COMPARE_NODE_FIELD(domainname);
 	COMPARE_NODE_FIELD(typeName);
+	COMPARE_NODE_FIELD(collClause);
 	COMPARE_NODE_FIELD(constraints);
 
 	return true;
@@ -2139,8 +2149,6 @@ _equalTypeName(TypeName *a, TypeName *b)
 	COMPARE_NODE_FIELD(typmods);
 	COMPARE_SCALAR_FIELD(typemod);
 	COMPARE_NODE_FIELD(arrayBounds);
-	COMPARE_NODE_FIELD(collnames);
-	COMPARE_SCALAR_FIELD(collOid);
 	COMPARE_LOCATION_FIELD(location);
 
 	return true;
@@ -2160,8 +2168,7 @@ static bool
 _equalCollateClause(CollateClause *a, CollateClause *b)
 {
 	COMPARE_NODE_FIELD(arg);
-	COMPARE_NODE_FIELD(collnames);
-	COMPARE_SCALAR_FIELD(collOid);
+	COMPARE_NODE_FIELD(collname);
 	COMPARE_LOCATION_FIELD(location);
 
 	return true;
@@ -2235,9 +2242,12 @@ _equalColumnDef(ColumnDef *a, ColumnDef *b)
 	COMPARE_SCALAR_FIELD(inhcount);
 	COMPARE_SCALAR_FIELD(is_local);
 	COMPARE_SCALAR_FIELD(is_not_null);
+	COMPARE_SCALAR_FIELD(is_from_type);
 	COMPARE_SCALAR_FIELD(storage);
 	COMPARE_NODE_FIELD(raw_default);
 	COMPARE_NODE_FIELD(cooked_default);
+	COMPARE_NODE_FIELD(collClause);
+	COMPARE_SCALAR_FIELD(collOid);
 	COMPARE_NODE_FIELD(constraints);
 
 	return true;
@@ -2590,6 +2600,9 @@ equal(void *a, void *b)
 			break;
 		case T_ConvertRowtypeExpr:
 			retval = _equalConvertRowtypeExpr(a, b);
+			break;
+		case T_CollateExpr:
+			retval = _equalCollateExpr(a, b);
 			break;
 		case T_CaseExpr:
 			retval = _equalCaseExpr(a, b);

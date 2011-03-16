@@ -132,6 +132,9 @@ static Node *makeXmlExpr(XmlExprOp op, char *name, List *named_args,
 static List *mergeTableFuncParameters(List *func_args, List *columns);
 static TypeName *TableFuncTypeName(List *columns);
 static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_t yyscanner);
+static void SplitColQualList(List *qualList,
+							 List **constraintList, CollateClause **collClause,
+							 core_yyscan_t yyscanner);
 
 %}
 
@@ -221,7 +224,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 %type <node>	alter_column_default opclass_item opclass_drop alter_using
 %type <ival>	add_drop opt_asc_desc opt_nulls_order
 
-%type <node>	alter_table_cmd alter_type_cmd
+%type <node>	alter_table_cmd alter_type_cmd opt_collate_clause
 %type <list>	alter_table_cmds alter_type_cmds
 
 %type <dbehavior>	opt_drop_behavior
@@ -400,8 +403,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 %type <list>	copy_generic_opt_list copy_generic_opt_arg_list
 %type <list>	copy_options
 
-%type <typnam>	Typename SimpleTypename SimpleTypenameWithoutCollation
-				ConstTypename
+%type <typnam>	Typename SimpleTypename ConstTypename
 				GenericType Numeric opt_float
 				Character ConstCharacter
 				CharacterWithLength CharacterWithoutLength
@@ -487,8 +489,8 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 	CHARACTER CHARACTERISTICS CHECK CHECKPOINT CLASS CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COMMENT COMMENTS COMMIT
 	COMMITTED CONCURRENTLY CONFIGURATION CONNECTION CONSTRAINT CONSTRAINTS
-	CONTENT_P CONTINUE_P CONVERSION_P COPY COST CREATE CREATEDB
-	CREATEROLE CREATEUSER CROSS CSV CURRENT_P
+	CONTENT_P CONTINUE_P CONVERSION_P COPY COST CREATE
+	CROSS CSV CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
 
@@ -518,13 +520,12 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING
 	LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P LOGIN_P
+	LOCATION LOCK_P
 
 	MAPPING MATCH MAXVALUE MINUTE_P MINVALUE MODE MONTH_P MOVE
 
-	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCREATEDB
-	NOCREATEROLE NOCREATEUSER NOINHERIT NOLOGIN_P NONE NOREPLICATION_P
-	NOSUPERUSER NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF
+	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NONE
+	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF
 	NULLS_P NUMERIC
 
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTION OPTIONS OR
@@ -537,14 +538,14 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 	QUOTE
 
 	RANGE READ REAL REASSIGN RECHECK RECURSIVE REF REFERENCES REINDEX
-	RELATIVE_P RELEASE RENAME REPEATABLE REPLACE REPLICA REPLICATION_P
+	RELATIVE_P RELEASE RENAME REPEATABLE REPLACE REPLICA
 	RESET RESTART RESTRICT RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK
 	ROW ROWS RULE
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETOF SHARE
 	SHOW SIMILAR SIMPLE SMALLINT SOME STABLE STANDALONE_P START STATEMENT
-	STATISTICS STDIN STDOUT STORAGE STRICT_P STRIP_P SUBSTRING SUPERUSER_P
+	STATISTICS STDIN STDOUT STORAGE STRICT_P STRIP_P SUBSTRING
 	SYMMETRIC SYSID SYSTEM_P
 
 	TABLE TABLES TABLESPACE TEMP TEMPLATE TEMPORARY TEXT_P THEN TIME TIMESTAMP
@@ -619,6 +620,7 @@ static RangeVar *makeRangeVarFromAnyName(List *names, int position, core_yyscan_
 %left		'^'
 /* Unary Operators */
 %left		AT ZONE			/* sets precedence for AT TIME ZONE */
+%left		COLLATE
 %right		UMINUS
 %left		'[' ']'
 %left		'(' ')'
@@ -835,62 +837,9 @@ AlterOptRoleElem:
 					$$ = makeDefElem("unencryptedPassword",
 									 (Node *)makeString($3));
 				}
-			| SUPERUSER_P
-				{
-					$$ = makeDefElem("superuser", (Node *)makeInteger(TRUE));
-				}
-			| NOSUPERUSER
-				{
-					$$ = makeDefElem("superuser", (Node *)makeInteger(FALSE));
-				}
 			| INHERIT
 				{
 					$$ = makeDefElem("inherit", (Node *)makeInteger(TRUE));
-				}
-			| NOINHERIT
-				{
-					$$ = makeDefElem("inherit", (Node *)makeInteger(FALSE));
-				}
-			| CREATEDB
-				{
-					$$ = makeDefElem("createdb", (Node *)makeInteger(TRUE));
-				}
-			| NOCREATEDB
-				{
-					$$ = makeDefElem("createdb", (Node *)makeInteger(FALSE));
-				}
-			| CREATEROLE
-				{
-					$$ = makeDefElem("createrole", (Node *)makeInteger(TRUE));
-				}
-			| NOCREATEROLE
-				{
-					$$ = makeDefElem("createrole", (Node *)makeInteger(FALSE));
-				}
-			| CREATEUSER
-				{
-					/* For backwards compatibility, synonym for SUPERUSER */
-					$$ = makeDefElem("superuser", (Node *)makeInteger(TRUE));
-				}
-			| NOCREATEUSER
-				{
-					$$ = makeDefElem("superuser", (Node *)makeInteger(FALSE));
-				}
-			| LOGIN_P
-				{
-					$$ = makeDefElem("canlogin", (Node *)makeInteger(TRUE));
-				}
-			| NOLOGIN_P
-				{
-					$$ = makeDefElem("canlogin", (Node *)makeInteger(FALSE));
-				}
-			| REPLICATION_P
-				{
-					$$ = makeDefElem("isreplication", (Node *)makeInteger(TRUE));
-				}
-			| NOREPLICATION_P
-				{
-					$$ = makeDefElem("isreplication", (Node *)makeInteger(FALSE));
 				}
 			| CONNECTION LIMIT SignedIconst
 				{
@@ -904,6 +853,57 @@ AlterOptRoleElem:
 			| USER name_list
 				{
 					$$ = makeDefElem("rolemembers", (Node *)$2);
+				}
+			| IDENT
+				{
+					/*
+					 * We handle identifiers that aren't parser keywords with
+					 * the following special-case codes, to avoid bloating the
+					 * size of the main parser.
+					 */
+					if (strcmp($1, "superuser") == 0)
+						$$ = makeDefElem("superuser", (Node *)makeInteger(TRUE));
+					else if (strcmp($1, "nosuperuser") == 0)
+						$$ = makeDefElem("superuser", (Node *)makeInteger(FALSE));
+					else if (strcmp($1, "createuser") == 0)
+					{
+						/* For backwards compatibility, synonym for SUPERUSER */
+						$$ = makeDefElem("superuser", (Node *)makeInteger(TRUE));
+					}
+					else if (strcmp($1, "nocreateuser") == 0)
+					{
+						/* For backwards compatibility, synonym for SUPERUSER */
+						$$ = makeDefElem("superuser", (Node *)makeInteger(FALSE));
+					}
+					else if (strcmp($1, "createrole") == 0)
+						$$ = makeDefElem("createrole", (Node *)makeInteger(TRUE));
+					else if (strcmp($1, "nocreaterole") == 0)
+						$$ = makeDefElem("createrole", (Node *)makeInteger(FALSE));
+					else if (strcmp($1, "replication") == 0)
+						$$ = makeDefElem("isreplication", (Node *)makeInteger(TRUE));
+					else if (strcmp($1, "noreplication") == 0)
+						$$ = makeDefElem("isreplication", (Node *)makeInteger(FALSE));
+					else if (strcmp($1, "createdb") == 0)
+						$$ = makeDefElem("createdb", (Node *)makeInteger(TRUE));
+					else if (strcmp($1, "nocreatedb") == 0)
+						$$ = makeDefElem("createdb", (Node *)makeInteger(FALSE));
+					else if (strcmp($1, "login") == 0)
+						$$ = makeDefElem("canlogin", (Node *)makeInteger(TRUE));
+					else if (strcmp($1, "nologin") == 0)
+						$$ = makeDefElem("canlogin", (Node *)makeInteger(FALSE));
+					else if (strcmp($1, "noinherit") == 0)
+					{
+						/*
+						 * Note that INHERIT is a keyword, so it's handled by main parser, but
+						 * NOINHERIT is handled here.
+						 */
+						$$ = makeDefElem("inherit", (Node *)makeInteger(FALSE));
+					}
+					else
+						ereport(ERROR,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("unrecognized role option \"%s\"", $1),
+									 parser_errposition(@1)));
 				}
 		;
 
@@ -1746,13 +1746,17 @@ alter_table_cmd:
 			 * ALTER TABLE <name> ALTER [COLUMN] <colname> [SET DATA] TYPE <typename>
 			 *		[ USING <expression> ]
 			 */
-			| ALTER opt_column ColId opt_set_data TYPE_P Typename alter_using
+			| ALTER opt_column ColId opt_set_data TYPE_P Typename opt_collate_clause alter_using
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
+					ColumnDef *def = makeNode(ColumnDef);
 					n->subtype = AT_AlterColumnType;
 					n->name = $3;
-					n->def = (Node *) $6;
-					n->transform = $7;
+					n->def = (Node *) def;
+					/* We only use these three fields of the ColumnDef node */
+					def->typeName = $6;
+					def->collClause = (CollateClause *) $7;
+					def->raw_default = $8;
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> ADD CONSTRAINT ... */
@@ -1981,6 +1985,18 @@ opt_drop_behavior:
 			| /* EMPTY */				{ $$ = DROP_RESTRICT; /* default */ }
 		;
 
+opt_collate_clause:
+			COLLATE any_name
+				{
+					CollateClause *n = makeNode(CollateClause);
+					n->arg = NULL;
+					n->collname = $2;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| /* EMPTY */				{ $$ = NULL; }
+		;
+
 alter_using:
 			USING a_expr				{ $$ = $2; }
 			| /* EMPTY */				{ $$ = NULL; }
@@ -2077,13 +2093,18 @@ alter_type_cmd:
 					$$ = (Node *)n;
 				}
 			/* ALTER TYPE <name> ALTER ATTRIBUTE <attname> [SET DATA] TYPE <typename> [RESTRICT|CASCADE] */
-			| ALTER ATTRIBUTE ColId opt_set_data TYPE_P Typename opt_drop_behavior
+			| ALTER ATTRIBUTE ColId opt_set_data TYPE_P Typename opt_collate_clause opt_drop_behavior
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
+					ColumnDef *def = makeNode(ColumnDef);
 					n->subtype = AT_AlterColumnType;
 					n->name = $3;
-					n->def = (Node *) $6;
-					n->behavior = $7;
+					n->def = (Node *) def;
+					n->behavior = $8;
+					/* We only use these three fields of the ColumnDef node */
+					def->typeName = $6;
+					def->collClause = (CollateClause *) $7;
+					def->raw_default = NULL;
 					$$ = (Node *)n;
 				}
 		;
@@ -2454,8 +2475,16 @@ columnDef:	ColId Typename ColQualList
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
 					n->typeName = $2;
-					n->constraints = $3;
+					n->inhcount = 0;
 					n->is_local = true;
+					n->is_not_null = false;
+					n->is_from_type = false;
+					n->storage = 0;
+					n->raw_default = NULL;
+					n->cooked_default = NULL;
+					n->collOid = InvalidOid;
+					SplitColQualList($3, &n->constraints, &n->collClause,
+									 yyscanner);
 					$$ = (Node *)n;
 				}
 		;
@@ -2464,8 +2493,17 @@ columnOptions:	ColId WITH OPTIONS ColQualList
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
-					n->constraints = $4;
+					n->typeName = NULL;
+					n->inhcount = 0;
 					n->is_local = true;
+					n->is_not_null = false;
+					n->is_from_type = false;
+					n->storage = 0;
+					n->raw_default = NULL;
+					n->cooked_default = NULL;
+					n->collOid = InvalidOid;
+					SplitColQualList($4, &n->constraints, &n->collClause,
+									 yyscanner);
 					$$ = (Node *)n;
 				}
 		;
@@ -2486,6 +2524,19 @@ ColConstraint:
 				}
 			| ColConstraintElem						{ $$ = $1; }
 			| ConstraintAttr						{ $$ = $1; }
+			| COLLATE any_name
+				{
+					/*
+					 * Note: the CollateClause is momentarily included in
+					 * the list built by ColQualList, but we split it out
+					 * again in SplitColQualList.
+					 */
+					CollateClause *n = makeNode(CollateClause);
+					n->arg = NULL;
+					n->collname = $2;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 		;
 
 /* DEFAULT NULL is already the default for Postgres.
@@ -2973,8 +3024,12 @@ CreateAsElement:
 					n->inhcount = 0;
 					n->is_local = true;
 					n->is_not_null = false;
+					n->is_from_type = false;
+					n->storage = 0;
 					n->raw_default = NULL;
 					n->cooked_default = NULL;
+					n->collClause = NULL;
+					n->collOid = InvalidOid;
 					n->constraints = NIL;
 					$$ = (Node *)n;
 				}
@@ -6584,7 +6639,7 @@ opt_column: COLUMN									{ $$ = COLUMN; }
 			| /*EMPTY*/								{ $$ = 0; }
 		;
 
-opt_set_data: SET DATA_P									{ $$ = 1; }
+opt_set_data: SET DATA_P							{ $$ = 1; }
 			| /*EMPTY*/								{ $$ = 0; }
 		;
 
@@ -7450,7 +7505,8 @@ CreateDomainStmt:
 					CreateDomainStmt *n = makeNode(CreateDomainStmt);
 					n->domainname = $3;
 					n->typeName = $5;
-					n->constraints = $6;
+					SplitColQualList($6, &n->constraints, &n->collClause,
+									 yyscanner);
 					$$ = (Node *)n;
 				}
 		;
@@ -9091,13 +9147,21 @@ TableFuncElementList:
 				}
 		;
 
-TableFuncElement:	ColId Typename
+TableFuncElement:	ColId Typename opt_collate_clause
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
 					n->typeName = $2;
-					n->constraints = NIL;
+					n->inhcount = 0;
 					n->is_local = true;
+					n->is_not_null = false;
+					n->is_from_type = false;
+					n->storage = 0;
+					n->raw_default = NULL;
+					n->cooked_default = NULL;
+					n->collClause = (CollateClause *) $3;
+					n->collOid = InvalidOid;
+					n->constraints = NIL;
 					$$ = (Node *)n;
 				}
 		;
@@ -9158,13 +9222,6 @@ opt_array_bounds:
 		;
 
 SimpleTypename:
-			SimpleTypenameWithoutCollation opt_collate
-			{
-				$$ = $1;
-				$$->collnames = $2;
-			}
-
-SimpleTypenameWithoutCollation:
 			GenericType								{ $$ = $1; }
 			| Numeric								{ $$ = $1; }
 			| Bit									{ $$ = $1; }
@@ -9632,6 +9689,14 @@ interval_second:
 a_expr:		c_expr									{ $$ = $1; }
 			| a_expr TYPECAST Typename
 					{ $$ = makeTypeCast($1, $3, @2); }
+			| a_expr COLLATE any_name
+				{
+					CollateClause *n = makeNode(CollateClause);
+					n->arg = $1;
+					n->collname = $3;
+					n->location = @2;
+					$$ = (Node *) n;
+				}
 			| a_expr AT TIME ZONE a_expr
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -10199,14 +10264,6 @@ c_expr:		columnref								{ $$ = $1; }
 					r->row_typeid = InvalidOid;	/* not analyzed yet */
 					r->location = @1;
 					$$ = (Node *)r;
-				}
-			| c_expr COLLATE any_name
-				{
-					CollateClause *n = makeNode(CollateClause);
-					n->arg = (Expr *) $1;
-					n->collnames = $3;
-					n->location = @2;
-					$$ = (Node *)n;
 				}
 		;
 
@@ -11787,6 +11844,7 @@ unreserved_keyword:
 			| CLASS
 			| CLOSE
 			| CLUSTER
+			| COLLATION
 			| COMMENT
 			| COMMENTS
 			| COMMIT
@@ -11799,9 +11857,6 @@ unreserved_keyword:
 			| CONVERSION_P
 			| COPY
 			| COST
-			| CREATEDB
-			| CREATEROLE
-			| CREATEUSER
 			| CSV
 			| CURRENT_P
 			| CURSOR
@@ -11881,7 +11936,6 @@ unreserved_keyword:
 			| LOCAL
 			| LOCATION
 			| LOCK_P
-			| LOGIN_P
 			| MAPPING
 			| MATCH
 			| MAXVALUE
@@ -11894,13 +11948,6 @@ unreserved_keyword:
 			| NAMES
 			| NEXT
 			| NO
-			| NOCREATEDB
-			| NOCREATEROLE
-			| NOCREATEUSER
-			| NOINHERIT
-			| NOLOGIN_P
-			| NOREPLICATION_P
-			| NOSUPERUSER
 			| NOTHING
 			| NOTIFY
 			| NOWAIT
@@ -11942,7 +11989,6 @@ unreserved_keyword:
 			| REPEATABLE
 			| REPLACE
 			| REPLICA
-			| REPLICATION_P
 			| RESET
 			| RESTART
 			| RESTRICT
@@ -11977,7 +12023,6 @@ unreserved_keyword:
 			| STORAGE
 			| STRICT_P
 			| STRIP_P
-			| SUPERUSER_P
 			| SYSID
 			| SYSTEM_P
 			| TABLES
@@ -12001,6 +12046,7 @@ unreserved_keyword:
 			| UPDATE
 			| VACUUM
 			| VALID
+			| VALIDATE
 			| VALIDATOR
 			| VALUE_P
 			| VARYING
@@ -12683,15 +12729,6 @@ makeXmlExpr(XmlExprOp op, char *name, List *named_args, List *args,
 	return (Node *) x;
 }
 
-/* parser_init()
- * Initialize to parse one query string
- */
-void
-parser_init(base_yy_extra_type *yyext)
-{
-	yyext->parsetree = NIL;		/* in case grammar forgets to set it */
-}
-
 /*
  * Merge the input and output parameters of a table function.
  */
@@ -12777,6 +12814,57 @@ makeRangeVarFromAnyName(List *names, int position, core_yyscan_t yyscanner)
 	r->location = position;
 
 	return r;
+}
+
+/* Separate Constraint nodes from COLLATE clauses in a ColQualList */
+static void
+SplitColQualList(List *qualList,
+				 List **constraintList, CollateClause **collClause,
+				 core_yyscan_t yyscanner)
+{
+	ListCell   *cell;
+	ListCell   *prev;
+	ListCell   *next;
+
+	*collClause = NULL;
+	prev = NULL;
+	for (cell = list_head(qualList); cell; cell = next)
+	{
+		Node   *n = (Node *) lfirst(cell);
+
+		next = lnext(cell);
+		if (IsA(n, Constraint))
+		{
+			/* keep it in list */
+			prev = cell;
+			continue;
+		}
+		if (IsA(n, CollateClause))
+		{
+			CollateClause *c = (CollateClause *) n;
+
+			if (*collClause)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("multiple COLLATE clauses not allowed"),
+						 parser_errposition(c->location)));
+			*collClause = c;
+		}
+		else
+			elog(ERROR, "unexpected node type %d", (int) n->type);
+		/* remove non-Constraint nodes from qualList */
+		qualList = list_delete_cell(qualList, cell, prev);
+	}
+	*constraintList = qualList;
+}
+
+/* parser_init()
+ * Initialize to parse one query string
+ */
+void
+parser_init(base_yy_extra_type *yyext)
+{
+	yyext->parsetree = NIL;		/* in case grammar forgets to set it */
 }
 
 /*

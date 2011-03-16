@@ -5446,7 +5446,7 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
       <tbody>
        <row>
         <entry><literal>FM</literal> prefix</entry>
-        <entry>fill mode (suppress padding blanks and zeroes)</entry>
+        <entry>fill mode (suppress padding blanks and trailing zeroes)</entry>
         <entry><literal>FMMonth</literal></entry>
        </row>
        <row>
@@ -5812,7 +5812,7 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
       <tbody>
        <row>
         <entry><literal>FM</literal> prefix</entry>
-        <entry>fill mode (suppress padding blanks and zeroes)</entry>
+        <entry>fill mode (suppress padding blanks and trailing zeroes)</entry>
         <entry><literal>FM9999</literal></entry>
        </row>
        <row>
@@ -6605,13 +6605,20 @@ SELECT EXTRACT(CENTURY FROM TIMESTAMP '2001-02-16 20:38:40');
       <term><literal>day</literal></term>
       <listitem>
        <para>
-        The day (of the month) field (1 - 31)
+        For <type>timestamp</type> values, the day (of the month) field
+        (1 - 31) ; for <type>interval</type> values, the number of days
        </para>
 
 <screen>
 SELECT EXTRACT(DAY FROM TIMESTAMP '2001-02-16 20:38:40');
 <lineannotation>Result: </lineannotation><computeroutput>16</computeroutput>
+
+SELECT EXTRACT(DAY FROM INTERVAL '40 days 1 minute');
+<lineannotation>Result: </lineannotation><computeroutput>40</computeroutput>
 </screen>
+
+
+
       </listitem>
      </varlistentry>
 
@@ -6827,7 +6834,7 @@ SELECT EXTRACT(MINUTE FROM TIMESTAMP '2001-02-16 20:38:40');
       <listitem>
        <para>
         For <type>timestamp</type> values, the number of the month
-        within the year (1 - 12) ; for <type>interval</type> values
+        within the year (1 - 12) ; for <type>interval</type> values,
         the number of months, modulo 12 (0 - 11)
        </para>
 
@@ -9688,7 +9695,7 @@ nextval('foo')              <lineannotation>searches search path for <literal>fo
     Before <productname>PostgreSQL</productname> 8.1, the arguments of the
     sequence functions were of type <type>text</>, not <type>regclass</>, and
     the above-described conversion from a text string to an OID value would
-    happen at run time during each call.  For backwards compatibility, this
+    happen at run time during each call.  For backward compatibility, this
     facility still exists, but internally it is now handled as an implicit
     coercion from <type>text</> to <type>regclass</> before the function is
     invoked.
@@ -12959,6 +12966,10 @@ postgres=# SELECT * FROM unnest2(ARRAY[[1,2],[3,4]]);
    </indexterm>
 
    <indexterm>
+    <primary>session_user</primary>
+   </indexterm>
+
+   <indexterm>
     <primary>user</primary>
     <secondary>current</secondary>
    </indexterm>
@@ -13217,21 +13228,6 @@ SET search_path TO <replaceable>schema</> <optional>, <replaceable>schema</>, ..
        <entry>does current user have privilege for schema</entry>
       </row>
       <row>
-       <entry><literal><function>has_server_privilege</function>(<parameter>user</parameter>,
-                                  <parameter>server</parameter>,
-                                  <parameter>privilege</parameter>)</literal>
-       </entry>
-       <entry><type>boolean</type></entry>
-       <entry>does user have privilege for foreign server</entry>
-      </row>
-      <row>
-       <entry><literal><function>has_server_privilege</function>(<parameter>server</parameter>,
-                                  <parameter>privilege</parameter>)</literal>
-       </entry>
-       <entry><type>boolean</type></entry>
-       <entry>does current user have privilege for foreign server</entry>
-      </row>
-      <row>
        <entry><literal><function>has_sequence_privilege</function>(<parameter>user</parameter>,
                                   <parameter>sequence</parameter>,
                                   <parameter>privilege</parameter>)</literal>
@@ -13245,6 +13241,21 @@ SET search_path TO <replaceable>schema</> <optional>, <replaceable>schema</>, ..
        </entry>
        <entry><type>boolean</type></entry>
        <entry>does current user have privilege for sequence</entry>
+      </row>
+      <row>
+       <entry><literal><function>has_server_privilege</function>(<parameter>user</parameter>,
+                                  <parameter>server</parameter>,
+                                  <parameter>privilege</parameter>)</literal>
+       </entry>
+       <entry><type>boolean</type></entry>
+       <entry>does user have privilege for foreign server</entry>
+      </row>
+      <row>
+       <entry><literal><function>has_server_privilege</function>(<parameter>server</parameter>,
+                                  <parameter>privilege</parameter>)</literal>
+       </entry>
+       <entry><type>boolean</type></entry>
+       <entry>does current user have privilege for foreign server</entry>
       </row>
       <row>
        <entry><literal><function>has_table_privilege</function>(<parameter>user</parameter>,
@@ -13649,6 +13660,10 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
    </indexterm>
 
    <indexterm>
+    <primary>pg_describe_object</primary>
+   </indexterm>
+
+   <indexterm>
     <primary>pg_get_constraintdef</primary>
    </indexterm>
 
@@ -13726,9 +13741,14 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
 
      <tbody>
       <row>
-       <entry><literal><function>format_type(<parameter>type_oid</parameter> [, <parameter>typemod</> [, <parameter>collation_oid</> ]])</function></literal></entry>
+       <entry><literal><function>format_type(<parameter>type_oid</parameter>, <parameter>typemod</>)</function></literal></entry>
        <entry><type>text</type></entry>
        <entry>get SQL name of a data type</entry>
+      </row>
+      <row>
+       <entry><literal><function>pg_describe_object(<parameter>catalog_id</parameter>, <parameter>object_id</parameter>, <parameter>object_sub_id</parameter>)</function></literal></entry>
+       <entry><type>text</type></entry>
+       <entry>get description of a database object</entry>
       </row>
       <row>
        <entry><literal><function>pg_get_constraintdef(<parameter>constraint_oid</parameter>)</function></literal></entry>
@@ -13851,11 +13871,6 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
        <entry>get the set of database OIDs that have objects in the tablespace</entry>
       </row>
       <row>
-       <entry><literal><function>pg_describe_object(<parameter>catalog_id</parameter>, <parameter>object_id</parameter>, <parameter>object_sub_id</parameter>)</function>)</literal></entry>
-       <entry><type>text</type></entry>
-       <entry>get description of a database object</entry>
-      </row>
-      <row>
        <entry><literal><function>pg_typeof(<parameter>any</parameter>)</function></literal></entry>
        <entry><type>regtype</type></entry>
        <entry>get the data type of any value</entry>
@@ -13867,9 +13882,7 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
   <para>
    <function>format_type</function> returns the SQL name of a data type that
    is identified by its type OID and possibly a type modifier.  Pass NULL
-   for the type modifier or omit the argument if no specific modifier is known.
-   If a collation is given as third argument, a <literal>COLLATE</> clause
-   followed by a formatted collation name is appended.
+   for the type modifier if no specific modifier is known.
   </para>
 
   <para>
@@ -14045,10 +14058,10 @@ SELECT typlen FROM pg_type WHERE oid = pg_typeof(33);
    </table>
 
    <para>
-    <function>col_description</function> returns the comment for a table column,
-    which is specified by the OID of its table and its column number.
-    <function>obj_description</function> cannot be used for table columns since
-    columns do not have OIDs of their own.
+    <function>col_description</function> returns the comment for a table
+    column, which is specified by the OID of its table and its column number.
+    (<function>obj_description</function> cannot be used for table columns
+    since columns do not have OIDs of their own.)
    </para>
 
    <para>
@@ -14067,8 +14080,8 @@ SELECT typlen FROM pg_type WHERE oid = pg_typeof(33);
     <function>shobj_description</function> is used just like
     <function>obj_description</function> except it is used for retrieving
     comments on shared objects.  Some system catalogs are global to all
-    databases within each cluster and their descriptions are stored globally
-    as well.
+    databases within each cluster, and the descriptions for objects in them
+    are stored globally as well.
    </para>
 
    <indexterm>
@@ -14676,6 +14689,16 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
     </tgroup>
    </table>
 
+   <indexterm>
+    <primary>pg_is_xlog_replay_paused</primary>
+   </indexterm>
+   <indexterm>
+    <primary>pg_xlog_replay_pause</primary>
+   </indexterm>
+   <indexterm>
+    <primary>pg_xlog_replay_resume</primary>
+   </indexterm>
+
    <para>
     The functions shown in <xref
     linkend="functions-recovery-control-table"> control the progress of recovery.
@@ -14798,8 +14821,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         </entry>
        <entry><type>bigint</type></entry>
        <entry>
-        Total disk space used by indexes attached to the table with the
-        specified OID or name
+        Total disk space used by indexes attached to the specified table
        </entry>
       </row>
       <row>
@@ -14810,7 +14832,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
        <entry>
         Disk space used by the specified fork (<literal>'main'</literal>,
         <literal>'fsm'</literal> or <literal>'vm'</>)
-        of the table or index with the specified OID or name
+        of the specified table or index
        </entry>
       </row>
       <row>
@@ -14835,9 +14857,8 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         </entry>
        <entry><type>bigint</type></entry>
        <entry>
-        Disk space used by the table with the specified OID or name,
-        excluding indexes (but including TOAST, free space map, and visibility
-        map)
+        Disk space used by the specified table, excluding indexes
+        (but including TOAST, free space map, and visibility map)
        </entry>
       </row>
       <row>
@@ -14860,7 +14881,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         </entry>
        <entry><type>bigint</type></entry>
        <entry>
-        Total disk space used by the table with the specified OID or name,
+        Total disk space used by the specified table,
         including all indexes and <acronym>TOAST</> data
        </entry>
       </row>
@@ -14921,6 +14942,18 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
    </para>
 
    <para>
+    The functions above that operate on tables or indexes accept a
+    <type>regclass</> argument, which is simply the OID of the table or index
+    in the <structname>pg_class</> system catalog.  You do not have to look up
+    the OID by hand, however, since the <type>regclass</> data type's input
+    converter will do the work for you.  Just write the table name enclosed in
+    single quotes so that it looks like a literal constant.  For compatibility
+    with the handling of ordinary <acronym>SQL</acronym> names, the string
+    will be converted to lower case unless it contains double quotes around
+    the table name.
+   </para>
+
+   <para>
     The functions shown in <xref linkend="functions-admin-dblocation"> assist
     in identifying the specific disk files associated with database objects.
    </para>
@@ -14947,7 +14980,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         </entry>
        <entry><type>oid</type></entry>
        <entry>
-        Filenode number of the relation with the specified OID or name
+        Filenode number of the specified relation
        </entry>
       </row>
       <row>
@@ -14956,7 +14989,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         </entry>
        <entry><type>text</type></entry>
        <entry>
-        File path name of the relation with the specified OID or name
+        File path name of the specified relation
        </entry>
       </row>
      </tbody>
@@ -15067,7 +15100,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
     can be used to read a file in a specified encoding:
 <programlisting>
 SELECT convert_from(pg_read_binary_file('file_in_utf8.txt'), 'UTF8');
-</programlisting>    
+</programlisting>
    </para>
 
    <indexterm>
