@@ -31,7 +31,7 @@ extern Var *makeVar(Index varno,
 		Index varlevelsup);
 
 extern Var *makeVarFromTargetEntry(Index varno,
-								   TargetEntry *tle);
+					   TargetEntry *tle);
 
 extern Var *makeWholeRowVar(RangeTblEntry *rte,
 				Index varno,
@@ -48,12 +48,13 @@ extern FromExpr *makeFromExpr(List *fromlist, Node *quals);
 
 extern Const *makeConst(Oid consttype,
 		  int32 consttypmod,
+		  Oid constcollid,
 		  int constlen,
 		  Datum constvalue,
 		  bool constisnull,
 		  bool constbyval);
 
-extern Const *makeNullConst(Oid consttype, int32 consttypmod);
+extern Const *makeNullConst(Oid consttype, int32 consttypmod, Oid constcollid);
 
 extern Node *makeBoolConst(bool value, bool isnull);
 
@@ -62,7 +63,7 @@ extern Expr *makeBoolExpr(BoolExprType boolop, List *args, int location);
 extern Alias *makeAlias(const char *aliasname, List *colnames);
 
 extern RelabelType *makeRelabelType(Expr *arg, Oid rtype, int32 rtypmod,
-				CoercionForm rformat);
+				Oid rcollid, CoercionForm rformat);
 
 extern RangeVar *makeRangeVar(char *schemaname, char *relname, int location);
 
@@ -70,8 +71,8 @@ extern TypeName *makeTypeName(char *typnam);
 extern TypeName *makeTypeNameFromNameList(List *names);
 extern TypeName *makeTypeNameFromOid(Oid typeOid, int32 typmod);
 
-extern FuncExpr *makeFuncExpr(Oid funcid, Oid rettype,
-			 List *args, Oid collid, CoercionForm fformat);
+extern FuncExpr *makeFuncExpr(Oid funcid, Oid rettype, List *args,
+			 Oid funccollid, Oid inputcollid, CoercionForm fformat);
 
 extern DefElem *makeDefElem(char *name, Node *arg);
 extern DefElem *makeDefElemExtended(char *nameSpace, char *name, Node *arg,

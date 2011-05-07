@@ -1070,9 +1070,9 @@ RelationInitIndexAccessInfo(Relation relation)
 		MemoryContextAllocZero(indexcxt, natts * sizeof(int16));
 
 	/*
-	 * indcollation cannot be referenced directly through the C struct, because it
-	 * comes after the variable-width indkey field.  Must extract the datum
-	 * the hard way...
+	 * indcollation cannot be referenced directly through the C struct,
+	 * because it comes after the variable-width indkey field.	Must extract
+	 * the datum the hard way...
 	 */
 	indcollDatum = fastgetattr(relation->rd_indextuple,
 							   Anum_pg_index_indcollation,
@@ -1096,7 +1096,7 @@ RelationInitIndexAccessInfo(Relation relation)
 
 	/*
 	 * Fill the support procedure OID array, as well as the info about
-	 * opfamilies and opclass input types.  (aminfo and supportinfo are left
+	 * opfamilies and opclass input types.	(aminfo and supportinfo are left
 	 * as zeroes, and are filled on-the-fly when used)
 	 */
 	IndexSupportInitialize(indclass, relation->rd_support,
@@ -1651,6 +1651,12 @@ RelationClose(Relation relation)
  *	We assume that at the time we are called, we have at least AccessShareLock
  *	on the target index.  (Note: in the calls from RelationClearRelation,
  *	this is legitimate because we know the rel has positive refcount.)
+ *
+ *	If the target index is an index on pg_class or pg_index, we'd better have
+ *	previously gotten at least AccessShareLock on its underlying catalog,
+ *	else we are at risk of deadlock against someone trying to exclusive-lock
+ *	the heap and index in that order.  This is ensured in current usage by
+ *	only applying this to indexes being opened or having positive refcount.
  */
 static void
 RelationReloadIndexInfo(Relation relation)
@@ -3610,6 +3616,10 @@ RelationGetIndexPredicate(Relation relation)
  *
  * Attribute numbers are offset by FirstLowInvalidHeapAttributeNumber so that
  * we can include system attributes (e.g., OID) in the bitmap representation.
+ *
+ * Caller had better hold at least RowExclusiveLock on the target relation
+ * to ensure that it has a stable set of indexes.  This also makes it safe
+ * (deadlock-free) for us to take locks on the relation's indexes.
  *
  * The returned result is palloc'd in the caller's memory context and should
  * be bms_free'd when not needed anymore.

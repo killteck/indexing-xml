@@ -466,7 +466,6 @@ _bt_log_reuse_page(Relation rel, BlockNumber blkno, TransactionId latestRemovedX
 
 	/* XLOG stuff */
 	{
-		XLogRecPtr	recptr;
 		XLogRecData rdata[1];
 		xl_btree_reuse_page xlrec_reuse;
 
@@ -478,7 +477,7 @@ _bt_log_reuse_page(Relation rel, BlockNumber blkno, TransactionId latestRemovedX
 		rdata[0].buffer = InvalidBuffer;
 		rdata[0].next = NULL;
 
-		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE, rdata);
+		XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE, rdata);
 
 		/*
 		 * We don't do PageSetLSN or PageSetTLI here because we're about
@@ -1268,9 +1267,9 @@ _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
 
 	/*
 	 * Check that the parent-page index items we're about to delete/overwrite
-	 * contain what we expect.  This can fail if the index has become
-	 * corrupt for some reason.  We want to throw any error before entering
-	 * the critical section --- otherwise it'd be a PANIC.
+	 * contain what we expect.	This can fail if the index has become corrupt
+	 * for some reason.  We want to throw any error before entering the
+	 * critical section --- otherwise it'd be a PANIC.
 	 *
 	 * The test on the target item is just an Assert because _bt_getstackbuf
 	 * should have guaranteed it has the expected contents.  The test on the

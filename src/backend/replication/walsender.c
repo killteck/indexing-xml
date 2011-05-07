@@ -66,14 +66,16 @@
 WalSndCtlData *WalSndCtl = NULL;
 
 /* My slot in the shared memory array */
-WalSnd *MyWalSnd = NULL;
+WalSnd	   *MyWalSnd = NULL;
 
 /* Global state */
 bool		am_walsender = false;		/* Am I a walsender process ? */
 
 /* User-settable parameters for walsender */
 int			max_wal_senders = 0;	/* the maximum number of concurrent walsenders */
-int			WalSndDelay = 1000;	/* max sleep time between some actions */
+int			WalSndDelay = 1000; /* max sleep time between some actions */
+int			replication_timeout = 60 * 1000;	/* maximum time to send one
+												 * WAL data message */
 
 /*
  * These variables are used similarly to openLogFile/Id/Seg/Off,
@@ -95,6 +97,11 @@ static XLogRecPtr sentPtr = {0, 0};
  */
 static StringInfoData reply_message;
 
+/*
+ * Timestamp of the last receipt of the reply from the standby.
+ */
+static TimestampTz last_reply_timestamp;
+
 /* Flags set by signal handlers for later service in main loop */
 static volatile sig_atomic_t got_SIGHUP = false;
 volatile sig_atomic_t walsender_shutdown_requested = false;
@@ -113,9 +120,9 @@ static int	WalSndLoop(void);
 static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
-static bool XLogSend(char *msgbuf, bool *caughtup);
+static void XLogSend(char *msgbuf, bool *caughtup);
 static void IdentifySystem(void);
-static void StartReplication(StartReplicationCmd * cmd);
+static void StartReplication(StartReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
@@ -275,8 +282,8 @@ IdentifySystem(void)
 	XLogRecPtr	logptr;
 
 	/*
-	 * Reply with a result set with one row, three columns. First col is system
-	 * ID, second is timeline ID, and third is current xlog location.
+	 * Reply with a result set with one row, three columns. First col is
+	 * system ID, second is timeline ID, and third is current xlog location.
 	 */
 
 	snprintf(sysid, sizeof(sysid), UINT64_FORMAT,
@@ -342,19 +349,19 @@ IdentifySystem(void)
  * START_REPLICATION
  */
 static void
-StartReplication(StartReplicationCmd * cmd)
+StartReplication(StartReplicationCmd *cmd)
 {
 	StringInfoData buf;
 
 	/*
-	 * Let postmaster know that we're streaming. Once we've declared us as
-	 * a WAL sender process, postmaster will let us outlive the bgwriter and
-	 * kill us last in the shutdown sequence, so we get a chance to stream
-	 * all remaining WAL at shutdown, including the shutdown checkpoint.
-	 * Note that there's no going back, and we mustn't write any WAL records
-	 * after this.
+	 * Let postmaster know that we're streaming. Once we've declared us as a
+	 * WAL sender process, postmaster will let us outlive the bgwriter and
+	 * kill us last in the shutdown sequence, so we get a chance to stream all
+	 * remaining WAL at shutdown, including the shutdown checkpoint. Note that
+	 * there's no going back, and we mustn't write any WAL records after this.
 	 */
 	MarkPostmasterChildWalSender();
+	SendPostmasterSignal(PMSIGNAL_ADVANCE_STATE_MACHINE);
 
 	/*
 	 * Check that we're logging enough information in the WAL for
@@ -376,8 +383,8 @@ StartReplication(StartReplicationCmd * cmd)
 	 * For some applications, for example, synchronous replication, it is
 	 * important to have a clear state for this initial catchup mode, so we
 	 * can trigger actions when we change streaming state later. We may stay
-	 * in this state for a long time, which is exactly why we want to be
-	 * able to monitor whether or not we are still here.
+	 * in this state for a long time, which is exactly why we want to be able
+	 * to monitor whether or not we are still here.
 	 */
 	WalSndSetState(WALSNDSTATE_CATCHUP);
 
@@ -469,6 +476,7 @@ ProcessRepliesIfAny(void)
 {
 	unsigned char firstchar;
 	int			r;
+	int			received = false;
 
 	for (;;)
 	{
@@ -484,7 +492,7 @@ ProcessRepliesIfAny(void)
 		if (r == 0)
 		{
 			/* no data available without blocking */
-			return;
+			break;
 		}
 
 		/* Handle the very limited subset of commands expected in this phase */
@@ -495,6 +503,7 @@ ProcessRepliesIfAny(void)
 				 */
 			case 'd':
 				ProcessStandbyMessage();
+				received = true;
 				break;
 
 				/*
@@ -506,10 +515,16 @@ ProcessRepliesIfAny(void)
 			default:
 				ereport(FATAL,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
-						 errmsg("invalid standby closing message type %d",
+						 errmsg("invalid standby message type %d",
 								firstchar)));
 		}
 	}
+
+	/*
+	 * Save the last reply timestamp if we've received at least one reply.
+	 */
+	if (received)
+		last_reply_timestamp = GetCurrentTimestamp();
 }
 
 /*
@@ -518,7 +533,7 @@ ProcessRepliesIfAny(void)
 static void
 ProcessStandbyMessage(void)
 {
-	char msgtype;
+	char		msgtype;
 
 	resetStringInfo(&reply_message);
 
@@ -534,8 +549,7 @@ ProcessStandbyMessage(void)
 	}
 
 	/*
-	 * Check message type from the first byte. At the moment, there is only
-	 * one type.
+	 * Check message type from the first byte.
 	 */
 	msgtype = pq_getmsgbyte(&reply_message);
 
@@ -563,7 +577,7 @@ ProcessStandbyMessage(void)
 static void
 ProcessStandbyReplyMessage(void)
 {
-	StandbyReplyMessage	reply;
+	StandbyReplyMessage reply;
 
 	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyReplyMessage));
 
@@ -573,8 +587,8 @@ ProcessStandbyReplyMessage(void)
 		 reply.apply.xlogid, reply.apply.xrecoff);
 
 	/*
-	 * Update shared state for this WalSender process
-	 * based on reply data from standby.
+	 * Update shared state for this WalSender process based on reply data from
+	 * standby.
 	 */
 	{
 		/* use volatile pointer to prevent code rearrangement */
@@ -596,7 +610,7 @@ ProcessStandbyReplyMessage(void)
 static void
 ProcessStandbyHSFeedbackMessage(void)
 {
-	StandbyHSFeedbackMessage	reply;
+	StandbyHSFeedbackMessage reply;
 	TransactionId newxmin = InvalidTransactionId;
 
 	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyHSFeedbackMessage));
@@ -606,22 +620,21 @@ ProcessStandbyHSFeedbackMessage(void)
 		 reply.epoch);
 
 	/*
-	 * Update the WalSender's proc xmin to allow it to be visible
-	 * to snapshots. This will hold back the removal of dead rows
-	 * and thereby prevent the generation of cleanup conflicts
-	 * on the standby server.
+	 * Update the WalSender's proc xmin to allow it to be visible to
+	 * snapshots. This will hold back the removal of dead rows and thereby
+	 * prevent the generation of cleanup conflicts on the standby server.
 	 */
 	if (TransactionIdIsValid(reply.xmin))
 	{
-		TransactionId	nextXid;
-		uint32			nextEpoch;
-		bool			epochOK = false;
+		TransactionId nextXid;
+		uint32		nextEpoch;
+		bool		epochOK = false;
 
 		GetNextXidAndEpoch(&nextXid, &nextEpoch);
 
 		/*
-		 * Epoch of oldestXmin should be same as standby or
-		 * if the counter has wrapped, then one less than reply.
+		 * Epoch of oldestXmin should be same as standby or if the counter has
+		 * wrapped, then one less than reply.
 		 */
 		if (reply.xmin <= nextXid)
 		{
@@ -643,6 +656,7 @@ ProcessStandbyHSFeedbackMessage(void)
 			if (!TransactionIdIsValid(MyProc->xmin))
 			{
 				TransactionId oldestXmin = GetOldestXmin(true, true);
+
 				if (TransactionIdPrecedes(oldestXmin, reply.xmin))
 					newxmin = reply.xmin;
 				else
@@ -653,7 +667,7 @@ ProcessStandbyHSFeedbackMessage(void)
 				if (TransactionIdPrecedes(MyProc->xmin, reply.xmin))
 					newxmin = reply.xmin;
 				else
-					newxmin = MyProc->xmin; /* stay the same */
+					newxmin = MyProc->xmin;		/* stay the same */
 			}
 		}
 	}
@@ -689,6 +703,9 @@ WalSndLoop(void)
 	 */
 	initStringInfo(&reply_message);
 
+	/* Initialize the last reply timestamp */
+	last_reply_timestamp = GetCurrentTimestamp();
+
 	/* Loop forever, unless we get an error */
 	for (;;)
 	{
@@ -707,19 +724,6 @@ WalSndLoop(void)
 			SyncRepInitConfig();
 		}
 
-		/*
-		 * When SIGUSR2 arrives, we send all outstanding logs up to the
-		 * shutdown checkpoint record (i.e., the latest record) and exit.
-		 */
-		if (walsender_ready_to_stop)
-		{
-			if (!XLogSend(output_message, &caughtup))
-				break;
-			ProcessRepliesIfAny();
-			if (caughtup)
-				walsender_shutdown_requested = true;
-		}
-
 		/* Normal exit from the walsender is here */
 		if (walsender_shutdown_requested)
 		{
@@ -731,40 +735,93 @@ WalSndLoop(void)
 		}
 
 		/*
-		 * If we had sent all accumulated WAL in last round, nap for the
-		 * configured time before retrying.
+		 * If we don't have any pending data in the output buffer, try to send
+		 * some more.
 		 */
-		if (caughtup)
+		if (!pq_is_send_pending())
 		{
+			XLogSend(output_message, &caughtup);
+
 			/*
 			 * Even if we wrote all the WAL that was available when we started
 			 * sending, more might have arrived while we were sending this
 			 * batch. We had the latch set while sending, so we have not
-			 * received any signals from that time. Let's arm the latch
-			 * again, and after that check that we're still up-to-date.
+			 * received any signals from that time. Let's arm the latch again,
+			 * and after that check that we're still up-to-date.
 			 */
-			ResetLatch(&MyWalSnd->latch);
-
-			if (!XLogSend(output_message, &caughtup))
-				break;
-			if (caughtup && !got_SIGHUP && !walsender_ready_to_stop && !walsender_shutdown_requested)
+			if (caughtup && !pq_is_send_pending())
 			{
-				/*
-				 * XXX: We don't really need the periodic wakeups anymore,
-				 * WaitLatchOrSocket should reliably wake up as soon as
-				 * something interesting happens.
-				 */
+				ResetLatch(&MyWalSnd->latch);
 
-				/* Sleep */
-				WaitLatchOrSocket(&MyWalSnd->latch, MyProcPort->sock,
-								  WalSndDelay * 1000L);
+				XLogSend(output_message, &caughtup);
 			}
 		}
-		else
+
+		/* Flush pending output to the client */
+		if (pq_flush_if_writable() != 0)
+			break;
+
+		/*
+		 * When SIGUSR2 arrives, we send any outstanding logs up to the
+		 * shutdown checkpoint record (i.e., the latest record) and exit.
+		 */
+		if (walsender_ready_to_stop && !pq_is_send_pending())
 		{
-			/* Attempt to send the log once every loop */
-			if (!XLogSend(output_message, &caughtup))
+			XLogSend(output_message, &caughtup);
+			ProcessRepliesIfAny();
+			if (caughtup && !pq_is_send_pending())
+				walsender_shutdown_requested = true;
+		}
+
+		if ((caughtup || pq_is_send_pending()) &&
+			!got_SIGHUP &&
+			!walsender_shutdown_requested)
+		{
+			TimestampTz finish_time = 0;
+			long		sleeptime;
+
+			/* Reschedule replication timeout */
+			if (replication_timeout > 0)
+			{
+				long		secs;
+				int			usecs;
+
+				finish_time = TimestampTzPlusMilliseconds(last_reply_timestamp,
+														replication_timeout);
+				TimestampDifference(GetCurrentTimestamp(),
+									finish_time, &secs, &usecs);
+				sleeptime = secs * 1000 + usecs / 1000;
+				if (WalSndDelay < sleeptime)
+					sleeptime = WalSndDelay;
+			}
+			else
+			{
+				/*
+				 * XXX: Without timeout, we don't really need the periodic
+				 * wakeups anymore, WaitLatchOrSocket should reliably wake up
+				 * as soon as something interesting happens.
+				 */
+				sleeptime = WalSndDelay;
+			}
+
+			/* Sleep */
+			WaitLatchOrSocket(&MyWalSnd->latch, MyProcPort->sock,
+							  true, pq_is_send_pending(),
+							  sleeptime * 1000L);
+
+			/* Check for replication timeout */
+			if (replication_timeout > 0 &&
+				GetCurrentTimestamp() >= finish_time)
+			{
+				/*
+				 * Since typically expiration of replication timeout means
+				 * communication problem, we don't send the error message to
+				 * the standby.
+				 */
+				ereport(COMMERROR,
+						(errmsg("terminating walsender process due to replication timeout")));
 				break;
+			}
 		}
 
 		/*
@@ -772,14 +829,14 @@ WalSndLoop(void)
 		 * This is an important state change for users, since before this
 		 * point data loss might occur if the primary dies and we need to
 		 * failover to the standby. The state change is also important for
-		 * synchronous replication, since commits that started to wait at
-		 * that point might wait for some time.
+		 * synchronous replication, since commits that started to wait at that
+		 * point might wait for some time.
 		 */
 		if (MyWalSnd->state == WALSNDSTATE_CATCHUP && caughtup)
 		{
 			ereport(DEBUG1,
 					(errmsg("standby \"%s\" has now caught up with primary",
-									application_name)));
+							application_name)));
 			WalSndSetState(WALSNDSTATE_STREAMING);
 		}
 
@@ -994,7 +1051,8 @@ XLogRead(char *buf, XLogRecPtr recptr, Size nbytes)
 
 /*
  * Read up to MAX_SEND_SIZE bytes of WAL that's been flushed to disk,
- * but not yet sent to the client, and send it.
+ * but not yet sent to the client, and buffer it in the libpq output
+ * buffer.
  *
  * msgbuf is a work area in which the output message is constructed.  It's
  * passed in just so we can avoid re-palloc'ing the buffer on each cycle.
@@ -1002,10 +1060,9 @@ XLogRead(char *buf, XLogRecPtr recptr, Size nbytes)
  *
  * If there is no unsent WAL remaining, *caughtup is set to true, otherwise
  * *caughtup is set to false.
- *
- * Returns true if OK, false if trouble.
+
  */
-static bool
+static void
 XLogSend(char *msgbuf, bool *caughtup)
 {
 	XLogRecPtr	SendRqstPtr;
@@ -1028,7 +1085,7 @@ XLogSend(char *msgbuf, bool *caughtup)
 	if (XLByteLE(SendRqstPtr, sentPtr))
 	{
 		*caughtup = true;
-		return true;
+		return;
 	}
 
 	/*
@@ -1100,11 +1157,7 @@ XLogSend(char *msgbuf, bool *caughtup)
 
 	memcpy(msgbuf + 1, &msghdr, sizeof(WalDataMessageHeader));
 
-	pq_putmessage('d', msgbuf, 1 + sizeof(WalDataMessageHeader) + nbytes);
-
-	/* Flush pending output to the client */
-	if (pq_flush())
-		return false;
+	pq_putmessage_noblock('d', msgbuf, 1 + sizeof(WalDataMessageHeader) + nbytes);
 
 	sentPtr = endptr;
 
@@ -1128,7 +1181,7 @@ XLogSend(char *msgbuf, bool *caughtup)
 		set_ps_display(activitymsg, false);
 	}
 
-	return true;
+	return;
 }
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
@@ -1264,7 +1317,7 @@ WalSndShmemInit(void)
 void
 WalSndWakeup(void)
 {
-	int		i;
+	int			i;
 
 	for (i = 0; i < max_wal_senders; i++)
 		SetLatch(&WalSndCtl->walsnds[i].latch);
@@ -1297,13 +1350,13 @@ WalSndGetStateString(WalSndState state)
 	switch (state)
 	{
 		case WALSNDSTATE_STARTUP:
-			return "STARTUP";
+			return "startup";
 		case WALSNDSTATE_BACKUP:
-			return "BACKUP";
+			return "backup";
 		case WALSNDSTATE_CATCHUP:
-			return "CATCHUP";
+			return "catchup";
 		case WALSNDSTATE_STREAMING:
-			return "STREAMING";
+			return "streaming";
 	}
 	return "UNKNOWN";
 }
@@ -1316,16 +1369,16 @@ WalSndGetStateString(WalSndState state)
 Datum
 pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_WAL_SENDERS_COLS 	8
-	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-	TupleDesc			tupdesc;
-	Tuplestorestate	   *tupstore;
-	MemoryContext		per_query_ctx;
-	MemoryContext		oldcontext;
-	int					*sync_priority;
-	int					priority = 0;
-	int					sync_standby = -1;
-	int					i;
+#define PG_STAT_GET_WAL_SENDERS_COLS	8
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	int		   *sync_priority;
+	int			priority = 0;
+	int			sync_standby = -1;
+	int			i;
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1353,9 +1406,9 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 	MemoryContextSwitchTo(oldcontext);
 
 	/*
-	 * Get the priorities of sync standbys all in one go, to minimise
-	 * lock acquisitions and to allow us to evaluate who is the current
-	 * sync standby. This code must match the code in SyncRepReleaseWaiters().
+	 * Get the priorities of sync standbys all in one go, to minimise lock
+	 * acquisitions and to allow us to evaluate who is the current sync
+	 * standby. This code must match the code in SyncRepReleaseWaiters().
 	 */
 	sync_priority = palloc(sizeof(int) * max_wal_senders);
 	LWLockAcquire(SyncRepLock, LW_SHARED);
@@ -1389,7 +1442,7 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 		XLogRecPtr	write;
 		XLogRecPtr	flush;
 		XLogRecPtr	apply;
-		WalSndState	state;
+		WalSndState state;
 		Datum		values[PG_STAT_GET_WAL_SENDERS_COLS];
 		bool		nulls[PG_STAT_GET_WAL_SENDERS_COLS];
 
@@ -1410,8 +1463,8 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 		if (!superuser())
 		{
 			/*
-			 * Only superusers can see details. Other users only get
-			 * the pid value to know it's a walsender, but no details.
+			 * Only superusers can see details. Other users only get the pid
+			 * value to know it's a walsender, but no details.
 			 */
 			MemSet(&nulls[1], true, PG_STAT_GET_WAL_SENDERS_COLS - 1);
 		}
@@ -1432,7 +1485,7 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 			if (flush.xlogid == 0 && flush.xrecoff == 0)
 				nulls[4] = true;
 			snprintf(location, sizeof(location), "%X/%X",
-					flush.xlogid, flush.xrecoff);
+					 flush.xlogid, flush.xrecoff);
 			values[4] = CStringGetTextDatum(location);
 
 			if (apply.xlogid == 0 && apply.xrecoff == 0)
@@ -1444,15 +1497,15 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 			values[6] = Int32GetDatum(sync_priority[i]);
 
 			/*
-			 * More easily understood version of standby state.
-			 * This is purely informational, not different from priority.
+			 * More easily understood version of standby state. This is purely
+			 * informational, not different from priority.
 			 */
 			if (sync_priority[i] == 0)
-				values[7] = CStringGetTextDatum("ASYNC");
+				values[7] = CStringGetTextDatum("async");
 			else if (i == sync_standby)
-				values[7] = CStringGetTextDatum("SYNC");
+				values[7] = CStringGetTextDatum("sync");
 			else
-				values[7] = CStringGetTextDatum("POTENTIAL");
+				values[7] = CStringGetTextDatum("potential");
 		}
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);

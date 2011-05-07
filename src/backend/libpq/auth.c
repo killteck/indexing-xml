@@ -60,7 +60,11 @@ static int	recv_and_check_password_packet(Port *port);
 /* Standard TCP port number for Ident service.	Assigned by IANA */
 #define IDENT_PORT 113
 
-static int	authident(hbaPort *port);
+static int	ident_inet(hbaPort *port);
+
+#ifdef HAVE_UNIX_SOCKETS
+static int	auth_peer(hbaPort *port);
+#endif
 
 
 /*----------------------------------------------------------------
@@ -179,7 +183,7 @@ static int	pg_GSS_recvauth(Port *port);
  *----------------------------------------------------------------
  */
 #ifdef ENABLE_SSPI
-typedef		SECURITY_STATUS
+typedef SECURITY_STATUS
 			(WINAPI * QUERY_SECURITY_CONTEXT_TOKEN_FN) (
 													   PCtxtHandle, void **);
 static int	pg_SSPI_recvauth(Port *port);
@@ -268,6 +272,9 @@ auth_failed(Port *port, int status)
 			break;
 		case uaIdent:
 			errstr = gettext_noop("Ident authentication failed for user \"%s\"");
+			break;
+		case uaPeer:
+			errstr = gettext_noop("Peer authentication failed for user \"%s\"");
 			break;
 		case uaPassword:
 		case uaMD5:
@@ -506,11 +513,12 @@ ClientAuthentication(Port *port)
 #endif
 			break;
 
-		case uaIdent:
+		case uaPeer:
+#ifdef HAVE_UNIX_SOCKETS
 
 			/*
-			 * If we are doing ident on unix-domain sockets, use SCM_CREDS
-			 * only if it is defined and SO_PEERCRED isn't.
+			 * If we are doing peer on unix-domain sockets, use SCM_CREDS only
+			 * if it is defined and SO_PEERCRED isn't.
 			 */
 #if !defined(HAVE_GETPEEREID) && !defined(SO_PEERCRED) && \
 	(defined(HAVE_STRUCT_CMSGCRED) || defined(HAVE_STRUCT_FCRED) || \
@@ -535,7 +543,14 @@ ClientAuthentication(Port *port)
 				sendAuthRequest(port, AUTH_REQ_SCM_CREDS);
 			}
 #endif
-			status = authident(port);
+			status = auth_peer(port);
+#else							/* HAVE_UNIX_SOCKETS */
+			Assert(false);
+#endif
+			break;
+
+		case uaIdent:
+			status = ident_inet(port);
 			break;
 
 		case uaMD5:
@@ -584,7 +599,7 @@ ClientAuthentication(Port *port)
 	}
 
 	if (ClientAuthentication_hook)
-		(*ClientAuthentication_hook)(port, status);
+		(*ClientAuthentication_hook) (port, status);
 
 	if (status == STATUS_OK)
 		sendAuthRequest(port, AUTH_REQ_OK);
@@ -830,7 +845,7 @@ pg_krb5_recvauth(Port *port)
 		return ret;
 
 	retval = krb5_recvauth(pg_krb5_context, &auth_context,
-						   (krb5_pointer) & port->sock, pg_krb_srvnam,
+						   (krb5_pointer) &port->sock, pg_krb_srvnam,
 						   pg_krb5_server, 0, pg_krb5_keytab, &ticket);
 	if (retval)
 	{
@@ -942,15 +957,14 @@ static void
 pg_GSS_error(int severity, char *errmsg, OM_uint32 maj_stat, OM_uint32 min_stat)
 {
 	gss_buffer_desc gmsg;
-	OM_uint32	lmaj_s,
-				lmin_s,
+	OM_uint32	lmin_s,
 				msg_ctx;
 	char		msg_major[128],
 				msg_minor[128];
 
 	/* Fetch major status message */
 	msg_ctx = 0;
-	lmaj_s = gss_display_status(&lmin_s, maj_stat, GSS_C_GSS_CODE,
+	gss_display_status(&lmin_s, maj_stat, GSS_C_GSS_CODE,
 								GSS_C_NO_OID, &msg_ctx, &gmsg);
 	strlcpy(msg_major, gmsg.value, sizeof(msg_major));
 	gss_release_buffer(&lmin_s, &gmsg);
@@ -966,7 +980,7 @@ pg_GSS_error(int severity, char *errmsg, OM_uint32 maj_stat, OM_uint32 min_stat)
 
 	/* Fetch mechanism minor status message */
 	msg_ctx = 0;
-	lmaj_s = gss_display_status(&lmin_s, min_stat, GSS_C_MECH_CODE,
+	gss_display_status(&lmin_s, min_stat, GSS_C_MECH_CODE,
 								GSS_C_NO_OID, &msg_ctx, &gmsg);
 	strlcpy(msg_minor, gmsg.value, sizeof(msg_minor));
 	gss_release_buffer(&lmin_s, &gmsg);
@@ -1599,11 +1613,12 @@ interpret_ident_response(const char *ident_response,
  *
  *	But iff we're unable to get the information from ident, return false.
  */
-static bool
-ident_inet(const SockAddr remote_addr,
-		   const SockAddr local_addr,
-		   char *ident_user)
+static int
+ident_inet(hbaPort *port)
 {
+	const SockAddr remote_addr = port->raddr;
+	const SockAddr local_addr = port->laddr;
+	char		ident_user[IDENT_USERNAME_MAX + 1];
 	pgsocket	sock_fd,		/* File descriptor for socket on which we talk
 								 * to Ident */
 				rc;				/* Return code from a locally called function */
@@ -1646,7 +1661,7 @@ ident_inet(const SockAddr remote_addr,
 	{
 		if (ident_serv)
 			pg_freeaddrinfo_all(hints.ai_family, ident_serv);
-		return false;			/* we don't expect this to happen */
+		return STATUS_ERROR;	/* we don't expect this to happen */
 	}
 
 	hints.ai_flags = AI_NUMERICHOST;
@@ -1662,7 +1677,7 @@ ident_inet(const SockAddr remote_addr,
 	{
 		if (la)
 			pg_freeaddrinfo_all(hints.ai_family, la);
-		return false;			/* we don't expect this to happen */
+		return STATUS_ERROR;	/* we don't expect this to happen */
 	}
 
 	sock_fd = socket(ident_serv->ai_family, ident_serv->ai_socktype,
@@ -1751,7 +1766,11 @@ ident_inet_done:
 		closesocket(sock_fd);
 	pg_freeaddrinfo_all(remote_addr.addr.ss_family, ident_serv);
 	pg_freeaddrinfo_all(local_addr.addr.ss_family, la);
-	return ident_return;
+
+	if (ident_return)
+		/* Success! Check the usermap */
+		return check_usermap(port->hba->usermap, port->user_name, ident_user, false);
+	return STATUS_ERROR;
 }
 
 /*
@@ -1763,9 +1782,11 @@ ident_inet_done:
  */
 #ifdef HAVE_UNIX_SOCKETS
 
-static bool
-ident_unix(int sock, char *ident_user)
+static int
+auth_peer(hbaPort *port)
 {
+	char		ident_user[IDENT_USERNAME_MAX + 1];
+
 #if defined(HAVE_GETPEEREID)
 	/* OpenBSD style:  */
 	uid_t		uid;
@@ -1773,13 +1794,13 @@ ident_unix(int sock, char *ident_user)
 	struct passwd *pass;
 
 	errno = 0;
-	if (getpeereid(sock, &uid, &gid) != 0)
+	if (getpeereid(port->sock, &uid, &gid) != 0)
 	{
 		/* We didn't get a valid credentials struct. */
 		ereport(LOG,
 				(errcode_for_socket_access(),
 				 errmsg("could not get peer credentials: %m")));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	pass = getpwuid(uid);
@@ -1789,12 +1810,10 @@ ident_unix(int sock, char *ident_user)
 		ereport(LOG,
 				(errmsg("local user with ID %d does not exist",
 						(int) uid)));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	strlcpy(ident_user, pass->pw_name, IDENT_USERNAME_MAX + 1);
-
-	return true;
 #elif defined(SO_PEERCRED)
 	/* Linux style: use getsockopt(SO_PEERCRED) */
 	struct ucred peercred;
@@ -1802,14 +1821,14 @@ ident_unix(int sock, char *ident_user)
 	struct passwd *pass;
 
 	errno = 0;
-	if (getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &peercred, &so_len) != 0 ||
+	if (getsockopt(port->sock, SOL_SOCKET, SO_PEERCRED, &peercred, &so_len) != 0 ||
 		so_len != sizeof(peercred))
 	{
 		/* We didn't get a valid credentials struct. */
 		ereport(LOG,
 				(errcode_for_socket_access(),
 				 errmsg("could not get peer credentials: %m")));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	pass = getpwuid(peercred.uid);
@@ -1819,12 +1838,10 @@ ident_unix(int sock, char *ident_user)
 		ereport(LOG,
 				(errmsg("local user with ID %d does not exist",
 						(int) peercred.uid)));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	strlcpy(ident_user, pass->pw_name, IDENT_USERNAME_MAX + 1);
-
-	return true;
 #elif defined(HAVE_GETPEERUCRED)
 	/* Solaris > 10 */
 	uid_t		uid;
@@ -1832,12 +1849,12 @@ ident_unix(int sock, char *ident_user)
 	ucred_t    *ucred;
 
 	ucred = NULL;				/* must be initialized to NULL */
-	if (getpeerucred(sock, &ucred) == -1)
+	if (getpeerucred(port->sock, &ucred) == -1)
 	{
 		ereport(LOG,
 				(errcode_for_socket_access(),
 				 errmsg("could not get peer credentials: %m")));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	if ((uid = ucred_geteuid(ucred)) == -1)
@@ -1845,7 +1862,7 @@ ident_unix(int sock, char *ident_user)
 		ereport(LOG,
 				(errcode_for_socket_access(),
 		   errmsg("could not get effective UID from peer credentials: %m")));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	ucred_free(ucred);
@@ -1856,12 +1873,10 @@ ident_unix(int sock, char *ident_user)
 		ereport(LOG,
 				(errmsg("local user with ID %d does not exist",
 						(int) uid)));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	strlcpy(ident_user, pass->pw_name, IDENT_USERNAME_MAX + 1);
-
-	return true;
 #elif defined(HAVE_STRUCT_CMSGCRED) || defined(HAVE_STRUCT_FCRED) || (defined(HAVE_STRUCT_SOCKCRED) && defined(LOCAL_CREDS))
 	struct msghdr msg;
 
@@ -1906,14 +1921,14 @@ ident_unix(int sock, char *ident_user)
 	iov.iov_base = &buf;
 	iov.iov_len = 1;
 
-	if (recvmsg(sock, &msg, 0) < 0 ||
+	if (recvmsg(port->sock, &msg, 0) < 0 ||
 		cmsg->cmsg_len < sizeof(cmsgmem) ||
 		cmsg->cmsg_type != SCM_CREDS)
 	{
 		ereport(LOG,
 				(errcode_for_socket_access(),
 				 errmsg("could not get peer credentials: %m")));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	cred = (Cred *) CMSG_DATA(cmsg);
@@ -1925,59 +1940,21 @@ ident_unix(int sock, char *ident_user)
 		ereport(LOG,
 				(errmsg("local user with ID %d does not exist",
 						(int) cred->cruid)));
-		return false;
+		return STATUS_ERROR;
 	}
 
 	strlcpy(ident_user, pw->pw_name, IDENT_USERNAME_MAX + 1);
-
-	return true;
 #else
 	ereport(LOG,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 			 errmsg("Ident authentication is not supported on local connections on this platform")));
 
-	return false;
+	return STATUS_ERROR;
 #endif
-}
-#endif   /* HAVE_UNIX_SOCKETS */
-
-
-/*
- *	Determine the username of the initiator of the connection described
- *	by "port".	Then look in the usermap file under the usermap
- *	port->hba->usermap and see if that user is equivalent to Postgres user
- *	port->user.
- *
- *	Return STATUS_OK if yes, STATUS_ERROR if no match (or couldn't get info).
- */
-static int
-authident(hbaPort *port)
-{
-	char		ident_user[IDENT_USERNAME_MAX + 1];
-
-	switch (port->raddr.addr.ss_family)
-	{
-		case AF_INET:
-#ifdef	HAVE_IPV6
-		case AF_INET6:
-#endif
-			if (!ident_inet(port->raddr, port->laddr, ident_user))
-				return STATUS_ERROR;
-			break;
-
-#ifdef HAVE_UNIX_SOCKETS
-		case AF_UNIX:
-			if (!ident_unix(port->sock, ident_user))
-				return STATUS_ERROR;
-			break;
-#endif
-
-		default:
-			return STATUS_ERROR;
-	}
 
 	return check_usermap(port->hba->usermap, port->user_name, ident_user, false);
 }
+#endif   /* HAVE_UNIX_SOCKETS */
 
 
 /*----------------------------------------------------------------
@@ -2787,10 +2764,10 @@ CheckRADIUSAuth(Port *port)
 	pg_freeaddrinfo_all(hint.ai_family, serveraddrs);
 
 	/*
-	 * Figure out at what time we should time out. We can't just use
-	 * a single call to select() with a timeout, since somebody can
-	 * be sending invalid packets to our port thus causing us to
-	 * retry in a loop and never time out.
+	 * Figure out at what time we should time out. We can't just use a single
+	 * call to select() with a timeout, since somebody can be sending invalid
+	 * packets to our port thus causing us to retry in a loop and never time
+	 * out.
 	 */
 	gettimeofday(&endtime, NULL);
 	endtime.tv_sec += RADIUS_TIMEOUT;
@@ -2799,7 +2776,7 @@ CheckRADIUSAuth(Port *port)
 	{
 		struct timeval timeout;
 		struct timeval now;
-		int64 timeoutval;
+		int64		timeoutval;
 
 		gettimeofday(&now, NULL);
 		timeoutval = (endtime.tv_sec * 1000000 + endtime.tv_usec) - (now.tv_sec * 1000000 + now.tv_usec);
@@ -2839,12 +2816,12 @@ CheckRADIUSAuth(Port *port)
 		/*
 		 * Attempt to read the response packet, and verify the contents.
 		 *
-		 * Any packet that's not actually a RADIUS packet, or otherwise
-		 * does not validate as an explicit reject, is just ignored and
-		 * we retry for another packet (until we reach the timeout). This
-		 * is to avoid the possibility to denial-of-service the login by
-		 * flooding the server with invalid packets on the port that
-		 * we're expecting the RADIUS response on.
+		 * Any packet that's not actually a RADIUS packet, or otherwise does
+		 * not validate as an explicit reject, is just ignored and we retry
+		 * for another packet (until we reach the timeout). This is to avoid
+		 * the possibility to denial-of-service the login by flooding the
+		 * server with invalid packets on the port that we're expecting the
+		 * RADIUS response on.
 		 */
 
 		addrsize = sizeof(remoteaddr);
@@ -2865,12 +2842,12 @@ CheckRADIUSAuth(Port *port)
 		{
 #ifdef HAVE_IPV6
 			ereport(LOG,
-					(errmsg("RADIUS response was sent from incorrect port: %i",
-							ntohs(remoteaddr.sin6_port))));
+				  (errmsg("RADIUS response was sent from incorrect port: %i",
+						  ntohs(remoteaddr.sin6_port))));
 #else
 			ereport(LOG,
-					(errmsg("RADIUS response was sent from incorrect port: %i",
-							ntohs(remoteaddr.sin_port))));
+				  (errmsg("RADIUS response was sent from incorrect port: %i",
+						  ntohs(remoteaddr.sin_port))));
 #endif
 			continue;
 		}
@@ -2904,12 +2881,12 @@ CheckRADIUSAuth(Port *port)
 		 */
 		cryptvector = palloc(packetlength + strlen(port->hba->radiussecret));
 
-		memcpy(cryptvector, receivepacket, 4);		/* code+id+length */
-		memcpy(cryptvector + 4, packet->vector, RADIUS_VECTOR_LENGTH);		/* request
-																			 * authenticator, from
-																			 * original packet */
-		if (packetlength > RADIUS_HEADER_LENGTH)	/* there may be no attributes
-													 * at all */
+		memcpy(cryptvector, receivepacket, 4);	/* code+id+length */
+		memcpy(cryptvector + 4, packet->vector, RADIUS_VECTOR_LENGTH);	/* request
+																		 * authenticator, from
+																		 * original packet */
+		if (packetlength > RADIUS_HEADER_LENGTH)		/* there may be no
+														 * attributes at all */
 			memcpy(cryptvector + RADIUS_HEADER_LENGTH, receive_buffer + RADIUS_HEADER_LENGTH, packetlength - RADIUS_HEADER_LENGTH);
 		memcpy(cryptvector + packetlength, port->hba->radiussecret, strlen(port->hba->radiussecret));
 
@@ -2918,7 +2895,7 @@ CheckRADIUSAuth(Port *port)
 						   encryptedpassword))
 		{
 			ereport(LOG,
-					(errmsg("could not perform MD5 encryption of received packet")));
+			(errmsg("could not perform MD5 encryption of received packet")));
 			pfree(cryptvector);
 			continue;
 		}
@@ -2944,9 +2921,9 @@ CheckRADIUSAuth(Port *port)
 		else
 		{
 			ereport(LOG,
-					(errmsg("RADIUS response has invalid code (%i) for user \"%s\"",
-							receivepacket->code, port->user_name)));
+			 (errmsg("RADIUS response has invalid code (%i) for user \"%s\"",
+					 receivepacket->code, port->user_name)));
 			continue;
 		}
-	} /* while (true) */
+	}							/* while (true) */
 }

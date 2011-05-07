@@ -2397,7 +2397,7 @@ DecodeTime(char *str, int fmask, int range,
 
 	/* do a sanity check */
 #ifdef HAVE_INT64_TIMESTAMP
-	if (tm->tm_hour < 0 || tm->tm_min < 0 || tm->tm_min > MINS_PER_HOUR -1 ||
+	if (tm->tm_hour < 0 || tm->tm_min < 0 || tm->tm_min > MINS_PER_HOUR - 1 ||
 		tm->tm_sec < 0 || tm->tm_sec > SECS_PER_MINUTE ||
 		*fsec < INT64CONST(0) ||
 		*fsec > USECS_PER_SEC)
@@ -4140,20 +4140,17 @@ CheckDateTokenTables(void)
 /*
  * This function gets called during timezone config file load or reload
  * to create the final array of timezone tokens.  The argument array
- * is already sorted in name order.  This data is in a temporary memory
- * context and must be copied to somewhere permanent.
+ * is already sorted in name order.  The data is converted to datetkn
+ * format and installed in *tbl, which must be allocated by the caller.
  */
 void
-InstallTimeZoneAbbrevs(tzEntry *abbrevs, int n)
+ConvertTimeZoneAbbrevs(TimeZoneAbbrevTable *tbl,
+					   struct tzEntry *abbrevs, int n)
 {
-	datetkn    *newtbl;
+	datetkn    *newtbl = tbl->abbrevs;
 	int			i;
 
-	/*
-	 * Copy the data into TopMemoryContext and convert to datetkn format.
-	 */
-	newtbl = (datetkn *) MemoryContextAlloc(TopMemoryContext,
-											n * sizeof(datetkn));
+	tbl->numabbrevs = n;
 	for (i = 0; i < n; i++)
 	{
 		strncpy(newtbl[i].token, abbrevs[i].abbrev, TOKMAXLEN);
@@ -4163,12 +4160,20 @@ InstallTimeZoneAbbrevs(tzEntry *abbrevs, int n)
 
 	/* Check the ordering, if testing */
 	Assert(CheckDateTokenTable("timezone offset", newtbl, n));
+}
 
-	/* Now safe to replace existing table (if any) */
-	if (timezonetktbl)
-		pfree(timezonetktbl);
-	timezonetktbl = newtbl;
-	sztimezonetktbl = n;
+/*
+ * Install a TimeZoneAbbrevTable as the active table.
+ *
+ * Caller is responsible that the passed table doesn't go away while in use.
+ */
+void
+InstallTimeZoneAbbrevs(TimeZoneAbbrevTable *tbl)
+{
+	int			i;
+
+	timezonetktbl = tbl->abbrevs;
+	sztimezonetktbl = tbl->numabbrevs;
 
 	/* clear date cache in case it contains any stale timezone names */
 	for (i = 0; i < MAXDATEFIELDS; i++)

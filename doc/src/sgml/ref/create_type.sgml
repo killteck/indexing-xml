@@ -22,7 +22,7 @@ PostgreSQL documentation
  <refsynopsisdiv>
 <synopsis>
 CREATE TYPE <replaceable class="parameter">name</replaceable> AS
-    ( [ <replaceable class="PARAMETER">attribute_name</replaceable> <replaceable class="PARAMETER">data_type</replaceable> [, ... ] ] )
+    ( [ <replaceable class="PARAMETER">attribute_name</replaceable> <replaceable class="PARAMETER">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ] )
 
 CREATE TYPE <replaceable class="parameter">name</replaceable> AS ENUM
     ( [ '<replaceable class="parameter">label</replaceable>' [, ... ] ] )
@@ -85,11 +85,12 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
    The first form of <command>CREATE TYPE</command>
    creates a composite type.
    The composite type is specified by a list of attribute names and data types.
-   This is essentially the same as the row type
+   An attribute's collation can be specified too, if its data type is
+   collatable.  A composite type is essentially the same as the row type
    of a table, but using <command>CREATE TYPE</command> avoids the need to
    create an actual table when all that is wanted is to define a type.
-   A stand-alone composite type is useful as the argument or return type of a
-   function.
+   A stand-alone composite type is useful, for example, as the argument or
+   return type of a function.
   </para>
   </refsect2>
 
@@ -411,10 +412,10 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
   </para>
 
   <para>
-   If the optional
+   If the optional boolean
    parameter <replaceable class="parameter">collatable</replaceable>
    is true, column definitions and expressions of the type may carry
-   collation information and allow the use of
+   collation information through use of
    the <literal>COLLATE</literal> clause.  It is up to the
    implementations of the functions operating on the type to actually
    make use of the collation information; this does not happen

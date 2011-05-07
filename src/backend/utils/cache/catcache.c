@@ -26,6 +26,7 @@
 #ifdef CATCACHE_STATS
 #include "storage/ipc.h"		/* for on_proc_exit */
 #endif
+#include "storage/lmgr.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
@@ -933,6 +934,8 @@ CatalogCacheInitializeCache(CatCache *cache)
 		/* Fill in sk_strategy as well --- always standard equality */
 		cache->cc_skey[i].sk_strategy = BTEqualStrategyNumber;
 		cache->cc_skey[i].sk_subtype = InvalidOid;
+		/* Currently, there are no catcaches on collation-aware data types */
+		cache->cc_skey[i].sk_collation = InvalidOid;
 
 		CACHE4_elog(DEBUG2, "CatalogCacheInitializeCache %s %d %p",
 					cache->cc_relname,
@@ -967,8 +970,16 @@ InitCatCachePhase2(CatCache *cache, bool touch_index)
 	{
 		Relation	idesc;
 
+		/*
+		 * We must lock the underlying catalog before opening the index to
+		 * avoid deadlock, since index_open could possibly result in reading
+		 * this same catalog, and if anyone else is exclusive-locking this
+		 * catalog and index they'll be doing it in that order.
+		 */
+		LockRelationOid(cache->cc_reloid, AccessShareLock);
 		idesc = index_open(cache->cc_indexoid, AccessShareLock);
 		index_close(idesc, AccessShareLock);
+		UnlockRelationOid(cache->cc_reloid, AccessShareLock);
 	}
 }
 

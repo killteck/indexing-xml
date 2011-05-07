@@ -88,8 +88,8 @@ const char *progname;
 static const char *modulename = gettext_noop("archiver");
 
 /* index array created by fix_dependencies -- only used in parallel restore */
-static TocEntry	  **tocsByDumpId;			/* index by dumpId - 1 */
-static DumpId		maxDumpId;				/* length of above array */
+static TocEntry **tocsByDumpId; /* index by dumpId - 1 */
+static DumpId maxDumpId;		/* length of above array */
 
 
 static ArchiveHandle *_allocAH(const char *FileSpec, const ArchiveFormat fmt,
@@ -1003,11 +1003,8 @@ SortTocFromFile(Archive *AHX, RestoreOptions *ropt)
 {
 	ArchiveHandle *AH = (ArchiveHandle *) AHX;
 	FILE	   *fh;
-	char		buf[1024];
-	char	   *cmnt;
-	char	   *endptr;
-	DumpId		id;
-	TocEntry   *te;
+	char		buf[100];
+	bool		incomplete_line;
 
 	/* Allocate space for the 'wanted' array, and init it */
 	ropt->idWanted = (bool *) malloc(sizeof(bool) * AH->maxDumpId);
@@ -1019,8 +1016,30 @@ SortTocFromFile(Archive *AHX, RestoreOptions *ropt)
 		die_horribly(AH, modulename, "could not open TOC file \"%s\": %s\n",
 					 ropt->tocFile, strerror(errno));
 
+	incomplete_line = false;
 	while (fgets(buf, sizeof(buf), fh) != NULL)
 	{
+		bool		prev_incomplete_line = incomplete_line;
+		int			buflen;
+		char	   *cmnt;
+		char	   *endptr;
+		DumpId		id;
+		TocEntry   *te;
+
+		/*
+		 * Some lines in the file might be longer than sizeof(buf).  This is
+		 * no problem, since we only care about the leading numeric ID which
+		 * can be at most a few characters; but we have to skip continuation
+		 * bufferloads when processing a long line.
+		 */
+		buflen = strlen(buf);
+		if (buflen > 0 && buf[buflen - 1] == '\n')
+			incomplete_line = false;
+		else
+			incomplete_line = true;
+		if (prev_incomplete_line)
+			continue;
+
 		/* Truncate line at comment, if any */
 		cmnt = strchr(buf, ';');
 		if (cmnt != NULL)
@@ -1510,7 +1529,6 @@ _moveAfter(ArchiveHandle *AH, TocEntry *pos, TocEntry *te)
 	pos->next->prev = te;
 	pos->next = te;
 }
-
 #endif
 
 static void
@@ -1752,7 +1770,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 
 	if (AH->fSpec)
 	{
-		struct stat	st;
+		struct stat st;
 
 		wantClose = 1;
 
@@ -1763,6 +1781,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 		if (stat(AH->fSpec, &st) == 0 && S_ISDIR(st.st_mode))
 		{
 			char		buf[MAXPGPATH];
+
 			if (snprintf(buf, MAXPGPATH, "%s/toc.dat", AH->fSpec) >= MAXPGPATH)
 				die_horribly(AH, modulename, "directory name too long: \"%s\"\n",
 							 AH->fSpec);
@@ -1784,7 +1803,7 @@ _discoverArchiveFormat(ArchiveHandle *AH)
 #endif
 			die_horribly(AH, modulename, "directory \"%s\" does not appear to be a valid archive (\"toc.dat\" does not exist)\n",
 						 AH->fSpec);
-			fh = NULL; /* keep compiler quiet */
+			fh = NULL;			/* keep compiler quiet */
 		}
 		else
 		{
@@ -3219,7 +3238,7 @@ dumpTimestamp(ArchiveHandle *AH, const char *msg, time_t tim)
  *
  * Work is done in three phases.
  * First we process all SECTION_PRE_DATA tocEntries, in a single connection,
- * just as for a standard restore.  Second we process the remaining non-ACL
+ * just as for a standard restore.	Second we process the remaining non-ACL
  * steps in parallel worker children (threads on Windows, processes on Unix),
  * each of which connects separately to the database.  Finally we process all
  * the ACL entries in a single connection (that happens back in
@@ -3259,9 +3278,9 @@ restore_toc_entries_parallel(ArchiveHandle *AH)
 	 * Do all the early stuff in a single connection in the parent. There's no
 	 * great point in running it in parallel, in fact it will actually run
 	 * faster in a single connection because we avoid all the connection and
-	 * setup overhead.  Also, pg_dump is not currently very good about
-	 * showing all the dependencies of SECTION_PRE_DATA items, so we do not
-	 * risk trying to process them out-of-order.
+	 * setup overhead.	Also, pg_dump is not currently very good about showing
+	 * all the dependencies of SECTION_PRE_DATA items, so we do not risk
+	 * trying to process them out-of-order.
 	 */
 	skipped_some = false;
 	for (next_work_item = AH->toc->next; next_work_item != AH->toc; next_work_item = next_work_item->next)
@@ -3948,8 +3967,8 @@ fix_dependencies(ArchiveHandle *AH)
 
 	/*
 	 * Count the incoming dependencies for each item.  Also, it is possible
-	 * that the dependencies list items that are not in the archive at
-	 * all.  Subtract such items from the depCounts.
+	 * that the dependencies list items that are not in the archive at all.
+	 * Subtract such items from the depCounts.
 	 */
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
@@ -3965,8 +3984,8 @@ fix_dependencies(ArchiveHandle *AH)
 	}
 
 	/*
-	 * Allocate space for revDeps[] arrays, and reset nRevDeps so we can
-	 * use it as a counter below.
+	 * Allocate space for revDeps[] arrays, and reset nRevDeps so we can use
+	 * it as a counter below.
 	 */
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
@@ -3976,8 +3995,8 @@ fix_dependencies(ArchiveHandle *AH)
 	}
 
 	/*
-	 * Build the revDeps[] arrays of incoming-dependency dumpIds.  This
-	 * had better agree with the loops above.
+	 * Build the revDeps[] arrays of incoming-dependency dumpIds.  This had
+	 * better agree with the loops above.
 	 */
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{

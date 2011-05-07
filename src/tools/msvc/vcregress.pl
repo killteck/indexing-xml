@@ -13,7 +13,8 @@ my $startdir = getcwd();
 
 chdir "../../.." if (-d "../../../src/tools/msvc");
 
-require 'src/tools/msvc/config.pl';
+require 'src/tools/msvc/config_default.pl';
+require 'src/tools/msvc/config.pl' if (-f 'src/tools/msvc/config.pl');
 
 # buildenv.pl is for specifying the build environment settings
 # it should contian lines like:
@@ -88,7 +89,7 @@ sub installcheck
     my @args = (
         "../../../$Config/pg_regress/pg_regress","--dlpath=.",
         "--psqldir=../../../$Config/psql","--schedule=${schedule}_schedule",
-        "--multibyte=SQL_ASCII","--no-locale"
+        "--encoding=SQL_ASCII","--no-locale"
     );
     push(@args,$maxconn) if $maxconn;
     system(@args);
@@ -101,7 +102,7 @@ sub check
     my @args = (
         "../../../$Config/pg_regress/pg_regress","--dlpath=.",
         "--psqldir=../../../$Config/psql","--schedule=${schedule}_schedule",
-        "--multibyte=SQL_ASCII","--no-locale",
+        "--encoding=SQL_ASCII","--no-locale",
         "--temp-install=./tmp_check","--top-builddir=\"$topdir\""
     );
     push(@args,$maxconn) if $maxconn;
@@ -125,7 +126,7 @@ sub ecpgcheck
         "--dbname=regress1,connectdb",
         "--create-role=connectuser,connectdb",
         "--schedule=${schedule}_schedule",
-        "--multibyte=SQL_ASCII",
+        "--encoding=SQL_ASCII",
         "--no-locale",
         "--temp-install=./tmp_chk",
         "--top-builddir=\"$topdir\""
@@ -226,6 +227,14 @@ sub fetchRegressOpts
         # ignore options that use makefile variables - can't handle those
         # ignore anything that isn't an option staring with --
         @opts = grep { $_ !~ /\$\(/ && $_ =~ /^--/ } split(/\s+/,$1);
+    }
+    if ($m =~ /^\s*ENCODING\s*=\s*(\S+)/m)
+    {
+        push @opts, "--encoding=$1";
+    }
+    if ($m =~ /^\s*NO_LOCALE\s*=\s*\S+/m)
+    {
+        push @opts, "--no-locale";
     }
     return @opts;
 }

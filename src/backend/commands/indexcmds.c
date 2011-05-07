@@ -183,10 +183,22 @@ DefineIndex(RangeVar *heapRelation,
 	/* Note: during bootstrap may see uncataloged relation */
 	if (rel->rd_rel->relkind != RELKIND_RELATION &&
 		rel->rd_rel->relkind != RELKIND_UNCATALOGED)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a table",
-						heapRelation->relname)));
+	{
+		if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+			/*
+			 * Custom error message for FOREIGN TABLE since the term is
+			 * close to a regular table and can confuse the user.
+			 */
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					 errmsg("cannot create index on foreign table \"%s\"",
+						 heapRelation->relname)));
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					 errmsg("\"%s\" is not a table",
+							heapRelation->relname)));
+	}
 
 	/*
 	 * Don't try to CREATE INDEX on temp tables of other backends.
@@ -350,7 +362,8 @@ DefineIndex(RangeVar *heapRelation,
 	collationObjectId = (Oid *) palloc(numberOfAttributes * sizeof(Oid));
 	classObjectId = (Oid *) palloc(numberOfAttributes * sizeof(Oid));
 	coloptions = (int16 *) palloc(numberOfAttributes * sizeof(int16));
-	ComputeIndexAttrs(indexInfo, collationObjectId, classObjectId, coloptions, attributeList,
+	ComputeIndexAttrs(indexInfo, collationObjectId, classObjectId,
+					  coloptions, attributeList,
 					  exclusionOpNames, relationId,
 					  accessMethodName, accessMethodId,
 					  amcanorder, isconstraint);
@@ -395,7 +408,8 @@ DefineIndex(RangeVar *heapRelation,
 	indexRelationId =
 		index_create(rel, indexRelationName, indexRelationId,
 					 indexInfo, indexColNames,
-					 accessMethodId, tablespaceId, collationObjectId, classObjectId,
+					 accessMethodId, tablespaceId,
+					 collationObjectId, classObjectId,
 					 coloptions, reloptions, primary,
 					 isconstraint, deferrable, initdeferred,
 					 allowSystemTableMods,
@@ -505,7 +519,7 @@ DefineIndex(RangeVar *heapRelation,
 	indexInfo->ii_BrokenHotChain = false;
 
 	/* Now build the index */
-	index_build(rel, indexRelation, indexInfo, primary);
+	index_build(rel, indexRelation, indexInfo, primary, false);
 
 	/* Close both the relations, but keep the locks */
 	heap_close(rel, NoLock);
@@ -837,63 +851,93 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 			attcollation = attform->attcollation;
 			ReleaseSysCache(atttuple);
 		}
-		else if (attribute->expr && IsA(attribute->expr, Var) &&
-				 ((Var *) attribute->expr)->varattno != InvalidAttrNumber)
-		{
-			/* Tricky tricky, he wrote (column) ... treat as simple attr */
-			Var		   *var = (Var *) attribute->expr;
-
-			indexInfo->ii_KeyAttrNumbers[attn] = var->varattno;
-			atttype = get_atttype(relId, var->varattno);
-			attcollation = var->varcollid;
-		}
 		else
 		{
 			/* Index expression */
-			Assert(attribute->expr != NULL);
-			indexInfo->ii_KeyAttrNumbers[attn] = 0;		/* marks expression */
-			indexInfo->ii_Expressions = lappend(indexInfo->ii_Expressions,
-												attribute->expr);
-			atttype = exprType(attribute->expr);
-			attcollation = exprCollation(attribute->expr);
+			Node	   *expr = attribute->expr;
+
+			Assert(expr != NULL);
+			atttype = exprType(expr);
+			attcollation = exprCollation(expr);
 
 			/*
-			 * We don't currently support generation of an actual query plan
-			 * for an index expression, only simple scalar expressions; hence
-			 * these restrictions.
+			 * Strip any top-level COLLATE clause.	This ensures that we treat
+			 * "x COLLATE y" and "(x COLLATE y)" alike.
 			 */
-			if (contain_subplans(attribute->expr))
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			while (IsA(expr, CollateExpr))
+				expr = (Node *) ((CollateExpr *) expr)->arg;
+
+			if (IsA(expr, Var) &&
+				((Var *) expr)->varattno != InvalidAttrNumber)
+			{
+				/*
+				 * User wrote "(column)" or "(column COLLATE something)".
+				 * Treat it like simple attribute anyway.
+				 */
+				indexInfo->ii_KeyAttrNumbers[attn] = ((Var *) expr)->varattno;
+			}
+			else
+			{
+				indexInfo->ii_KeyAttrNumbers[attn] = 0; /* marks expression */
+				indexInfo->ii_Expressions = lappend(indexInfo->ii_Expressions,
+													expr);
+
+				/*
+				 * We don't currently support generation of an actual query
+				 * plan for an index expression, only simple scalar
+				 * expressions; hence these restrictions.
+				 */
+				if (contain_subplans(expr))
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("cannot use subquery in index expression")));
-			if (contain_agg_clause(attribute->expr))
-				ereport(ERROR,
-						(errcode(ERRCODE_GROUPING_ERROR),
-				errmsg("cannot use aggregate function in index expression")));
+				if (contain_agg_clause(expr))
+					ereport(ERROR,
+							(errcode(ERRCODE_GROUPING_ERROR),
+							 errmsg("cannot use aggregate function in index expression")));
 
-			/*
-			 * A expression using mutable functions is probably wrong, since
-			 * if you aren't going to get the same result for the same data
-			 * every time, it's not clear what the index entries mean at all.
-			 */
-			if (CheckMutability((Expr *) attribute->expr))
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-						 errmsg("functions in index expression must be marked IMMUTABLE")));
+				/*
+				 * A expression using mutable functions is probably wrong,
+				 * since if you aren't going to get the same result for the
+				 * same data every time, it's not clear what the index entries
+				 * mean at all.
+				 */
+				if (CheckMutability((Expr *) expr))
+					ereport(ERROR,
+							(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+							 errmsg("functions in index expression must be marked IMMUTABLE")));
+			}
 		}
 
 		/*
-		 * Collation override
+		 * Apply collation override if any
 		 */
 		if (attribute->collation)
+			attcollation = get_collation_oid(attribute->collation, false);
+
+		/*
+		 * Check we have a collation iff it's a collatable type.  The only
+		 * expected failures here are (1) COLLATE applied to a noncollatable
+		 * type, or (2) index expression had an unresolved collation.  But we
+		 * might as well code this to be a complete consistency check.
+		 */
+		if (type_is_collatable(atttype))
 		{
-			if (!type_is_collatable(atttype))
+			if (!OidIsValid(attcollation))
 				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
+						(errcode(ERRCODE_INDETERMINATE_COLLATION),
+						 errmsg("could not determine which collation to use for index expression"),
+						 errhint("Use the COLLATE clause to set the collation explicitly.")));
+		}
+		else
+		{
+			if (OidIsValid(attcollation))
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
 						 errmsg("collations are not supported by type %s",
 								format_type_be(atttype))));
-			attcollation = get_collation_oid(attribute->collation, false);
 		}
+
 		collationOidP[attn] = attcollation;
 
 		/*
@@ -1536,7 +1580,7 @@ ReindexTable(RangeVar *relation)
 
 	ReleaseSysCache(tuple);
 
-	if (!reindex_relation(heapOid, true, 0))
+	if (!reindex_relation(heapOid, REINDEX_REL_PROCESS_TOAST))
 		ereport(NOTICE,
 				(errmsg("table \"%s\" has no indexes",
 						relation->relname)));
@@ -1649,7 +1693,7 @@ ReindexDatabase(const char *databaseName, bool do_system, bool do_user)
 		StartTransactionCommand();
 		/* functions in indexes may want a snapshot set */
 		PushActiveSnapshot(GetTransactionSnapshot());
-		if (reindex_relation(relid, true, 0))
+		if (reindex_relation(relid, REINDEX_REL_PROCESS_TOAST))
 			ereport(NOTICE,
 					(errmsg("table \"%s.%s\" was reindexed",
 							get_namespace_name(get_rel_namespace(relid)),

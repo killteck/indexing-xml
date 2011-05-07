@@ -108,7 +108,7 @@ static int exec_stmt_fors(PLpgSQL_execstate *estate,
 static int exec_stmt_forc(PLpgSQL_execstate *estate,
 			   PLpgSQL_stmt_forc *stmt);
 static int exec_stmt_foreach_a(PLpgSQL_execstate *estate,
-				    PLpgSQL_stmt_foreach_a *stmt);
+					PLpgSQL_stmt_foreach_a *stmt);
 static int exec_stmt_open(PLpgSQL_execstate *estate,
 			   PLpgSQL_stmt_open *stmt);
 static int exec_stmt_fetch(PLpgSQL_execstate *estate,
@@ -1016,7 +1016,7 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
 		MemoryContext oldcontext = CurrentMemoryContext;
 		ResourceOwner oldowner = CurrentResourceOwner;
 		ExprContext *old_eval_econtext = estate->eval_econtext;
-		ErrorData *save_cur_error = estate->cur_error;
+		ErrorData  *save_cur_error = estate->cur_error;
 
 		estate->err_text = gettext_noop("during statement block entry");
 
@@ -1516,7 +1516,9 @@ exec_stmt_case(PLpgSQL_execstate *estate, PLpgSQL_stmt_case *stmt)
 		 * this doesn't affect the originally stored function parse tree.
 		 */
 		if (t_var->datatype->typoid != t_oid)
-			t_var->datatype = plpgsql_build_datatype(t_oid, -1);
+			t_var->datatype = plpgsql_build_datatype(t_oid,
+													 -1,
+										   estate->func->fn_input_collation);
 
 		/* now we can assign to the variable */
 		exec_assign_value(estate,
@@ -1911,7 +1913,6 @@ exec_stmt_forc(PLpgSQL_execstate *estate, PLpgSQL_stmt_forc *stmt)
 {
 	PLpgSQL_var *curvar;
 	char	   *curname = NULL;
-	const char *portalname;
 	PLpgSQL_expr *query;
 	ParamListInfo paramLI;
 	Portal		portal;
@@ -1995,7 +1996,6 @@ exec_stmt_forc(PLpgSQL_execstate *estate, PLpgSQL_stmt_forc *stmt)
 	if (portal == NULL)
 		elog(ERROR, "could not open cursor: %s",
 			 SPI_result_code_string(SPI_result));
-	portalname = portal->name;
 
 	/* don't need paramlist any more */
 	if (paramLI)
@@ -2044,16 +2044,16 @@ exec_stmt_forc(PLpgSQL_execstate *estate, PLpgSQL_stmt_forc *stmt)
 static int
 exec_stmt_foreach_a(PLpgSQL_execstate *estate, PLpgSQL_stmt_foreach_a *stmt)
 {
-	ArrayType		   *arr;
-	Oid					arrtype;
-	PLpgSQL_datum	   *loop_var;
-	Oid					loop_var_elem_type;
-	bool				found = false;
-	int					rc = PLPGSQL_RC_OK;
-	ArrayIterator		array_iterator;
-	Oid					iterator_result_type;
-	Datum				value;
-	bool				isnull;
+	ArrayType  *arr;
+	Oid			arrtype;
+	PLpgSQL_datum *loop_var;
+	Oid			loop_var_elem_type;
+	bool		found = false;
+	int			rc = PLPGSQL_RC_OK;
+	ArrayIterator array_iterator;
+	Oid			iterator_result_type;
+	Datum		value;
+	bool		isnull;
 
 	/* get the value of the array expression */
 	value = exec_eval_expr(estate, stmt->expr, &isnull, &arrtype);
@@ -2083,8 +2083,8 @@ exec_stmt_foreach_a(PLpgSQL_execstate *estate, PLpgSQL_stmt_foreach_a *stmt)
 	if (stmt->slice < 0 || stmt->slice > ARR_NDIM(arr))
 		ereport(ERROR,
 				(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
-				 errmsg("slice dimension (%d) is out of the valid range 0..%d",
-						stmt->slice, ARR_NDIM(arr))));
+			   errmsg("slice dimension (%d) is out of the valid range 0..%d",
+					  stmt->slice, ARR_NDIM(arr))));
 
 	/* Set up the loop variable and see if it is of an array type */
 	loop_var = estate->datums[stmt->varno];
@@ -2102,19 +2102,19 @@ exec_stmt_foreach_a(PLpgSQL_execstate *estate, PLpgSQL_stmt_foreach_a *stmt)
 																  loop_var));
 
 	/*
-	 * Sanity-check the loop variable type.  We don't try very hard here,
-	 * and should not be too picky since it's possible that exec_assign_value
-	 * can coerce values of different types.  But it seems worthwhile to
-	 * complain if the array-ness of the loop variable is not right.
+	 * Sanity-check the loop variable type.  We don't try very hard here, and
+	 * should not be too picky since it's possible that exec_assign_value can
+	 * coerce values of different types.  But it seems worthwhile to complain
+	 * if the array-ness of the loop variable is not right.
 	 */
 	if (stmt->slice > 0 && loop_var_elem_type == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("FOREACH ... SLICE loop variable must be of an array type")));
+		errmsg("FOREACH ... SLICE loop variable must be of an array type")));
 	if (stmt->slice == 0 && loop_var_elem_type != InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("FOREACH loop variable must not be of an array type")));
+			  errmsg("FOREACH loop variable must not be of an array type")));
 
 	/* Create an iterator to step through the array */
 	array_iterator = array_create_iterator(arr, stmt->slice);
@@ -3947,9 +3947,9 @@ exec_assign_value(PLpgSQL_execstate *estate,
 				/*
 				 * We need to do subscript evaluation, which might require
 				 * evaluating general expressions; and the caller might have
-				 * done that too in order to prepare the input Datum.  We
-				 * have to save and restore the caller's SPI_execute result,
-				 * if any.
+				 * done that too in order to prepare the input Datum.  We have
+				 * to save and restore the caller's SPI_execute result, if
+				 * any.
 				 */
 				save_eval_tuptable = estate->eval_tuptable;
 				estate->eval_tuptable = NULL;
@@ -4015,11 +4015,11 @@ exec_assign_value(PLpgSQL_execstate *estate,
 								 errmsg("array subscript in assignment must not be null")));
 
 					/*
-					 * Clean up in case the subscript expression wasn't simple.
-					 * We can't do exec_eval_cleanup, but we can do this much
-					 * (which is safe because the integer subscript value is
-					 * surely pass-by-value), and we must do it in case the
-					 * next subscript expression isn't simple either.
+					 * Clean up in case the subscript expression wasn't
+					 * simple. We can't do exec_eval_cleanup, but we can do
+					 * this much (which is safe because the integer subscript
+					 * value is surely pass-by-value), and we must do it in
+					 * case the next subscript expression isn't simple either.
 					 */
 					if (estate->eval_tuptable != NULL)
 						SPI_freetuptable(estate->eval_tuptable);
@@ -4307,33 +4307,64 @@ exec_get_datum_type(PLpgSQL_execstate *estate,
 }
 
 /*
- * exec_get_rec_fieldtype				Get datatype of a PLpgSQL record field
- *
- * Also returns the field number to *fieldno.
+ * exec_get_datum_collation				Get collation of a PLpgSQL_datum
  */
 Oid
-exec_get_rec_fieldtype(PLpgSQL_rec *rec, const char *fieldname,
-					   int *fieldno)
+exec_get_datum_collation(PLpgSQL_execstate *estate,
+						 PLpgSQL_datum *datum)
 {
-	Oid			typeid;
-	int			fno;
+	Oid			collid;
 
-	if (rec->tupdesc == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("record \"%s\" is not assigned yet",
-						rec->refname),
-				 errdetail("The tuple structure of a not-yet-assigned record is indeterminate.")));
-	fno = SPI_fnumber(rec->tupdesc, fieldname);
-	if (fno == SPI_ERROR_NOATTRIBUTE)
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_COLUMN),
-				 errmsg("record \"%s\" has no field \"%s\"",
-						rec->refname, fieldname)));
-	typeid = SPI_gettypeid(rec->tupdesc, fno);
+	switch (datum->dtype)
+	{
+		case PLPGSQL_DTYPE_VAR:
+			{
+				PLpgSQL_var *var = (PLpgSQL_var *) datum;
 
-	*fieldno = fno;
-	return typeid;
+				collid = var->datatype->collation;
+				break;
+			}
+
+		case PLPGSQL_DTYPE_ROW:
+		case PLPGSQL_DTYPE_REC:
+			/* composite types are never collatable */
+			collid = InvalidOid;
+			break;
+
+		case PLPGSQL_DTYPE_RECFIELD:
+			{
+				PLpgSQL_recfield *recfield = (PLpgSQL_recfield *) datum;
+				PLpgSQL_rec *rec;
+				int			fno;
+
+				rec = (PLpgSQL_rec *) (estate->datums[recfield->recparentno]);
+				if (rec->tupdesc == NULL)
+					ereport(ERROR,
+						  (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						   errmsg("record \"%s\" is not assigned yet",
+								  rec->refname),
+						   errdetail("The tuple structure of a not-yet-assigned record is indeterminate.")));
+				fno = SPI_fnumber(rec->tupdesc, recfield->fieldname);
+				if (fno == SPI_ERROR_NOATTRIBUTE)
+					ereport(ERROR,
+							(errcode(ERRCODE_UNDEFINED_COLUMN),
+							 errmsg("record \"%s\" has no field \"%s\"",
+									rec->refname, recfield->fieldname)));
+				/* XXX there's no SPI_getcollid, as yet */
+				if (fno > 0)
+					collid = rec->tupdesc->attrs[fno - 1]->attcollation;
+				else	/* no system column types have collation */
+					collid = InvalidOid;
+				break;
+			}
+
+		default:
+			elog(ERROR, "unrecognized dtype: %d", datum->dtype);
+			collid = InvalidOid;	/* keep compiler quiet */
+			break;
+	}
+
+	return collid;
 }
 
 /* ----------
@@ -4693,7 +4724,7 @@ loop_exit:
  * Because we only store one execution tree for a simple expression, we
  * can't handle recursion cases.  So, if we see the tree is already busy
  * with an evaluation in the current xact, we just return FALSE and let the
- * caller run the expression the hard way.  (Other alternatives such as
+ * caller run the expression the hard way.	(Other alternatives such as
  * creating a new tree for a recursive call either introduce memory leaks,
  * or add enough bookkeeping to be doubtful wins anyway.)  Another case that
  * is covered by the expr_simple_in_use test is where a previous execution
@@ -4874,7 +4905,7 @@ setup_param_list(PLpgSQL_execstate *estate, PLpgSQL_expr *expr)
 		/* sizeof(ParamListInfoData) includes the first array element */
 		paramLI = (ParamListInfo)
 			palloc0(sizeof(ParamListInfoData) +
-					(estate->ndatums - 1) *sizeof(ParamExternData));
+					(estate->ndatums - 1) * sizeof(ParamExternData));
 		paramLI->paramFetch = plpgsql_param_fetch;
 		paramLI->paramFetchArg = (void *) estate;
 		paramLI->parserSetup = (ParserSetupHook) plpgsql_parser_setup;
@@ -5303,6 +5334,18 @@ exec_simple_check_node(Node *node)
 				return TRUE;
 			}
 
+		case T_NullIfExpr:
+			{
+				NullIfExpr *expr = (NullIfExpr *) node;
+
+				if (expr->opretset)
+					return FALSE;
+				if (!exec_simple_check_node((Node *) expr->args))
+					return FALSE;
+
+				return TRUE;
+			}
+
 		case T_ScalarArrayOpExpr:
 			{
 				ScalarArrayOpExpr *expr = (ScalarArrayOpExpr *) node;
@@ -5349,9 +5392,6 @@ exec_simple_check_node(Node *node)
 
 		case T_ConvertRowtypeExpr:
 			return exec_simple_check_node((Node *) ((ConvertRowtypeExpr *) node)->arg);
-
-		case T_CollateExpr:
-			return exec_simple_check_node((Node *) ((CollateExpr *) node)->arg);
 
 		case T_CaseExpr:
 			{
@@ -5439,18 +5479,6 @@ exec_simple_check_node(Node *node)
 				XmlExpr    *expr = (XmlExpr *) node;
 
 				if (!exec_simple_check_node((Node *) expr->named_args))
-					return FALSE;
-				if (!exec_simple_check_node((Node *) expr->args))
-					return FALSE;
-
-				return TRUE;
-			}
-
-		case T_NullIfExpr:
-			{
-				NullIfExpr *expr = (NullIfExpr *) node;
-
-				if (expr->opretset)
 					return FALSE;
 				if (!exec_simple_check_node((Node *) expr->args))
 					return FALSE;

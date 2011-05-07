@@ -4,8 +4,8 @@
 #define WIN32_ONLY_COMPILER
 #endif
 
-/* 
- * Make sure _WIN32_WINNT has the minumum required value. 
+/*
+ * Make sure _WIN32_WINNT has the minumum required value.
  * Leave a higher value in place.
 */
 #if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0501
@@ -27,7 +27,7 @@
 
 #undef ERROR
 
-/* 
+/*
  * The Mingw64 headers choke if this is already defined - they
  * define it themselves.
  */
@@ -275,6 +275,38 @@ typedef int pid_t;
 #define EBADFD WSAENOTSOCK
 #define EOPNOTSUPP WSAEOPNOTSUPP
 
+/*
+ * Extended locale functions with gratuitous underscore prefixes.
+ * (These APIs are nevertheless fully documented by Microsoft.)
+ */
+#define locale_t _locale_t
+#define tolower_l _tolower_l
+#define toupper_l _toupper_l
+#define towlower_l _towlower_l
+#define towupper_l _towupper_l
+#define isdigit_l _isdigit_l
+#define iswdigit_l _iswdigit_l
+#define isalpha_l _isalpha_l
+#define iswalpha_l _iswalpha_l
+#define isalnum_l _isalnum_l
+#define iswalnum_l _iswalnum_l
+#define isupper_l _isupper_l
+#define iswupper_l _iswupper_l
+#define islower_l _islower_l
+#define iswlower_l _iswlower_l
+#define isgraph_l _isgraph_l
+#define iswgraph_l _iswgraph_l
+#define isprint_l _isprint_l
+#define iswprint_l _iswprint_l
+#define ispunct_l _ispunct_l
+#define iswpunct_l _iswpunct_l
+#define isspace_l _isspace_l
+#define iswspace_l _iswspace_l
+#define strcoll_l _strcoll_l
+#define wcscoll_l _wcscoll_l
+#define wcstombs_l _wcstombs_l
+#define mbstowcs_l _mbstowcs_l
+
 
 /* In backend/port/win32/signal.c */
 extern PGDLLIMPORT volatile int pg_signal_queue;
@@ -304,7 +336,7 @@ SOCKET		pgwin32_accept(SOCKET s, struct sockaddr * addr, int *addrlen);
 int			pgwin32_connect(SOCKET s, const struct sockaddr * name, int namelen);
 int			pgwin32_select(int nfds, fd_set *readfs, fd_set *writefds, fd_set *exceptfds, const struct timeval * timeout);
 int			pgwin32_recv(SOCKET s, char *buf, int len, int flags);
-int			pgwin32_send(SOCKET s, char *buf, int len, int flags);
+int			pgwin32_send(SOCKET s, const void *buf, int len, int flags);
 
 const char *pgwin32_socket_strerror(int err);
 int			pgwin32_waitforsinglesocket(SOCKET s, int what, int timeout);
@@ -351,7 +383,7 @@ typedef unsigned short mode_t;
 /* see also S_IRGRP etc below */
 #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#endif /* __BORLANDC__ */
+#endif   /* __BORLANDC__ */
 
 #define F_OK 0
 #define W_OK 2
@@ -379,8 +411,7 @@ typedef unsigned short mode_t;
 #define _O_SHORT_LIVED	O_SHORT_LIVED
 #endif   /* ifndef O_RANDOM */
 #endif   /* __BORLANDC__ */
-
-#endif /* WIN32_ONLY_COMPILER */
+#endif   /* WIN32_ONLY_COMPILER */
 
 /* These aren't provided by either MingW or MSVC */
 #ifndef __BORLANDC__
@@ -392,4 +423,5 @@ typedef unsigned short mode_t;
 #define S_IWOTH 0
 #define S_IXOTH 0
 #define S_IRWXO 0
-#endif /* __BORLANDC__ */
+
+#endif   /* __BORLANDC__ */

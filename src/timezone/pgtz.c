@@ -1158,7 +1158,7 @@ identify_system_timezone(void)
 
 		memset(zonename, 0, sizeof(zonename));
 		namesize = sizeof(zonename);
-		if ((r = RegQueryValueEx(key, "Std", NULL, NULL, zonename, &namesize)) != ERROR_SUCCESS)
+		if ((r = RegQueryValueEx(key, "Std", NULL, NULL, (unsigned char *) zonename, &namesize)) != ERROR_SUCCESS)
 		{
 			ereport(LOG,
 					(errmsg_internal("could not query value for key \"std\" to identify system time zone \"%s\": %i",
@@ -1175,7 +1175,7 @@ identify_system_timezone(void)
 		}
 		memset(zonename, 0, sizeof(zonename));
 		namesize = sizeof(zonename);
-		if ((r = RegQueryValueEx(key, "Dlt", NULL, NULL, zonename, &namesize)) != ERROR_SUCCESS)
+		if ((r = RegQueryValueEx(key, "Dlt", NULL, NULL, (unsigned char *) zonename, &namesize)) != ERROR_SUCCESS)
 		{
 			ereport(LOG,
 					(errmsg_internal("could not query value for key \"dlt\" to identify system time zone \"%s\": %i",
@@ -1444,27 +1444,39 @@ pg_timezone_initialize(void)
 {
 	pg_tz	   *def_tz = NULL;
 
-	/* Do we need to try to figure the session timezone? */
-	if (pg_strcasecmp(GetConfigOption("timezone", false), "UNKNOWN") == 0)
+	/*
+	 * Make sure that session_timezone and log_timezone are set.
+	 * (session_timezone could still be NULL even if a timezone value was set
+	 * in postgresql.conf, if that setting was interval-based rather than
+	 * timezone-based.)
+	 */
+	if (!session_timezone)
 	{
-		/* Select setting */
 		def_tz = select_default_timezone();
 		session_timezone = def_tz;
-		/* Tell GUC about the value. Will redundantly call pg_tzset() */
-		SetConfigOption("timezone", pg_get_timezone_name(def_tz),
-						PGC_POSTMASTER, PGC_S_ARGV);
 	}
-
-	/* What about the log timezone? */
-	if (pg_strcasecmp(GetConfigOption("log_timezone", false), "UNKNOWN") == 0)
+	if (!log_timezone)
 	{
-		/* Select setting, but don't duplicate work */
+		/* Don't duplicate work */
 		if (!def_tz)
 			def_tz = select_default_timezone();
 		log_timezone = def_tz;
+	}
+
+	/* Now, set the timezone GUC if it's not already set */
+	if (GetConfigOption("timezone", false) == NULL)
+	{
 		/* Tell GUC about the value. Will redundantly call pg_tzset() */
-		SetConfigOption("log_timezone", pg_get_timezone_name(def_tz),
-						PGC_POSTMASTER, PGC_S_ARGV);
+		SetConfigOption("timezone", pg_get_timezone_name(session_timezone),
+						PGC_POSTMASTER, PGC_S_ENV_VAR);
+	}
+
+	/* Likewise for log timezone */
+	if (GetConfigOption("log_timezone", false) == NULL)
+	{
+		/* Tell GUC about the value. Will redundantly call pg_tzset() */
+		SetConfigOption("log_timezone", pg_get_timezone_name(log_timezone),
+						PGC_POSTMASTER, PGC_S_ENV_VAR);
 	}
 }
 

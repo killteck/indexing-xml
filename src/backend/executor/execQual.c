@@ -79,10 +79,10 @@ static Datum ExecEvalWholeRowSlow(ExprState *exprstate, ExprContext *econtext,
 static Datum ExecEvalConst(ExprState *exprstate, ExprContext *econtext,
 			  bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalParamExec(ExprState *exprstate, ExprContext *econtext,
-			  bool *isNull, ExprDoneCond *isDone);
+				  bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalParamExtern(ExprState *exprstate, ExprContext *econtext,
-			  bool *isNull, ExprDoneCond *isDone);
-static void init_fcache(Oid foid, FuncExprState *fcache,
+					bool *isNull, ExprDoneCond *isDone);
+static void init_fcache(Oid foid, Oid input_collation, FuncExprState *fcache,
 			MemoryContext fcacheCxt, bool needDescForSets);
 static void ShutdownFuncExpr(Datum arg);
 static TupleDesc get_cached_rowtype(Oid type_id, int32 typmod,
@@ -120,9 +120,6 @@ static Datum ExecEvalAnd(BoolExprState *andExpr, ExprContext *econtext,
 static Datum ExecEvalConvertRowtype(ConvertRowtypeExprState *cstate,
 					   ExprContext *econtext,
 					   bool *isNull, ExprDoneCond *isDone);
-static Datum ExecEvalCollateExpr(GenericExprState *exprstate,
-					ExprContext *econtext,
-					bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalCase(CaseExprState *caseExpr, ExprContext *econtext,
 			 bool *isNull, ExprDoneCond *isDone);
 static Datum ExecEvalCaseTestExpr(ExprState *exprstate,
@@ -1046,7 +1043,7 @@ ExecEvalParamExtern(ExprState *exprstate, ExprContext *econtext,
 	ereport(ERROR,
 			(errcode(ERRCODE_UNDEFINED_OBJECT),
 			 errmsg("no value found for parameter %d", thisParamId)));
-	return (Datum) 0;		/* keep compiler quiet */
+	return (Datum) 0;			/* keep compiler quiet */
 }
 
 
@@ -1179,7 +1176,7 @@ GetAttributeByName(HeapTupleHeader tuple, const char *attname, bool *isNull)
  * init_fcache - initialize a FuncExprState node during first use
  */
 static void
-init_fcache(Oid foid, FuncExprState *fcache,
+init_fcache(Oid foid, Oid input_collation, FuncExprState *fcache,
 			MemoryContext fcacheCxt, bool needDescForSets)
 {
 	AclResult	aclresult;
@@ -1205,11 +1202,12 @@ init_fcache(Oid foid, FuncExprState *fcache,
 
 	/* Set up the primary fmgr lookup information */
 	fmgr_info_cxt(foid, &(fcache->func), fcacheCxt);
-	fmgr_info_expr((Node *) fcache->xprstate.expr, &(fcache->func));
+	fmgr_info_set_expr((Node *) fcache->xprstate.expr, &(fcache->func));
 
 	/* Initialize the function call parameter struct as well */
 	InitFunctionCallInfoData(fcache->fcinfo_data, &(fcache->func),
-							 list_length(fcache->args), NULL, NULL);
+							 list_length(fcache->args),
+							 input_collation, NULL, NULL);
 
 	/* If function returns set, prepare expected tuple descriptor */
 	if (fcache->func.fn_retset && needDescForSets)
@@ -1976,12 +1974,13 @@ ExecMakeTableFunctionResult(ExprState *funcexpr,
 		{
 			FuncExpr   *func = (FuncExpr *) fcache->xprstate.expr;
 
-			init_fcache(func->funcid, fcache,
+			init_fcache(func->funcid, func->inputcollid, fcache,
 						econtext->ecxt_per_query_memory, false);
 		}
 		returnsSet = fcache->func.fn_retset;
 		InitFunctionCallInfoData(fcinfo, &(fcache->func),
 								 list_length(fcache->args),
+								 fcache->fcinfo_data.fncollation,
 								 NULL, (Node *) &rsinfo);
 
 		/*
@@ -2019,7 +2018,7 @@ ExecMakeTableFunctionResult(ExprState *funcexpr,
 	{
 		/* Treat funcexpr as a generic expression */
 		direct_function_call = false;
-		InitFunctionCallInfoData(fcinfo, NULL, 0, NULL, NULL);
+		InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, NULL, NULL);
 	}
 
 	/*
@@ -2255,7 +2254,8 @@ ExecEvalFunc(FuncExprState *fcache,
 	FuncExpr   *func = (FuncExpr *) fcache->xprstate.expr;
 
 	/* Initialize function lookup info */
-	init_fcache(func->funcid, fcache, econtext->ecxt_per_query_memory, true);
+	init_fcache(func->funcid, func->inputcollid, fcache,
+				econtext->ecxt_per_query_memory, true);
 
 	/* Go directly to ExecMakeFunctionResult on subsequent uses */
 	fcache->xprstate.evalfunc = (ExprStateEvalFunc) ExecMakeFunctionResult;
@@ -2277,7 +2277,8 @@ ExecEvalOper(FuncExprState *fcache,
 	OpExpr	   *op = (OpExpr *) fcache->xprstate.expr;
 
 	/* Initialize function lookup info */
-	init_fcache(op->opfuncid, fcache, econtext->ecxt_per_query_memory, true);
+	init_fcache(op->opfuncid, op->inputcollid, fcache,
+				econtext->ecxt_per_query_memory, true);
 
 	/* Go directly to ExecMakeFunctionResult on subsequent uses */
 	fcache->xprstate.evalfunc = (ExprStateEvalFunc) ExecMakeFunctionResult;
@@ -2318,7 +2319,7 @@ ExecEvalDistinct(FuncExprState *fcache,
 	{
 		DistinctExpr *op = (DistinctExpr *) fcache->xprstate.expr;
 
-		init_fcache(op->opfuncid, fcache,
+		init_fcache(op->opfuncid, op->inputcollid, fcache,
 					econtext->ecxt_per_query_memory, true);
 		Assert(!fcache->func.fn_retset);
 	}
@@ -2395,7 +2396,7 @@ ExecEvalScalarArrayOp(ScalarArrayOpExprState *sstate,
 	 */
 	if (sstate->fxprstate.func.fn_oid == InvalidOid)
 	{
-		init_fcache(opexpr->opfuncid, &sstate->fxprstate,
+		init_fcache(opexpr->opfuncid, opexpr->inputcollid, &sstate->fxprstate,
 					econtext->ecxt_per_query_memory, true);
 		Assert(!sstate->fxprstate.func.fn_retset);
 	}
@@ -2751,20 +2752,6 @@ ExecEvalConvertRowtype(ConvertRowtypeExprState *cstate,
 	result = do_convert_tuple(&tmptup, cstate->map);
 
 	return HeapTupleGetDatum(result);
-}
-
-/* ----------------------------------------------------------------
- *		ExecEvalCollateExpr
- *
- *		Evaluate a CollateExpr node.
- * ----------------------------------------------------------------
- */
-static Datum
-ExecEvalCollateExpr(GenericExprState *exprstate,
-					ExprContext *econtext,
-					bool *isNull, ExprDoneCond *isDone)
-{
-	return ExecEvalExpr(exprstate->arg, econtext, isNull, isDone);
 }
 
 /* ----------------------------------------------------------------
@@ -3168,6 +3155,7 @@ ExecEvalRowCompare(RowCompareExprState *rstate,
 		FunctionCallInfoData locfcinfo;
 
 		InitFunctionCallInfoData(locfcinfo, &(rstate->funcs[i]), 2,
+								 rstate->collations[i],
 								 NULL, NULL);
 		locfcinfo.arg[0] = ExecEvalExpr(le, econtext,
 										&locfcinfo.argnull[0], NULL);
@@ -3248,7 +3236,9 @@ ExecEvalMinMax(MinMaxExprState *minmaxExpr, ExprContext *econtext,
 			   bool *isNull, ExprDoneCond *isDone)
 {
 	Datum		result = (Datum) 0;
-	MinMaxOp	op = ((MinMaxExpr *) minmaxExpr->xprstate.expr)->op;
+	MinMaxExpr *minmax = (MinMaxExpr *) minmaxExpr->xprstate.expr;
+	Oid			collation = minmax->inputcollid;
+	MinMaxOp	op = minmax->op;
 	FunctionCallInfoData locfcinfo;
 	ListCell   *arg;
 
@@ -3256,7 +3246,8 @@ ExecEvalMinMax(MinMaxExprState *minmaxExpr, ExprContext *econtext,
 		*isDone = ExprSingleResult;
 	*isNull = true;				/* until we get a result */
 
-	InitFunctionCallInfoData(locfcinfo, &minmaxExpr->cfunc, 2, NULL, NULL);
+	InitFunctionCallInfoData(locfcinfo, &minmaxExpr->cfunc, 2,
+							 collation, NULL, NULL);
 	locfcinfo.argnull[0] = false;
 	locfcinfo.argnull[1] = false;
 
@@ -3542,7 +3533,7 @@ ExecEvalNullIf(FuncExprState *nullIfExpr,
 	{
 		NullIfExpr *op = (NullIfExpr *) nullIfExpr->xprstate.expr;
 
-		init_fcache(op->opfuncid, nullIfExpr,
+		init_fcache(op->opfuncid, op->inputcollid, nullIfExpr,
 					econtext->ecxt_per_query_memory, true);
 		Assert(!nullIfExpr->func.fn_retset);
 	}
@@ -4129,9 +4120,7 @@ ExecEvalArrayCoerceExpr(ArrayCoerceExprState *astate,
 		/* Set up the primary fmgr lookup information */
 		fmgr_info_cxt(acoerce->elemfuncid, &(astate->elemfunc),
 					  econtext->ecxt_per_query_memory);
-
-		/* Initialize additional info */
-		fmgr_info_expr((Node *) acoerce, &(astate->elemfunc));
+		fmgr_info_set_expr((Node *) acoerce, &(astate->elemfunc));
 	}
 
 	/*
@@ -4139,9 +4128,11 @@ ExecEvalArrayCoerceExpr(ArrayCoerceExprState *astate,
 	 *
 	 * We pass on the desttypmod and isExplicit flags whether or not the
 	 * function wants them.
+	 *
+	 * Note: coercion functions are assumed to not use collation.
 	 */
 	InitFunctionCallInfoData(locfcinfo, &(astate->elemfunc), 3,
-							 NULL, NULL);
+							 InvalidOid, NULL, NULL);
 	locfcinfo.arg[0] = PointerGetDatum(array);
 	locfcinfo.arg[1] = Int32GetDatum(acoerce->resulttypmod);
 	locfcinfo.arg[2] = BoolGetDatum(acoerce->isExplicit);
@@ -4400,6 +4391,18 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				state = (ExprState *) fstate;
 			}
 			break;
+		case T_NullIfExpr:
+			{
+				NullIfExpr *nullifexpr = (NullIfExpr *) node;
+				FuncExprState *fstate = makeNode(FuncExprState);
+
+				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalNullIf;
+				fstate->args = (List *)
+					ExecInitExpr((Expr *) nullifexpr->args, parent);
+				fstate->func.fn_oid = InvalidOid;		/* not initialized */
+				state = (ExprState *) fstate;
+			}
+			break;
 		case T_ScalarArrayOpExpr:
 			{
 				ScalarArrayOpExpr *opexpr = (ScalarArrayOpExpr *) node;
@@ -4551,16 +4554,6 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				state = (ExprState *) cstate;
 			}
 			break;
-		case T_CollateExpr:
-			{
-				CollateExpr *collate = (CollateExpr *) node;
-				GenericExprState *gstate = makeNode(GenericExprState);
-
-				gstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalCollateExpr;
-				gstate->arg = ExecInitExpr(collate->arg, parent);
-				state = (ExprState *) gstate;
-			}
-			break;
 		case T_CaseExpr:
 			{
 				CaseExpr   *caseexpr = (CaseExpr *) node;
@@ -4666,7 +4659,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 						 * don't really care what type of NULL it is, so
 						 * always make an int4 NULL.
 						 */
-						e = (Expr *) makeNullConst(INT4OID, -1);
+						e = (Expr *) makeNullConst(INT4OID, -1, InvalidOid);
 					}
 					estate = ExecInitExpr(e, parent);
 					outlist = lappend(outlist, estate);
@@ -4712,12 +4705,13 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				rstate->rargs = outlist;
 				Assert(list_length(rcexpr->opfamilies) == nopers);
 				rstate->funcs = (FmgrInfo *) palloc(nopers * sizeof(FmgrInfo));
+				rstate->collations = (Oid *) palloc(nopers * sizeof(Oid));
 				i = 0;
-				forthree(l, rcexpr->opnos, l2, rcexpr->opfamilies, l3, rcexpr->collids)
+				forthree(l, rcexpr->opnos, l2, rcexpr->opfamilies, l3, rcexpr->inputcollids)
 				{
 					Oid			opno = lfirst_oid(l);
 					Oid			opfamily = lfirst_oid(l2);
-					Oid			collid = lfirst_oid(l3);
+					Oid			inputcollid = lfirst_oid(l3);
 					int			strategy;
 					Oid			lefttype;
 					Oid			righttype;
@@ -4739,7 +4733,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 					 * does this code.
 					 */
 					fmgr_info(proc, &(rstate->funcs[i]));
-					fmgr_info_collation(collid, &(rstate->funcs[i]));
+					rstate->collations[i] = inputcollid;
 					i++;
 				}
 				state = (ExprState *) rstate;
@@ -4799,7 +4793,6 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				 * code.
 				 */
 				fmgr_info(typentry->cmp_proc, &(mstate->cfunc));
-				fmgr_info_collation(minmaxexpr->collid, &(mstate->cfunc));
 				state = (ExprState *) mstate;
 			}
 			break;
@@ -4834,18 +4827,6 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				xstate->args = outlist;
 
 				state = (ExprState *) xstate;
-			}
-			break;
-		case T_NullIfExpr:
-			{
-				NullIfExpr *nullifexpr = (NullIfExpr *) node;
-				FuncExprState *fstate = makeNode(FuncExprState);
-
-				fstate->xprstate.evalfunc = (ExprStateEvalFunc) ExecEvalNullIf;
-				fstate->args = (List *)
-					ExecInitExpr((Expr *) nullifexpr->args, parent);
-				fstate->func.fn_oid = InvalidOid;		/* not initialized */
-				state = (ExprState *) fstate;
 			}
 			break;
 		case T_NullTest:

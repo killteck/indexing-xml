@@ -46,6 +46,20 @@ typedef struct QualCost
 	Cost		per_tuple;		/* per-evaluation cost */
 } QualCost;
 
+/*
+ * Costing aggregate function execution requires these statistics about
+ * the aggregates to be executed by a given Agg node.  Note that transCost
+ * includes the execution costs of the aggregates' input expressions.
+ */
+typedef struct AggClauseCosts
+{
+	int			numAggs;		/* total number of aggregate functions */
+	int			numOrderedAggs; /* number that use DISTINCT or ORDER BY */
+	QualCost	transCost;		/* total per-input-row execution costs */
+	Cost		finalCost;		/* total costs of agg final functions */
+	Size		transitionSpace;	/* space for pass-by-ref transition data */
+} AggClauseCosts;
+
 
 /*----------
  * PlannerGlobal
@@ -215,8 +229,8 @@ typedef struct PlannerInfo
 	struct Plan *non_recursive_plan;	/* plan for non-recursive term */
 
 	/* These fields are workspace for createplan.c */
-	Relids		curOuterRels;			/* outer rels above current node */
-	List	   *curOuterParams;			/* not-yet-assigned NestLoopParams */
+	Relids		curOuterRels;	/* outer rels above current node */
+	List	   *curOuterParams; /* not-yet-assigned NestLoopParams */
 
 	/* optional private data for join_search_hook, e.g., GEQO */
 	void	   *join_search_private;
@@ -423,7 +437,9 @@ typedef struct RelOptInfo
  * IndexOptInfo
  *		Per-index information for planning/optimization
  *
- *		opfamily[], indexkeys[], and opcintype[] each have ncolumns entries.
+ *		indexkeys[], indexcollations[], opfamily[], and opcintype[]
+ *		each have ncolumns entries.
+ *
  *		sortopfamily[], reverse_sort[], and nulls_first[] likewise have
  *		ncolumns entries, if the index is ordered; but if it is unordered,
  *		those pointers are NULL.
@@ -453,9 +469,9 @@ typedef struct IndexOptInfo
 
 	/* index descriptor information */
 	int			ncolumns;		/* number of columns in index */
-	Oid		   *opfamily;		/* OIDs of operator families for columns */
 	int		   *indexkeys;		/* column numbers of index's keys, or 0 */
 	Oid		   *indexcollations;	/* OIDs of collations of index columns */
+	Oid		   *opfamily;		/* OIDs of operator families for columns */
 	Oid		   *opcintype;		/* OIDs of opclass declared input data types */
 	Oid		   *sortopfamily;	/* OIDs of btree opfamilies, if orderable */
 	bool	   *reverse_sort;	/* is sort order descending? */
@@ -470,7 +486,7 @@ typedef struct IndexOptInfo
 	bool		predOK;			/* true if predicate matches query */
 	bool		unique;			/* true if a unique index */
 	bool		hypothetical;	/* true if index doesn't really exist */
-	bool		amcanorderbyop;	/* does AM support order by operator result? */
+	bool		amcanorderbyop; /* does AM support order by operator result? */
 	bool		amoptionalkey;	/* can query omit key for the first column? */
 	bool		amsearchnulls;	/* can AM search for NULL/NOT NULL entries? */
 	bool		amhasgettuple;	/* does AM have amgettuple interface? */
@@ -488,10 +504,13 @@ typedef struct IndexOptInfo
  * require merging two existing EquivalenceClasses.  At the end of the qual
  * distribution process, we have sets of values that are known all transitively
  * equal to each other, where "equal" is according to the rules of the btree
- * operator family(s) shown in ec_opfamilies.  (We restrict an EC to contain
- * only equalities whose operators belong to the same set of opfamilies.  This
- * could probably be relaxed, but for now it's not worth the trouble, since
- * nearly all equality operators belong to only one btree opclass anyway.)
+ * operator family(s) shown in ec_opfamilies, as well as the collation shown
+ * by ec_collation.  (We restrict an EC to contain only equalities whose
+ * operators belong to the same set of opfamilies.	This could probably be
+ * relaxed, but for now it's not worth the trouble, since nearly all equality
+ * operators belong to only one btree opclass anyway.  Similarly, we suppose
+ * that all or none of the input datatypes are collatable, so that a single
+ * collation value is sufficient.)
  *
  * We also use EquivalenceClasses as the base structure for PathKeys, letting
  * us represent knowledge about different sort orderings being equivalent.
@@ -520,6 +539,7 @@ typedef struct EquivalenceClass
 	NodeTag		type;
 
 	List	   *ec_opfamilies;	/* btree operator family OIDs */
+	Oid			ec_collation;	/* collation, if datatypes are collatable */
 	List	   *ec_members;		/* list of EquivalenceMembers */
 	List	   *ec_sources;		/* list of generating RestrictInfos */
 	List	   *ec_derives;		/* list of derived RestrictInfos */
@@ -574,9 +594,10 @@ typedef struct EquivalenceMember
  * represents the primary sort key, the second the first secondary sort key,
  * etc.  The value being sorted is represented by linking to an
  * EquivalenceClass containing that value and including pk_opfamily among its
- * ec_opfamilies.  This is a convenient method because it makes it trivial
- * to detect equivalent and closely-related orderings.	(See optimizer/README
- * for more information.)
+ * ec_opfamilies.  The EquivalenceClass tells which collation to use, too.
+ * This is a convenient method because it makes it trivial to detect
+ * equivalent and closely-related orderings. (See optimizer/README for more
+ * information.)
  *
  * Note: pk_strategy is either BTLessStrategyNumber (for ASC) or
  * BTGreaterStrategyNumber (for DESC).	We assume that all ordering-capable
@@ -589,7 +610,6 @@ typedef struct PathKey
 
 	EquivalenceClass *pk_eclass;	/* the value that is ordered */
 	Oid			pk_opfamily;	/* btree opfamily defining the ordering */
-	Oid			pk_collation;	/* collation */
 	int			pk_strategy;	/* sort direction (ASC or DESC) */
 	bool		pk_nulls_first; /* do NULLs come before normal values? */
 } PathKey;
@@ -1117,7 +1137,7 @@ typedef struct MergeScanSelCache
 {
 	/* Ordering details (cache lookup key) */
 	Oid			opfamily;		/* btree opfamily defining the ordering */
-	Oid			collation;
+	Oid			collation;		/* collation for the ordering */
 	int			strategy;		/* sort direction (ASC or DESC) */
 	bool		nulls_first;	/* do NULLs come before normal values? */
 	/* Results */
@@ -1383,9 +1403,6 @@ typedef struct PlaceHolderInfo
 /*
  * For each potentially index-optimizable MIN/MAX aggregate function,
  * root->minmax_aggs stores a MinMaxAggInfo describing it.
- *
- * Note: a MIN/MAX agg doesn't really care about the nulls_first property,
- * so the pathkey's nulls_first flag should be ignored.
  */
 typedef struct MinMaxAggInfo
 {
@@ -1394,7 +1411,10 @@ typedef struct MinMaxAggInfo
 	Oid			aggfnoid;		/* pg_proc Oid of the aggregate */
 	Oid			aggsortop;		/* Oid of its sort operator */
 	Expr	   *target;			/* expression we are aggregating on */
-	List	   *pathkeys;		/* pathkeys representing needed sort order */
+	PlannerInfo *subroot;		/* modified "root" for planning the subquery */
+	Path	   *path;			/* access path for subquery */
+	Cost		pathcost;		/* estimated cost to fetch first row */
+	Param	   *param;			/* param for subplan's output */
 } MinMaxAggInfo;
 
 /*
@@ -1430,7 +1450,7 @@ typedef struct MinMaxAggInfo
  * to do so for Param slots.  Duplicate detection is actually *necessary*
  * in the case of NestLoop parameters since it serves to match up the usage
  * of a Param (in the inner scan) with the assignment of the value (in the
- * NestLoop node).  This might result in the same PARAM_EXEC slot being used
+ * NestLoop node).	This might result in the same PARAM_EXEC slot being used
  * by multiple NestLoop nodes or SubPlan nodes, but no harm is done since
  * the same value would be assigned anyway.
  */

@@ -72,7 +72,7 @@ typedef struct ArrayIteratorData
 	/* current position information, updated on each iteration */
 	char	   *data_ptr;		/* our current position in the array */
 	int			current_item;	/* the item # we're at in the array */
-} ArrayIteratorData;
+}	ArrayIteratorData;
 
 static bool array_isspace(char ch);
 static int	ArrayCount(const char *str, int *dim, char typdelim);
@@ -1268,7 +1268,8 @@ array_recv(PG_FUNCTION_ARGS)
 		 */
 		if (dim[i] != 0)
 		{
-			int ub = lBound[i] + dim[i] - 1;
+			int			ub = lBound[i] + dim[i] - 1;
+
 			if (lBound[i] > ub)
 				ereport(ERROR,
 						(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
@@ -1338,7 +1339,7 @@ array_recv(PG_FUNCTION_ARGS)
 		dataoffset = 0;			/* marker for no null bitmap */
 		nbytes += ARR_OVERHEAD_NONULLS(ndim);
 	}
-	retval = (ArrayType *) palloc(nbytes);
+	retval = (ArrayType *) palloc0(nbytes);
 	SET_VARSIZE(retval, nbytes);
 	retval->ndim = ndim;
 	retval->dataoffset = dataoffset;
@@ -1976,7 +1977,7 @@ array_get_slice(ArrayType *array,
 		bytes += ARR_OVERHEAD_NONULLS(ndim);
 	}
 
-	newarray = (ArrayType *) palloc(bytes);
+	newarray = (ArrayType *) palloc0(bytes);
 	SET_VARSIZE(newarray, bytes);
 	newarray->ndim = ndim;
 	newarray->dataoffset = dataoffset;
@@ -2229,7 +2230,7 @@ array_set(ArrayType *array,
 	/*
 	 * OK, create the new array and fill in header/dimensions
 	 */
-	newarray = (ArrayType *) palloc(newsize);
+	newarray = (ArrayType *) palloc0(newsize);
 	SET_VARSIZE(newarray, newsize);
 	newarray->ndim = ndim;
 	newarray->dataoffset = newhasnulls ? overheadlen : 0;
@@ -2559,7 +2560,7 @@ array_set_slice(ArrayType *array,
 
 	newsize = overheadlen + olddatasize - olditemsize + newitemsize;
 
-	newarray = (ArrayType *) palloc(newsize);
+	newarray = (ArrayType *) palloc0(newsize);
 	SET_VARSIZE(newarray, newsize);
 	newarray->ndim = ndim;
 	newarray->dataoffset = newhasnulls ? overheadlen : 0;
@@ -2818,7 +2819,7 @@ array_map(FunctionCallInfo fcinfo, Oid inpType, Oid retType,
 		dataoffset = 0;			/* marker for no null bitmap */
 		nbytes += ARR_OVERHEAD_NONULLS(ndim);
 	}
-	result = (ArrayType *) palloc(nbytes);
+	result = (ArrayType *) palloc0(nbytes);
 	SET_VARSIZE(result, nbytes);
 	result->ndim = ndim;
 	result->dataoffset = dataoffset;
@@ -2954,7 +2955,7 @@ construct_md_array(Datum *elems,
 		dataoffset = 0;			/* marker for no null bitmap */
 		nbytes += ARR_OVERHEAD_NONULLS(ndims);
 	}
-	result = (ArrayType *) palloc(nbytes);
+	result = (ArrayType *) palloc0(nbytes);
 	SET_VARSIZE(result, nbytes);
 	result->ndim = ndims;
 	result->dataoffset = dataoffset;
@@ -2978,7 +2979,7 @@ construct_empty_array(Oid elmtype)
 {
 	ArrayType  *result;
 
-	result = (ArrayType *) palloc(sizeof(ArrayType));
+	result = (ArrayType *) palloc0(sizeof(ArrayType));
 	SET_VARSIZE(result, sizeof(ArrayType));
 	result->ndim = 0;
 	result->dataoffset = 0;
@@ -3126,6 +3127,7 @@ array_eq(PG_FUNCTION_ARGS)
 {
 	ArrayType  *array1 = PG_GETARG_ARRAYTYPE_P(0);
 	ArrayType  *array2 = PG_GETARG_ARRAYTYPE_P(1);
+	Oid			collation = PG_GET_COLLATION();
 	int			ndims1 = ARR_NDIM(array1);
 	int			ndims2 = ARR_NDIM(array2);
 	int		   *dims1 = ARR_DIMS(array1);
@@ -3183,7 +3185,7 @@ array_eq(PG_FUNCTION_ARGS)
 		 * apply the operator to each pair of array elements.
 		 */
 		InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2,
-								 NULL, NULL);
+								 collation, NULL, NULL);
 
 		/* Loop over source data */
 		nitems = ArrayGetNItems(ndims1, dims1);
@@ -3366,8 +3368,7 @@ array_cmp(FunctionCallInfo fcinfo)
 	 */
 	typentry = (TypeCacheEntry *) fcinfo->flinfo->fn_extra;
 	if (typentry == NULL ||
-		typentry->type_id != element_type ||
-		typentry->cmp_proc_finfo.fn_collation != collation)
+		typentry->type_id != element_type)
 	{
 		typentry = lookup_type_cache(element_type,
 									 TYPECACHE_CMP_PROC_FINFO);
@@ -3377,7 +3378,6 @@ array_cmp(FunctionCallInfo fcinfo)
 			   errmsg("could not identify a comparison function for type %s",
 					  format_type_be(element_type))));
 		fcinfo->flinfo->fn_extra = (void *) typentry;
-		typentry->cmp_proc_finfo.fn_collation = collation;
 	}
 	typlen = typentry->typlen;
 	typbyval = typentry->typbyval;
@@ -3387,7 +3387,7 @@ array_cmp(FunctionCallInfo fcinfo)
 	 * apply the operator to each pair of array elements.
 	 */
 	InitFunctionCallInfoData(locfcinfo, &typentry->cmp_proc_finfo, 2,
-							 NULL, NULL);
+							 collation, NULL, NULL);
 
 	/* Loop over source data */
 	min_nitems = Min(nitems1, nitems2);
@@ -3572,7 +3572,7 @@ hash_array(PG_FUNCTION_ARGS)
 	 * apply the hash function to each array element.
 	 */
 	InitFunctionCallInfoData(locfcinfo, &typentry->hash_proc_finfo, 1,
-							 NULL, NULL);
+							 InvalidOid, NULL, NULL);
 
 	/* Loop over source data */
 	nitems = ArrayGetNItems(ndims, dims);
@@ -3646,8 +3646,8 @@ hash_array(PG_FUNCTION_ARGS)
  * When matchall is false, return true if any members of array1 are in array2.
  */
 static bool
-array_contain_compare(ArrayType *array1, ArrayType *array2, bool matchall,
-					  void **fn_extra)
+array_contain_compare(ArrayType *array1, ArrayType *array2, Oid collation,
+					  bool matchall, void **fn_extra)
 {
 	bool		result = matchall;
 	Oid			element_type = ARR_ELEMTYPE(array1);
@@ -3706,7 +3706,7 @@ array_contain_compare(ArrayType *array1, ArrayType *array2, bool matchall,
 	 * Apply the comparison operator to each pair of array elements.
 	 */
 	InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2,
-							 NULL, NULL);
+							 collation, NULL, NULL);
 
 	/* Loop over source data */
 	nelems1 = ArrayGetNItems(ARR_NDIM(array1), ARR_DIMS(array1));
@@ -3810,9 +3810,10 @@ arrayoverlap(PG_FUNCTION_ARGS)
 {
 	ArrayType  *array1 = PG_GETARG_ARRAYTYPE_P(0);
 	ArrayType  *array2 = PG_GETARG_ARRAYTYPE_P(1);
+	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
-	result = array_contain_compare(array1, array2, false,
+	result = array_contain_compare(array1, array2, collation, false,
 								   &fcinfo->flinfo->fn_extra);
 
 	/* Avoid leaking memory when handed toasted input. */
@@ -3827,9 +3828,10 @@ arraycontains(PG_FUNCTION_ARGS)
 {
 	ArrayType  *array1 = PG_GETARG_ARRAYTYPE_P(0);
 	ArrayType  *array2 = PG_GETARG_ARRAYTYPE_P(1);
+	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
-	result = array_contain_compare(array2, array1, true,
+	result = array_contain_compare(array2, array1, collation, true,
 								   &fcinfo->flinfo->fn_extra);
 
 	/* Avoid leaking memory when handed toasted input. */
@@ -3844,9 +3846,10 @@ arraycontained(PG_FUNCTION_ARGS)
 {
 	ArrayType  *array1 = PG_GETARG_ARRAYTYPE_P(0);
 	ArrayType  *array2 = PG_GETARG_ARRAYTYPE_P(1);
+	Oid			collation = PG_GET_COLLATION();
 	bool		result;
 
-	result = array_contain_compare(array1, array2, true,
+	result = array_contain_compare(array1, array2, collation, true,
 								   &fcinfo->flinfo->fn_extra);
 
 	/* Avoid leaking memory when handed toasted input. */

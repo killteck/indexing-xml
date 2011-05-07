@@ -1555,7 +1555,7 @@ exec_bind_message(StringInfo input_message)
 
 		/* sizeof(ParamListInfoData) includes the first array element */
 		params = (ParamListInfo) palloc(sizeof(ParamListInfoData) +
-								   (numParams - 1) *sizeof(ParamExternData));
+								  (numParams - 1) * sizeof(ParamExternData));
 		/* we have static list of params, so no hooks needed */
 		params->paramFetch = NULL;
 		params->paramFetchArg = NULL;
@@ -2643,6 +2643,9 @@ die(SIGNAL_ARGS)
 			InterruptHoldoffCount--;
 			ProcessInterrupts();
 		}
+
+		/* Interrupt any sync rep wait which is currently in progress. */
+		SetLatch(&(MyProc->waitLatch));
 	}
 
 	errno = save_errno;
@@ -2681,6 +2684,9 @@ StatementCancelHandler(SIGNAL_ARGS)
 			InterruptHoldoffCount--;
 			ProcessInterrupts();
 		}
+
+		/* Interrupt any sync rep wait which is currently in progress. */
+		SetLatch(&(MyProc->waitLatch));
 	}
 
 	errno = save_errno;
@@ -2798,7 +2804,8 @@ RecoveryConflictInterrupt(ProcSignalReason reason)
 				break;
 
 			default:
-				elog(FATAL, "Unknown conflict mode");
+				elog(FATAL, "unrecognized conflict mode: %d",
+					 (int) reason);
 		}
 
 		Assert(RecoveryConflictPending && (QueryCancelPending || ProcDiePending));
@@ -2960,9 +2967,14 @@ ProcessInterrupts(void)
 /*
  * IA64-specific code to fetch the AR.BSP register for stack depth checks.
  *
- * We currently support gcc and icc here.
+ * We currently support gcc, icc, and HP-UX inline assembly here.
  */
 #if defined(__ia64__) || defined(__ia64)
+
+#if defined(__hpux) && !defined(__GNUC__) && !defined __INTEL_COMPILER
+#include <ia64/sys/inline.h>
+#define ia64_get_bsp() ((char *) (_Asm_mov_from_ar(_AREG_BSP, _NO_FENCE)))
+#else
 
 #ifdef __INTEL_COMPILER
 #include <asm/ia64regs.h>
@@ -2975,17 +2987,17 @@ ia64_get_bsp(void)
 
 #ifndef __INTEL_COMPILER
 	/* the ;; is a "stop", seems to be required before fetching BSP */
-	__asm__ __volatile__(
-		";;\n"
-		"	mov	%0=ar.bsp	\n"
-:		"=r"(ret));
+	__asm__		__volatile__(
+										 ";;\n"
+										 "	mov	%0=ar.bsp	\n"
+							 :			 "=r"(ret));
 #else
-  ret = (char *) __getReg(_IA64_REG_AR_BSP);
+	ret = (char *) __getReg(_IA64_REG_AR_BSP);
 #endif
-  return ret;
+	return ret;
 }
-
-#endif /* IA64 */
+#endif
+#endif   /* IA64 */
 
 
 /*
@@ -3028,7 +3040,7 @@ check_stack_depth(void)
 				(errcode(ERRCODE_STATEMENT_TOO_COMPLEX),
 				 errmsg("stack depth limit exceeded"),
 				 errhint("Increase the configuration parameter \"max_stack_depth\" (currently %dkB), "
-						 "after ensuring the platform's stack depth limit is adequate.",
+			  "after ensuring the platform's stack depth limit is adequate.",
 						 max_stack_depth)));
 	}
 
@@ -3050,31 +3062,36 @@ check_stack_depth(void)
 				(errcode(ERRCODE_STATEMENT_TOO_COMPLEX),
 				 errmsg("stack depth limit exceeded"),
 				 errhint("Increase the configuration parameter \"max_stack_depth\" (currently %dkB), "
-						 "after ensuring the platform's stack depth limit is adequate.",
+			  "after ensuring the platform's stack depth limit is adequate.",
 						 max_stack_depth)));
 	}
-#endif /* IA64 */
+#endif   /* IA64 */
 }
 
-/* GUC assign hook for max_stack_depth */
+/* GUC check hook for max_stack_depth */
 bool
-assign_max_stack_depth(int newval, bool doit, GucSource source)
+check_max_stack_depth(int *newval, void **extra, GucSource source)
 {
-	long		newval_bytes = newval * 1024L;
+	long		newval_bytes = *newval * 1024L;
 	long		stack_rlimit = get_stack_depth_rlimit();
 
 	if (stack_rlimit > 0 && newval_bytes > stack_rlimit - STACK_DEPTH_SLOP)
 	{
-		ereport(GUC_complaint_elevel(source),
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("\"max_stack_depth\" must not exceed %ldkB",
-						(stack_rlimit - STACK_DEPTH_SLOP) / 1024L),
-				 errhint("Increase the platform's stack depth limit via \"ulimit -s\" or local equivalent.")));
+		GUC_check_errdetail("\"max_stack_depth\" must not exceed %ldkB.",
+							(stack_rlimit - STACK_DEPTH_SLOP) / 1024L);
+		GUC_check_errhint("Increase the platform's stack depth limit via \"ulimit -s\" or local equivalent.");
 		return false;
 	}
-	if (doit)
-		max_stack_depth_bytes = newval_bytes;
 	return true;
+}
+
+/* GUC assign hook for max_stack_depth */
+void
+assign_max_stack_depth(int newval, void *extra)
+{
+	long		newval_bytes = newval * 1024L;
+
+	max_stack_depth_bytes = newval_bytes;
 }
 
 
@@ -3221,7 +3238,7 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx)
 	 * postmaster/postmaster.c (the option sets should not conflict) and with
 	 * the common help() function in main/main.c.
 	 */
-	while ((flag = getopt(argc, argv, "A:B:c:D:d:EeFf:h:ijk:lN:nOo:Pp:r:S:sTt:v:W:-:")) != -1)
+	while ((flag = getopt(argc, argv, "A:B:bc:D:d:EeFf:h:ijk:lN:nOo:Pp:r:S:sTt:v:W:-:")) != -1)
 	{
 		switch (flag)
 		{
@@ -3231,6 +3248,11 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx)
 
 			case 'B':
 				SetConfigOption("shared_buffers", optarg, ctx, gucsource);
+				break;
+
+			case 'b':
+				/* Undocumented flag used for binary upgrades */
+				IsBinaryUpgrade = true;
 				break;
 
 			case 'D':

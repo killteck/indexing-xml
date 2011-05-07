@@ -905,44 +905,17 @@ get_atttypmod(Oid relid, AttrNumber attnum)
 }
 
 /*
- * get_attcollation
+ * get_atttypetypmodcoll
  *
- *		Given the relation id and the attribute number,
- *		return the "attcollation" field from the attribute relation.
- */
-Oid
-get_attcollation(Oid relid, AttrNumber attnum)
-{
-	HeapTuple	tp;
-
-	tp = SearchSysCache2(ATTNUM,
-						 ObjectIdGetDatum(relid),
-						 Int16GetDatum(attnum));
-	if (HeapTupleIsValid(tp))
-	{
-		Form_pg_attribute att_tup = (Form_pg_attribute) GETSTRUCT(tp);
-		Oid		result;
-
-		result = att_tup->attcollation;
-		ReleaseSysCache(tp);
-		return result;
-	}
-	else
-		return InvalidOid;
-}
-
-/*
- * get_atttypetypmod
- *
- *		A two-fer: given the relation id and the attribute number,
- *		fetch both type OID and atttypmod in a single cache lookup.
+ *		A three-fer: given the relation id and the attribute number,
+ *		fetch atttypid, atttypmod, and attcollation in a single cache lookup.
  *
  * Unlike the otherwise-similar get_atttype/get_atttypmod, this routine
  * raises an error if it can't obtain the information.
  */
 void
-get_atttypetypmod(Oid relid, AttrNumber attnum,
-				  Oid *typid, int32 *typmod)
+get_atttypetypmodcoll(Oid relid, AttrNumber attnum,
+					  Oid *typid, int32 *typmod, Oid *collid)
 {
 	HeapTuple	tp;
 	Form_pg_attribute att_tup;
@@ -957,6 +930,7 @@ get_atttypetypmod(Oid relid, AttrNumber attnum,
 
 	*typid = att_tup->atttypid;
 	*typmod = att_tup->atttypmod;
+	*collid = att_tup->attcollation;
 	ReleaseSysCache(tp);
 }
 
@@ -1149,7 +1123,7 @@ op_input_types(Oid opno, Oid *lefttype, Oid *righttype)
  *
  * In some cases (currently only array_eq), mergejoinability depends on the
  * specific input data type the operator is invoked for, so that must be
- * passed as well.  We currently assume that only one input's type is needed
+ * passed as well.	We currently assume that only one input's type is needed
  * to check this --- by convention, pass the left input's data type.
  */
 bool
@@ -1199,7 +1173,7 @@ op_mergejoinable(Oid opno, Oid inputtype)
  *
  * In some cases (currently only array_eq), hashjoinability depends on the
  * specific input data type the operator is invoked for, so that must be
- * passed as well.  We currently assume that only one input's type is needed
+ * passed as well.	We currently assume that only one input's type is needed
  * to check this --- by convention, pass the left input's data type.
  */
 bool
@@ -2083,6 +2057,7 @@ get_typdefault(Oid typid)
 			/* Build a Const node containing the value */
 			expr = (Node *) makeConst(typid,
 									  -1,
+									  type->typcollation,
 									  type->typlen,
 									  datum,
 									  false,
@@ -2743,9 +2718,9 @@ get_attstatsslot(HeapTuple statstuple,
 		/*
 		 * Need to get info about the array element type.  We look at the
 		 * actual element type embedded in the array, which might be only
-		 * binary-compatible with the passed-in atttype.  The info we
-		 * extract here should be the same either way, but deconstruct_array
-		 * is picky about having an exact type OID match.
+		 * binary-compatible with the passed-in atttype.  The info we extract
+		 * here should be the same either way, but deconstruct_array is picky
+		 * about having an exact type OID match.
 		 */
 		arrayelemtype = ARR_ELEMTYPE(statarray);
 		typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(arrayelemtype));

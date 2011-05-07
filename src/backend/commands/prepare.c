@@ -23,6 +23,7 @@
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_type.h"
 #include "rewrite/rewriteHandler.h"
@@ -368,6 +369,9 @@ EvaluateParams(PreparedStatement *pstmt, List *params,
 							format_type_be(expected_type_id)),
 			   errhint("You will need to rewrite or cast the expression.")));
 
+		/* Take care of collations in the finished expression. */
+		assign_expr_collations(pstate, expr);
+
 		lfirst(l) = expr;
 		i++;
 	}
@@ -378,7 +382,7 @@ EvaluateParams(PreparedStatement *pstmt, List *params,
 	/* sizeof(ParamListInfoData) includes the first array element */
 	paramLI = (ParamListInfo)
 		palloc(sizeof(ParamListInfoData) +
-			   (num_params - 1) *sizeof(ParamExternData));
+			   (num_params - 1) * sizeof(ParamExternData));
 	/* we have static list of params, so no hooks needed */
 	paramLI->paramFetch = NULL;
 	paramLI->paramFetchArg = NULL;

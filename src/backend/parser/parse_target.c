@@ -40,6 +40,7 @@ static Node *transformAssignmentIndirection(ParseState *pstate,
 							   bool targetIsArray,
 							   Oid targetTypeId,
 							   int32 targetTypMod,
+							   Oid targetCollation,
 							   ListCell *indirection,
 							   Node *rhs,
 							   int location);
@@ -48,6 +49,7 @@ static Node *transformAssignmentSubscripts(ParseState *pstate,
 							  const char *targetName,
 							  Oid targetTypeId,
 							  int32 targetTypMod,
+							  Oid targetCollation,
 							  List *subscripts,
 							  bool isSlice,
 							  ListCell *next_indirection,
@@ -370,7 +372,7 @@ transformAssignedExpr(ParseState *pstate,
 	Oid			type_id;		/* type of value provided */
 	Oid			attrtype;		/* type of target column */
 	int32		attrtypmod;
-	Oid			attrcollation;
+	Oid			attrcollation;	/* collation of target column */
 	Relation	rd = pstate->p_target_relation;
 
 	Assert(rd != NULL);
@@ -386,11 +388,12 @@ transformAssignedExpr(ParseState *pstate,
 
 	/*
 	 * If the expression is a DEFAULT placeholder, insert the attribute's
-	 * type/typmod into it so that exprType will report the right things. (We
-	 * expect that the eventually substituted default expression will in fact
-	 * have this type and typmod.)	Also, reject trying to update a subfield
-	 * or array element with DEFAULT, since there can't be any default for
-	 * portions of a column.
+	 * type/typmod/collation into it so that exprType etc will report the
+	 * right things.  (We expect that the eventually substituted default
+	 * expression will in fact have this type and typmod.  The collation
+	 * likely doesn't matter, but let's set it correctly anyway.)  Also,
+	 * reject trying to update a subfield or array element with DEFAULT, since
+	 * there can't be any default for portions of a column.
 	 */
 	if (expr && IsA(expr, SetToDefault))
 	{
@@ -398,7 +401,7 @@ transformAssignedExpr(ParseState *pstate,
 
 		def->typeId = attrtype;
 		def->typeMod = attrtypmod;
-		def->collid = attrcollation;
+		def->collation = attrcollation;
 		if (indirection)
 		{
 			if (IsA(linitial(indirection), A_Indices))
@@ -434,7 +437,8 @@ transformAssignedExpr(ParseState *pstate,
 			 * is not really a source value to work with. Insert a NULL
 			 * constant as the source value.
 			 */
-			colVar = (Node *) makeNullConst(attrtype, attrtypmod);
+			colVar = (Node *) makeNullConst(attrtype, attrtypmod,
+											attrcollation);
 		}
 		else
 		{
@@ -454,6 +458,7 @@ transformAssignedExpr(ParseState *pstate,
 										   false,
 										   attrtype,
 										   attrtypmod,
+										   attrcollation,
 										   list_head(indirection),
 										   (Node *) expr,
 										   location);
@@ -547,8 +552,9 @@ updateTargetListEntry(ParseState *pstate,
  * targetIsArray is true if we're subscripting it.  These are just for
  * error reporting.
  *
- * targetTypeId and targetTypMod indicate the datatype of the object to
- * be assigned to (initially the target column, later some subobject).
+ * targetTypeId, targetTypMod, targetCollation indicate the datatype and
+ * collation of the object to be assigned to (initially the target column,
+ * later some subobject).
  *
  * indirection is the sublist remaining to process.  When it's NULL, we're
  * done recursing and can just coerce and return the RHS.
@@ -568,6 +574,7 @@ transformAssignmentIndirection(ParseState *pstate,
 							   bool targetIsArray,
 							   Oid targetTypeId,
 							   int32 targetTypMod,
+							   Oid targetCollation,
 							   ListCell *indirection,
 							   Node *rhs,
 							   int location)
@@ -584,6 +591,7 @@ transformAssignmentIndirection(ParseState *pstate,
 
 		ctest->typeId = targetTypeId;
 		ctest->typeMod = targetTypMod;
+		ctest->collation = targetCollation;
 		basenode = (Node *) ctest;
 	}
 
@@ -616,6 +624,7 @@ transformAssignmentIndirection(ParseState *pstate,
 			AttrNumber	attnum;
 			Oid			fieldTypeId;
 			int32		fieldTypMod;
+			Oid			fieldCollation;
 
 			Assert(IsA(n, String));
 
@@ -628,6 +637,7 @@ transformAssignmentIndirection(ParseState *pstate,
 													 targetName,
 													 targetTypeId,
 													 targetTypMod,
+													 targetCollation,
 													 subscripts,
 													 isSlice,
 													 i,
@@ -661,8 +671,8 @@ transformAssignmentIndirection(ParseState *pstate,
 								strVal(n)),
 						 parser_errposition(pstate, location)));
 
-			get_atttypetypmod(typrelid, attnum,
-							  &fieldTypeId, &fieldTypMod);
+			get_atttypetypmodcoll(typrelid, attnum,
+								&fieldTypeId, &fieldTypMod, &fieldCollation);
 
 			/* recurse to create appropriate RHS for field assign */
 			rhs = transformAssignmentIndirection(pstate,
@@ -671,6 +681,7 @@ transformAssignmentIndirection(ParseState *pstate,
 												 false,
 												 fieldTypeId,
 												 fieldTypMod,
+												 fieldCollation,
 												 lnext(i),
 												 rhs,
 												 location);
@@ -695,6 +706,7 @@ transformAssignmentIndirection(ParseState *pstate,
 											 targetName,
 											 targetTypeId,
 											 targetTypMod,
+											 targetCollation,
 											 subscripts,
 											 isSlice,
 											 NULL,
@@ -746,6 +758,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 							  const char *targetName,
 							  Oid targetTypeId,
 							  int32 targetTypMod,
+							  Oid targetCollation,
 							  List *subscripts,
 							  bool isSlice,
 							  ListCell *next_indirection,
@@ -757,6 +770,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 	int32		arrayTypMod;
 	Oid			elementTypeId;
 	Oid			typeNeeded;
+	Oid			collationNeeded;
 
 	Assert(subscripts != NIL);
 
@@ -768,6 +782,16 @@ transformAssignmentSubscripts(ParseState *pstate,
 	/* Identify type that RHS must provide */
 	typeNeeded = isSlice ? arrayType : elementTypeId;
 
+	/*
+	 * Array normally has same collation as elements, but there's an
+	 * exception: we might be subscripting a domain over an array type. In
+	 * that case use collation of the base type.
+	 */
+	if (arrayType == targetTypeId)
+		collationNeeded = targetCollation;
+	else
+		collationNeeded = get_typcollation(arrayType);
+
 	/* recurse to create appropriate RHS for array assign */
 	rhs = transformAssignmentIndirection(pstate,
 										 NULL,
@@ -775,6 +799,7 @@ transformAssignmentSubscripts(ParseState *pstate,
 										 true,
 										 typeNeeded,
 										 arrayTypMod,
+										 collationNeeded,
 										 next_indirection,
 										 rhs,
 										 location);
@@ -785,7 +810,6 @@ transformAssignmentSubscripts(ParseState *pstate,
 											   arrayType,
 											   elementTypeId,
 											   arrayTypMod,
-											   InvalidOid,
 											   subscripts,
 											   rhs);
 
@@ -1267,7 +1291,8 @@ ExpandRowReference(ParseState *pstate, Node *expr,
 		fselect->fieldnum = i + 1;
 		fselect->resulttype = att->atttypid;
 		fselect->resulttypmod = att->atttypmod;
-		fselect->resultcollation = att->attcollation;
+		/* save attribute's collation for parse_collate.c */
+		fselect->resultcollid = att->attcollation;
 
 		if (targetlist)
 		{

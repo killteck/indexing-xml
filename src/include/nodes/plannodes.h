@@ -171,7 +171,7 @@ typedef struct ModifyTable
 	CmdType		operation;		/* INSERT, UPDATE, or DELETE */
 	bool		canSetTag;		/* do we set the command tag/es_processed? */
 	List	   *resultRelations;	/* integer list of RT indexes */
-	int			resultRelIndex;	/* index of first resultRel in plan's list */
+	int			resultRelIndex; /* index of first resultRel in plan's list */
 	List	   *plans;			/* plan(s) producing source data */
 	List	   *returningLists; /* per-target-table RETURNING tlists */
 	List	   *rowMarks;		/* PlanRowMarks (non-locking only) */
@@ -296,7 +296,7 @@ typedef Scan SeqScan;
  * that are being implemented by the index, while indexorderby is modified to
  * have index column Vars on the left-hand side.  Here, multiple expressions
  * must appear in exactly the ORDER BY order, and this is not necessarily the
- * index column order.  Only the expressions are provided, not the auxiliary
+ * index column order.	Only the expressions are provided, not the auxiliary
  * sort-order information from the ORDER BY SortGroupClauses; it's assumed
  * that the sort ordering is fully determinable from the top-level operators.
  * indexorderbyorig is unused at run time, but is needed for EXPLAIN.
@@ -309,8 +309,8 @@ typedef struct IndexScan
 	Oid			indexid;		/* OID of index to scan */
 	List	   *indexqual;		/* list of index quals (usually OpExprs) */
 	List	   *indexqualorig;	/* the same in original form */
-	List	   *indexorderby;		/* list of index ORDER BY exprs */
-	List	   *indexorderbyorig;	/* the same in original form */
+	List	   *indexorderby;	/* list of index ORDER BY exprs */
+	List	   *indexorderbyorig;		/* the same in original form */
 	ScanDirection indexorderdir;	/* forward or backward or don't care */
 } IndexScan;
 
@@ -406,7 +406,7 @@ typedef struct FunctionScan
 	List	   *funccolnames;	/* output column names (string Value nodes) */
 	List	   *funccoltypes;	/* OID list of column type OIDs */
 	List	   *funccoltypmods; /* integer list of column typmods */
-	List	   *funccolcollations;	/* OID list of column collation OIDs */
+	List	   *funccolcollations;		/* OID list of column collation OIDs */
 } FunctionScan;
 
 /* ----------------
@@ -508,11 +508,11 @@ typedef struct NestLoopParam
  *		merge join node
  *
  * The expected ordering of each mergeable column is described by a btree
- * opfamily OID, a direction (BTLessStrategyNumber or BTGreaterStrategyNumber)
- * and a nulls-first flag.	Note that the two sides of each mergeclause may
- * be of different datatypes, but they are ordered the same way according to
- * the common opfamily.  The operator in each mergeclause must be an equality
- * operator of the indicated opfamily.
+ * opfamily OID, a collation OID, a direction (BTLessStrategyNumber or
+ * BTGreaterStrategyNumber) and a nulls-first flag.  Note that the two sides
+ * of each mergeclause may be of different datatypes, but they are ordered the
+ * same way according to the common opfamily and collation.  The operator in
+ * each mergeclause must be an equality operator of the indicated opfamily.
  * ----------------
  */
 typedef struct MergeJoin

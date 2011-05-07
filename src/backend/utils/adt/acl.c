@@ -113,7 +113,7 @@ static AclMode convert_role_priv_string(text *priv_type_text);
 static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode);
 
 static void RoleMembershipCacheCallback(Datum arg, int cacheid, ItemPointer tuplePtr);
-static Oid get_role_oid_or_public(const char *rolname);
+static Oid	get_role_oid_or_public(const char *rolname);
 
 
 /*
@@ -781,10 +781,6 @@ acldefault(GrantObjectType objtype, Oid ownerId)
 		case ACL_OBJECT_FOREIGN_SERVER:
 			world_default = ACL_NO_RIGHTS;
 			owner_default = ACL_ALL_RIGHTS_FOREIGN_SERVER;
-			break;
-		case ACL_OBJECT_FOREIGN_TABLE:
-			world_default = ACL_NO_RIGHTS;
-			owner_default = ACL_ALL_RIGHTS_FOREIGN_TABLE;
 			break;
 		default:
 			elog(ERROR, "unrecognized objtype: %d", (int) objtype);
@@ -3162,7 +3158,7 @@ convert_foreign_data_wrapper_name(text *fdwname)
 {
 	char	   *fdwstr = text_to_cstring(fdwname);
 
-	return GetForeignDataWrapperOidByName(fdwstr, false);
+	return get_foreign_data_wrapper_oid(fdwstr, false);
 }
 
 /*
@@ -3928,7 +3924,7 @@ convert_server_name(text *servername)
 {
 	char	   *serverstr = text_to_cstring(servername);
 
-	return GetForeignServerOidByName(serverstr, false);
+	return get_foreign_server_oid(serverstr, false);
 }
 
 /*
@@ -4829,7 +4825,7 @@ get_role_oid(const char *rolname, bool missing_ok)
 
 /*
  * get_role_oid_or_public - As above, but return ACL_ID_PUBLIC if the
- * 		role name is "public".
+ *		role name is "public".
  */
 static Oid
 get_role_oid_or_public(const char *rolname)

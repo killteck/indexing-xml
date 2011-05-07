@@ -21,6 +21,7 @@ CREATE ROLE regress_test_indirect;
 CREATE ROLE unprivileged_role;
 
 CREATE FOREIGN DATA WRAPPER dummy;
+COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless';
 CREATE FOREIGN DATA WRAPPER postgresql VALIDATOR postgresql_fdw_validator;
 
 -- At this point we should have 2 built-in wrappers and no servers.
@@ -99,6 +100,7 @@ DROP ROLE regress_test_role_super;
 
 CREATE FOREIGN DATA WRAPPER foo;
 CREATE SERVER s1 FOREIGN DATA WRAPPER foo;
+COMMENT ON SERVER s1 IS 'foreign server';
 CREATE USER MAPPING FOR current_user SERVER s1;
 \dew+
 \des+
@@ -441,7 +443,11 @@ DROP SERVER s5 CASCADE;
 DROP SERVER t1 CASCADE;
 DROP SERVER t2;
 DROP USER MAPPING FOR regress_test_role SERVER s6;
+-- This test causes some order dependent cascade detail output,
+-- so switch to terse mode for it. 
+\set VERBOSITY terse
 DROP FOREIGN DATA WRAPPER foo CASCADE;
+\set VERBOSITY default
 DROP SERVER s8 CASCADE;
 DROP ROLE regress_test_indirect;
 DROP ROLE regress_test_role;

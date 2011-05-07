@@ -364,7 +364,7 @@ pg_stat_get_vacuum_count(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	int64		result;
-	PgStat_StatTabEntry	*tabentry;
+	PgStat_StatTabEntry *tabentry;
 
 	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)
 		result = 0;
@@ -379,7 +379,7 @@ pg_stat_get_autovacuum_count(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	int64		result;
-	PgStat_StatTabEntry	*tabentry;
+	PgStat_StatTabEntry *tabentry;
 
 	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)
 		result = 0;
@@ -394,7 +394,7 @@ pg_stat_get_analyze_count(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	int64		result;
-	PgStat_StatTabEntry	*tabentry;
+	PgStat_StatTabEntry *tabentry;
 
 	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)
 		result = 0;
@@ -409,7 +409,7 @@ pg_stat_get_autoanalyze_count(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	int64		result;
-	PgStat_StatTabEntry	*tabentry;
+	PgStat_StatTabEntry *tabentry;
 
 	if ((tabentry = pgstat_fetch_stat_tabentry(relid)) == NULL)
 		result = 0;
@@ -507,18 +507,30 @@ pg_stat_get_activity(PG_FUNCTION_ARGS)
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
 		tupdesc = CreateTemplateTupleDesc(12, false);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "datid", OIDOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "procpid", INT4OID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "usesysid", OIDOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "application_name", TEXTOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 5, "current_query", TEXTOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 6, "waiting", BOOLOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 7, "act_start", TIMESTAMPTZOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 8, "query_start", TIMESTAMPTZOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 9, "backend_start", TIMESTAMPTZOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 10, "client_addr", INETOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 11, "client_hostname", TEXTOID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 12, "client_port", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "datid",
+						   OIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "procpid",
+						   INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "usesysid",
+						   OIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "application_name",
+						   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 5, "current_query",
+						   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 6, "waiting",
+						   BOOLOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 7, "act_start",
+						   TIMESTAMPTZOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 8, "query_start",
+						   TIMESTAMPTZOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 9, "backend_start",
+						   TIMESTAMPTZOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 10, "client_addr",
+						   INETOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 11, "client_hostname",
+						   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 12, "client_port",
+						   INT4OID, -1, 0);
 
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -1251,11 +1263,11 @@ pg_stat_get_db_conflict_all(PG_FUNCTION_ARGS)
 		result = 0;
 	else
 		result = (int64) (
-			dbentry->n_conflict_tablespace +
-			dbentry->n_conflict_lock +
-			dbentry->n_conflict_snapshot +
-			dbentry->n_conflict_bufferpin +
-			dbentry->n_conflict_startup_deadlock);
+						  dbentry->n_conflict_tablespace +
+						  dbentry->n_conflict_lock +
+						  dbentry->n_conflict_snapshot +
+						  dbentry->n_conflict_bufferpin +
+						  dbentry->n_conflict_startup_deadlock);
 
 	PG_RETURN_INT64(result);
 }

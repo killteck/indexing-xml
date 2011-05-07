@@ -114,10 +114,7 @@ installdirs: installdirs-lib
 uninstall: uninstall-lib uninstall-data
 
 install-data: installdirs
-	@for file in $(addprefix $(srcdir)/, $(DATA)); do \
-	  echo "$(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/extension'"; \
-	  $(INSTALL_DATA) $$file '$(DESTDIR)$(datadir)/extension'; \
-	done
+	$(INSTALL_DATA) $(addprefix $(srcdir)/, $(DATA)) '$(DESTDIR)$(datadir)/extension/'
 
 uninstall-data:
 	rm -f $(addprefix '$(DESTDIR)$(datadir)/extension'/, $(notdir $(DATA)))
@@ -141,7 +138,7 @@ prep3:
 	      -e "s/LANGUAGE plpython2u/LANGUAGE plpython3u/g" \
 	      -e "s/EXTENSION plpythonu/EXTENSION plpython3u/g" \
 	      -e "s/EXTENSION plpython2u/EXTENSION plpython3u/g" \
-	    $$file >`echo $$file | sed 's,$(srcdir),python3,'`; \
+	    $$file >`echo $$file | sed 's,$(srcdir),python3,'` || exit; \
 	done
 
 clean3:

@@ -4,7 +4,7 @@
  *	  Routines to preprocess the parse tree target list
  *
  * For INSERT and UPDATE queries, the targetlist must contain an entry for
- * each attribute of the target relation in the correct order.  For all query
+ * each attribute of the target relation in the correct order.	For all query
  * types, we may need to add junk tlist entries for Vars used in the RETURNING
  * list and row ID information needed for EvalPlanQual checking.
  *
@@ -80,7 +80,7 @@ preprocess_targetlist(PlannerInfo *root, List *tlist)
 	/*
 	 * Add necessary junk columns for rowmarked rels.  These values are needed
 	 * for locking of rels selected FOR UPDATE/SHARE, and to do EvalPlanQual
-	 * rechecking.  See comments for PlanRowMark in plannodes.h.
+	 * rechecking.	See comments for PlanRowMark in plannodes.h.
 	 */
 	foreach(lc, root->rowMarks)
 	{
@@ -269,6 +269,7 @@ expand_targetlist(List *tlist, int command_type,
 					{
 						new_expr = (Node *) makeConst(atttype,
 													  -1,
+													  attcollation,
 													  att_tup->attlen,
 													  (Datum) 0,
 													  true,		/* isnull */
@@ -286,6 +287,7 @@ expand_targetlist(List *tlist, int command_type,
 						/* Insert NULL for dropped column */
 						new_expr = (Node *) makeConst(INT4OID,
 													  -1,
+													  InvalidOid,
 													  sizeof(int32),
 													  (Datum) 0,
 													  true,		/* isnull */
@@ -307,6 +309,7 @@ expand_targetlist(List *tlist, int command_type,
 						/* Insert NULL for dropped column */
 						new_expr = (Node *) makeConst(INT4OID,
 													  -1,
+													  InvalidOid,
 													  sizeof(int32),
 													  (Datum) 0,
 													  true,		/* isnull */

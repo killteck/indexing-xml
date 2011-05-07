@@ -51,6 +51,7 @@
 #include "miscadmin.h"
 #include "optimizer/var.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_func.h"
 #include "parser/parse_type.h"
@@ -334,6 +335,7 @@ examine_parameter_list(List *parameters, Oid languageOid,
 
 			def = transformExpr(pstate, fp->defexpr);
 			def = coerce_to_specific_type(pstate, def, toid, "DEFAULT");
+			assign_expr_collations(pstate, def);
 
 			/*
 			 * Make sure no variables are referred to.
@@ -1663,7 +1665,7 @@ CreateCast(CreateCastStmt *stmt)
 		 * We also disallow creating binary-compatibility casts involving
 		 * domains.  Casting from a domain to its base type is already
 		 * allowed, and casting the other way ought to go through domain
-		 * coercion to permit constraint checking.  Again, if you're intent on
+		 * coercion to permit constraint checking.	Again, if you're intent on
 		 * having your own semantics for that, create a no-op cast function.
 		 *
 		 * NOTE: if we were to relax this, the above checks for composites
@@ -1828,7 +1830,7 @@ DropCast(DropCastStmt *stmt)
 Oid
 get_cast_oid(Oid sourcetypeid, Oid targettypeid, bool missing_ok)
 {
-	Oid		oid;
+	Oid			oid;
 
 	oid = GetSysCacheOid2(CASTSOURCETARGET,
 						  ObjectIdGetDatum(sourcetypeid),

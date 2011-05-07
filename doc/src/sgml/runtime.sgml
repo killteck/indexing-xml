@@ -142,13 +142,16 @@ postgres$ <userinput>initdb -D /usr/local/pgsql/data</userinput>
    trust other local users, we recommend you use one of
    <command>initdb</command>'s <option>-W</option>, <option>--pwprompt</option>
    or <option>--pwfile</option> options to assign a password to the
-   database superuser.<indexterm><primary>password</><secondary>of the
-   superuser</></indexterm>  Also, specify <option>-A md5</> or
+   database superuser.<indexterm>
+     <primary>password</>
+     <secondary>of the superuser</>
+   </indexterm>
+   Also, specify <option>-A md5</> or
    <option>-A password</> so that the default <literal>trust</> authentication
    mode is not used; or modify the generated <filename>pg_hba.conf</filename>
    file after running <command>initdb</command>, but
    <emphasis>before</> you start the server for the first time. (Other
-   reasonable approaches include using <literal>ident</literal> authentication
+   reasonable approaches include using <literal>peer</literal> authentication
    or file system permissions to restrict connections. See <xref
    linkend="client-authentication"> for more information.)
   </para>
@@ -264,8 +267,11 @@ pg_ctl start -l logfile
 
   <para>
    Normally, you will want to start the database server when the
-   computer boots.<indexterm><primary>booting</><secondary>starting
-   the server during</></> Autostart scripts are operating-system-specific.
+   computer boots.<indexterm>
+     <primary>booting</>
+     <secondary>starting the server during</>
+   </indexterm>
+   Autostart scripts are operating-system-specific.
    There are a few distributed with
    <productname>PostgreSQL</productname> in the
    <filename>contrib/start-scripts</> directory. Installing one will require
@@ -2091,12 +2097,11 @@ pg_dumpall -p 5432 | psql -d postgres -p 5433
 
   <sect2 id="ssl-server-files">
    <title>SSL Server File Usage</title>
-  <para>
-   The files <filename>server.key</>, <filename>server.crt</>,
-   <filename>root.crt</filename>, and <filename>root.crl</filename>
-   are only examined during server start; so you must restart
-   the server for changes in them to take effect.
-  </para>
+
+   <para>
+    <xref linkend="ssl-file-usage"> summarizes the files that are
+    relevant to the SSL setup on the server.
+   </para>
 
   <table id="ssl-file-usage">
    <title>SSL Server File Usage</title>
@@ -2140,6 +2145,13 @@ pg_dumpall -p 5432 | psql -d postgres -p 5433
     </tbody>
    </tgroup>
   </table>
+
+   <para>
+    The files <filename>server.key</>, <filename>server.crt</>,
+    <filename>root.crt</filename>, and <filename>root.crl</filename>
+    are only examined during server start; so you must restart
+    the server for changes in them to take effect.
+   </para>
   </sect2>
 
   <sect2 id="ssl-certificate-creation">

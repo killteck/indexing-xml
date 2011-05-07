@@ -82,6 +82,7 @@ static char *username = "";
 static bool pwprompt = false;
 static char *pwfilename = NULL;
 static char *authmethod = "";
+static char *authmethodlocal = "";
 static bool debug = false;
 static bool noclean = false;
 static bool show_setting = false;
@@ -184,6 +185,7 @@ static int	locale_date_order(const char *locale);
 static bool check_locale_name(const char *locale);
 static bool check_locale_encoding(const char *locale, int encoding);
 static void setlocales(void);
+static char *localemap(char *locale);
 static void usage(const char *progname);
 
 #ifdef WIN32
@@ -229,7 +231,7 @@ do { \
 
 #define PG_CMD_PRINTF3(fmt, arg1, arg2, arg3)		\
 do { \
-	if (fprintf(cmdfd, fmt, arg1, arg2, arg3) < 0 || fflush(cmdfd) < 0)	\
+	if (fprintf(cmdfd, fmt, arg1, arg2, arg3) < 0 || fflush(cmdfd) < 0) \
 		output_failed = true, output_errno = errno; \
 } while (0)
 
@@ -1076,6 +1078,9 @@ setup_config(void)
 	conflines = replace_token(conflines,
 							  "@authmethod@",
 							  authmethod);
+	conflines = replace_token(conflines,
+							  "@authmethodlocal@",
+							  authmethodlocal);
 
 	conflines = replace_token(conflines,
 							  "@authcomment@",
@@ -1160,9 +1165,9 @@ bootstrap_template1(void)
 
 	bki_lines = replace_token(bki_lines, "ENCODING", encodingid);
 
-	bki_lines = replace_token(bki_lines, "LC_COLLATE", lc_collate);
+	bki_lines = replace_token(bki_lines, "LC_COLLATE", escape_quotes(lc_collate));
 
-	bki_lines = replace_token(bki_lines, "LC_CTYPE", lc_ctype);
+	bki_lines = replace_token(bki_lines, "LC_CTYPE", escape_quotes(lc_ctype));
 
 	/*
 	 * Pass correct LC_xxx environment to bootstrap.
@@ -1499,7 +1504,7 @@ setup_description(void)
 	/* Create default descriptions for operator implementation functions */
 	PG_CMD_PUTS("WITH funcdescs AS ( "
 				"SELECT p.oid as p_oid, oprname, "
-				"coalesce(obj_description(o.oid, 'pg_operator'),'') as opdesc "
+			  "coalesce(obj_description(o.oid, 'pg_operator'),'') as opdesc "
 				"FROM pg_proc p JOIN pg_operator o ON oprcode = p.oid ) "
 				"INSERT INTO pg_description "
 				"  SELECT p_oid, 'pg_proc'::regclass, 0, "
@@ -1507,7 +1512,7 @@ setup_description(void)
 				"  FROM funcdescs "
 				"  WHERE opdesc NOT LIKE 'deprecated%' AND "
 				"  NOT EXISTS (SELECT 1 FROM pg_description "
-                "    WHERE objoid = p_oid AND classoid = 'pg_proc'::regclass);\n");
+		  "    WHERE objoid = p_oid AND classoid = 'pg_proc'::regclass);\n");
 
 	PG_CMD_CLOSE;
 
@@ -1524,9 +1529,9 @@ setup_description(void)
 static bool
 normalize_locale_name(char *new, const char *old)
 {
-	char   *n = new;
+	char	   *n = new;
 	const char *o = old;
-	bool	changed = false;
+	bool		changed = false;
 
 	while (*o)
 	{
@@ -1548,7 +1553,7 @@ normalize_locale_name(char *new, const char *old)
 
 	return changed;
 }
-#endif /* HAVE_LOCALE_T */
+#endif   /* HAVE_LOCALE_T */
 
 /*
  * populate pg_collation
@@ -1556,18 +1561,19 @@ normalize_locale_name(char *new, const char *old)
 static void
 setup_collation(void)
 {
-#ifdef HAVE_LOCALE_T
-	int i;
-	FILE   *locale_a_handle;
-	char	localebuf[NAMEDATALEN];
-	int		skipped = 0;
+#if defined(HAVE_LOCALE_T) && !defined(WIN32)
+	int			i;
+	FILE	   *locale_a_handle;
+	char		localebuf[NAMEDATALEN];
+	int			count = 0;
+
 	PG_CMD_DECL;
 #endif
 
 	fputs(_("creating collations ... "), stdout);
 	fflush(stdout);
 
-#ifdef HAVE_LOCALE_T
+#if defined(HAVE_LOCALE_T) && !defined(WIN32)
 	snprintf(cmd, sizeof(cmd),
 			 "\"%s\" %s template1 >%s",
 			 backend_exec, backend_options,
@@ -1575,7 +1581,7 @@ setup_collation(void)
 
 	locale_a_handle = popen_check("locale -a", "r");
 	if (!locale_a_handle)
-		return;
+		return;					/* complaint already printed */
 
 	PG_CMD_OPEN;
 
@@ -1586,90 +1592,89 @@ setup_collation(void)
 
 	while (fgets(localebuf, sizeof(localebuf), locale_a_handle))
 	{
-		size_t	len;
-		int		enc;
-		bool	skip;
-		char	alias[NAMEDATALEN];
+		size_t		len;
+		int			enc;
+		bool		skip;
+		char		alias[NAMEDATALEN];
 
 		len = strlen(localebuf);
 
-		if (localebuf[len - 1] != '\n')
+		if (len == 0 || localebuf[len - 1] != '\n')
 		{
 			if (debug)
 				fprintf(stderr, _("%s: locale name too long, skipped: %s\n"),
 						progname, localebuf);
-			skipped++;
 			continue;
 		}
 		localebuf[len - 1] = '\0';
 
 		/*
-		 * Some systems have locale names that don't consist entirely
-		 * of ASCII letters (such as "bokm&aring;l" or
-		 * "fran&ccedil;ais").  This is pretty silly, since we need
-		 * the locale itself to interpret the non-ASCII characters.
-		 * We can't do much with those, so we filter them out.
+		 * Some systems have locale names that don't consist entirely of ASCII
+		 * letters (such as "bokm&aring;l" or "fran&ccedil;ais").  This is
+		 * pretty silly, since we need the locale itself to interpret the
+		 * non-ASCII characters. We can't do much with those, so we filter
+		 * them out.
 		 */
 		skip = false;
 		for (i = 0; i < len; i++)
+		{
 			if (IS_HIGHBIT_SET(localebuf[i]))
 			{
-				if (debug)
-					fprintf(stderr, _("%s: locale name has non-ASCII characters, skipped: %s\n"),
-							progname, localebuf);
-				skipped++;
 				skip = true;
 				break;
 			}
+		}
 		if (skip)
+		{
+			if (debug)
+				fprintf(stderr, _("%s: locale name has non-ASCII characters, skipped: %s\n"),
+						progname, localebuf);
 			continue;
+		}
 
 		enc = pg_get_encoding_from_locale(localebuf, debug);
 		if (enc < 0)
 		{
-			skipped++;
-			continue;			/* error message printed by pg_get_encoding_from_locale() */
+			/* error message printed by pg_get_encoding_from_locale() */
+			continue;
 		}
+		if (!PG_VALID_BE_ENCODING(enc))
+			continue;			/* ignore locales for client-only encodings */
 		if (enc == PG_SQL_ASCII)
-			continue;			/* SQL_ASCII is handled separately */
+			continue;			/* C/POSIX are already in the catalog */
 
-		PG_CMD_PRINTF2("INSERT INTO tmp_pg_collation (locale, encoding) VALUES ('%s', %d);",
+		count++;
+
+		PG_CMD_PRINTF2("INSERT INTO tmp_pg_collation (locale, encoding) VALUES ('%s', %d);\n",
 					   escape_quotes(localebuf), enc);
 
 		/*
-		 * Generate aliases such as "en_US" in addition to
-		 * "en_US.utf8" for ease of use.  Note that collation names
-		 * are unique per encoding only, so this doesn't clash with
-		 * "en_US" for LATIN1, say.
+		 * Generate aliases such as "en_US" in addition to "en_US.utf8" for
+		 * ease of use.  Note that collation names are unique per encoding
+		 * only, so this doesn't clash with "en_US" for LATIN1, say.
 		 */
 		if (normalize_locale_name(alias, localebuf))
-			PG_CMD_PRINTF3("INSERT INTO tmp_pg_collation (collname, locale, encoding) VALUES ('%s', '%s', %d);",
-						   escape_quotes(alias), escape_quotes(localebuf), enc);
+			PG_CMD_PRINTF3("INSERT INTO tmp_pg_collation (collname, locale, encoding) VALUES ('%s', '%s', %d);\n",
+						escape_quotes(alias), escape_quotes(localebuf), enc);
 	}
 
-	for (i = PG_SQL_ASCII; i <= PG_ENCODING_BE_LAST; i++)
-		PG_CMD_PRINTF2("INSERT INTO tmp_pg_collation (locale, encoding) VALUES ('C', %d), ('POSIX', %d);",
-					   i, i);
-
 	/* Add an SQL-standard name */
-	PG_CMD_PRINTF1("INSERT INTO tmp_pg_collation (collname, locale, encoding) VALUES ('ucs_basic', 'C', %d);", PG_UTF8);
+	PG_CMD_PRINTF1("INSERT INTO tmp_pg_collation (collname, locale, encoding) VALUES ('ucs_basic', 'C', %d);\n", PG_UTF8);
 
 	/*
-	 * When copying collations to the final location, eliminate
-	 * aliases that conflict with an existing locale name for the same
-	 * encoding.  For example, "br_FR.iso88591" is normalized to
-	 * "br_FR", both for encoding LATIN1.  But the unnormalized locale
-	 * "br_FR" already exists for LATIN1.  Prefer the collation that
-	 * matches the OS locale name, else the first name by sort order
-	 * (arbitrary choice to be deterministic).
+	 * When copying collations to the final location, eliminate aliases that
+	 * conflict with an existing locale name for the same encoding.  For
+	 * example, "br_FR.iso88591" is normalized to "br_FR", both for encoding
+	 * LATIN1.	But the unnormalized locale "br_FR" already exists for LATIN1.
+	 * Prefer the collation that matches the OS locale name, else the first
+	 * name by sort order (arbitrary choice to be deterministic).
 	 */
 	PG_CMD_PUTS("INSERT INTO pg_collation (collname, collnamespace, collowner, collencoding, collcollate, collctype) "
-				" SELECT DISTINCT ON (final_collname, collnamespace, encoding)"
+			  " SELECT DISTINCT ON (final_collname, collnamespace, encoding)"
 				"   COALESCE(collname, locale) AS final_collname, "
 				"   (SELECT oid FROM pg_namespace WHERE nspname = 'pg_catalog') AS collnamespace, "
 				"   (SELECT relowner FROM pg_class WHERE relname = 'pg_collation') AS collowner, "
-				"   encoding, "
-				"   locale, locale "
+				"   encoding, locale, locale "
 				"  FROM tmp_pg_collation"
 				"  ORDER BY final_collname, collnamespace, encoding, (collname = locale) DESC, locale;\n");
 
@@ -1677,18 +1682,15 @@ setup_collation(void)
 	PG_CMD_CLOSE;
 
 	check_ok();
-	if (skipped && !debug)
+	if (count == 0 && !debug)
 	{
-		printf(ngettext("%d system locale has been omitted because it cannot supported by PostgreSQL.\n",
-						"%d system locales have been omitted because they cannot be supported by PostgreSQL.\n",
-						skipped),
-			   skipped);
+		printf(_("No usable system locales were found.\n"));
 		printf(_("Use the option \"--debug\" to see details.\n"));
 	}
-#else /* not HAVE_LOCALE_T */
+#else							/* not HAVE_LOCALE_T && not WIN32 */
 	printf(_("not supported on this platform\n"));
 	fflush(stdout);
-#endif /* not HAVE_LOCALE_T */
+#endif   /* not HAVE_LOCALE_T  && not WIN32*/
 }
 
 /*
@@ -2249,6 +2251,83 @@ check_locale_encoding(const char *locale, int user_enc)
 	return true;
 }
 
+#ifdef WIN32
+
+/*
+ * Replace 'needle' with 'replacement' in 'str' . Note that the replacement
+ * is done in-place, so 'replacement' must be shorter than 'needle'.
+ */
+static void
+strreplace(char *str, char *needle, char *replacement)
+{
+	char *s;
+
+	s = strstr(str, needle);
+	if (s != NULL)
+	{
+		int replacementlen = strlen(replacement);
+		char *rest = s + strlen(needle);
+
+		memcpy(s, replacement, replacementlen);
+		memmove(s + replacementlen, rest, strlen(rest) + 1);
+	}
+}
+
+#endif /* WIN32 */
+
+/*
+ * Windows has a problem with locale names that have a dot in the country
+ * name. For example:
+ *
+ * "Chinese (Traditional)_Hong Kong S.A.R..950"
+ *
+ * For some reason, setlocale() doesn't accept that. Fortunately, Windows'
+ * setlocale() accepts various alternative names for such countries, so we
+ * map the full country names to accepted aliases.
+ *
+ * The returned string is always malloc'd - if no mapping is done it is
+ * just a malloc'd copy of the original.
+ */
+static char *
+localemap(char *locale)
+{
+	locale = xstrdup(locale);
+
+#ifdef WIN32
+	/*
+	 * Map the full country name to an abbreviation that setlocale() accepts.
+	 *
+	 * "HKG" is listed here:
+	 * http://msdn.microsoft.com/en-us/library/cdax410z%28v=vs.71%29.aspx
+	 * (Country/Region Strings).
+	 *
+	 * "ARE" is the ISO-3166 three-letter code for U.A.E. It is not on the
+	 * above list, but seems to work anyway.
+	 */
+	strreplace(locale, "Hong Kong S.A.R.", "HKG");
+	strreplace(locale, "U.A.E.", "ARE");
+
+	/*
+	 * The ISO-3166 country code for Macau S.A.R. is MAC, but Windows doesn't
+	 * seem to recognize that. And Macau isn't listed in the table of
+	 * accepted abbreviations linked above.
+	 *
+	 * Fortunately, "ZHM" seems to be accepted as an alias for
+	 * "Chinese (Traditional)_Macau S.A.R..950", so we use that. Note that
+	 * it's unlike HKG and ARE, ZHM is an alias for the whole locale name,
+	 * not just the country part. I'm not sure where that "ZHM" comes from,
+	 * must be some legacy naming scheme. But hey, it works.
+	 *
+	 * Some versions of Windows spell it "Macau", others "Macao".
+	 */
+	strreplace(locale, "Chinese (Traditional)_Macau S.A.R..950", "ZHM");
+	strreplace(locale, "Chinese_Macau S.A.R..950", "ZHM");
+	strreplace(locale, "Chinese (Traditional)_Macao S.A.R..950", "ZHM");
+	strreplace(locale, "Chinese_Macao S.A.R..950", "ZHM");
+#endif /* WIN32 */
+
+	return locale;
+}
 
 /*
  * set up the locale variables
@@ -2281,25 +2360,25 @@ setlocales(void)
 	 */
 
 	if (strlen(lc_ctype) == 0 || !check_locale_name(lc_ctype))
-		lc_ctype = xstrdup(setlocale(LC_CTYPE, NULL));
+		lc_ctype = localemap(setlocale(LC_CTYPE, NULL));
 	if (strlen(lc_collate) == 0 || !check_locale_name(lc_collate))
-		lc_collate = xstrdup(setlocale(LC_COLLATE, NULL));
+		lc_collate = localemap(setlocale(LC_COLLATE, NULL));
 	if (strlen(lc_numeric) == 0 || !check_locale_name(lc_numeric))
-		lc_numeric = xstrdup(setlocale(LC_NUMERIC, NULL));
+		lc_numeric = localemap(setlocale(LC_NUMERIC, NULL));
 	if (strlen(lc_time) == 0 || !check_locale_name(lc_time))
-		lc_time = xstrdup(setlocale(LC_TIME, NULL));
+		lc_time = localemap(setlocale(LC_TIME, NULL));
 	if (strlen(lc_monetary) == 0 || !check_locale_name(lc_monetary))
-		lc_monetary = xstrdup(setlocale(LC_MONETARY, NULL));
+		lc_monetary = localemap(setlocale(LC_MONETARY, NULL));
 	if (strlen(lc_messages) == 0 || !check_locale_name(lc_messages))
 #if defined(LC_MESSAGES) && !defined(WIN32)
 	{
 		/* when available get the current locale setting */
-		lc_messages = xstrdup(setlocale(LC_MESSAGES, NULL));
+		lc_messages = localemap(setlocale(LC_MESSAGES, NULL));
 	}
 #else
 	{
 		/* when not available, get the CTYPE setting */
-		lc_messages = xstrdup(setlocale(LC_CTYPE, NULL));
+		lc_messages = localemap(setlocale(LC_CTYPE, NULL));
 	}
 #endif
 
@@ -2308,7 +2387,10 @@ setlocales(void)
 #ifdef WIN32
 typedef BOOL (WINAPI * __CreateRestrictedToken) (HANDLE, DWORD, DWORD, PSID_AND_ATTRIBUTES, DWORD, PLUID_AND_ATTRIBUTES, DWORD, PSID_AND_ATTRIBUTES, PHANDLE);
 
+/* Windows API define missing from some versions of MingW headers */
+#ifndef  DISABLE_MAX_PRIVILEGE
 #define DISABLE_MAX_PRIVILEGE	0x1
+#endif
 
 /*
  * Create a restricted token and execute the specified process with it.
@@ -2637,6 +2719,7 @@ main(int argc, char *argv[])
 	}
 
 	if (strcmp(authmethod, "md5") &&
+		strcmp(authmethod, "peer") &&
 		strcmp(authmethod, "ident") &&
 		strcmp(authmethod, "trust") &&
 #ifdef USE_PAM
@@ -2665,6 +2748,20 @@ main(int argc, char *argv[])
 		fprintf(stderr, _("%s: must specify a password for the superuser to enable %s authentication\n"), progname, authmethod);
 		exit(1);
 	}
+
+	/*
+	 * When ident is specified, use peer for local connections. Mirrored, when
+	 * peer is specified, use ident for TCP connections.
+	 */
+	if (strcmp(authmethod, "ident") == 0)
+		authmethodlocal = "peer";
+	else if (strcmp(authmethod, "peer") == 0)
+	{
+		authmethodlocal = "peer";
+		authmethod = "ident";
+	}
+	else
+		authmethodlocal = authmethod;
 
 	if (strlen(pg_data) == 0)
 	{
@@ -2890,7 +2987,19 @@ main(int argc, char *argv[])
 		}
 		else if (!pg_valid_server_encoding_id(ctype_enc))
 		{
-			/* We recognized it, but it's not a legal server encoding */
+			/*
+			 * We recognized it, but it's not a legal server encoding.
+			 * On Windows, UTF-8 works with any locale, so we can fall back
+			 * to UTF-8.
+			 */
+#ifdef WIN32
+			printf(_("Encoding %s implied by locale is not allowed as a server-side encoding.\n"
+					 "The default database encoding will be set to %s instead.\n"),
+				   pg_encoding_to_char(ctype_enc),
+				   pg_encoding_to_char(PG_UTF8));
+			ctype_enc = PG_UTF8;
+			encodingid = encodingid_to_string(ctype_enc);
+#else
 			fprintf(stderr,
 					_("%s: locale %s requires unsupported encoding %s\n"),
 					progname, lc_ctype, pg_encoding_to_char(ctype_enc));
@@ -2899,6 +3008,7 @@ main(int argc, char *argv[])
 					"Rerun %s with a different locale selection.\n"),
 					pg_encoding_to_char(ctype_enc), progname);
 			exit(1);
+#endif
 		}
 		else
 		{

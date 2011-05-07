@@ -14,6 +14,7 @@ CREATE ROLE regress_test_role_super SUPERUSER;
 CREATE ROLE regress_test_indirect;
 CREATE ROLE unprivileged_role;
 CREATE FOREIGN DATA WRAPPER dummy;
+COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless';
 CREATE FOREIGN DATA WRAPPER postgresql VALIDATOR postgresql_fdw_validator;
 -- At this point we should have 2 built-in wrappers and no servers.
 SELECT fdwname, fdwhandler::regproc, fdwvalidator::regproc, fdwoptions FROM pg_foreign_data_wrapper ORDER BY 1, 2, 3;
@@ -211,6 +212,7 @@ DROP ROLE regress_test_role_super;
 
 CREATE FOREIGN DATA WRAPPER foo;
 CREATE SERVER s1 FOREIGN DATA WRAPPER foo;
+COMMENT ON SERVER s1 IS 'foreign server';
 CREATE USER MAPPING FOR current_user SERVER s1;
 \dew+
                                    List of foreign-data wrappers
@@ -668,7 +670,7 @@ Has OIDs: no
 (1 row)
 
 CREATE INDEX id_ft1_c2 ON ft1 (c2);                             -- ERROR
-ERROR:  "ft1" is not a table
+ERROR:  cannot create index on foreign table "ft1"
 SELECT * FROM ft1;                                              -- ERROR
 ERROR:  foreign-data wrapper "dummy" has no handler
 EXPLAIN SELECT * FROM ft1;                                      -- ERROR
@@ -1084,13 +1086,12 @@ DROP SERVER t1 CASCADE;
 NOTICE:  drop cascades to user mapping for public
 DROP SERVER t2;
 DROP USER MAPPING FOR regress_test_role SERVER s6;
+-- This test causes some order dependent cascade detail output,
+-- so switch to terse mode for it. 
+\set VERBOSITY terse
 DROP FOREIGN DATA WRAPPER foo CASCADE;
 NOTICE:  drop cascades to 5 other objects
-DETAIL:  drop cascades to server s4
-drop cascades to user mapping for foreign_data_user
-drop cascades to server s6
-drop cascades to server s9
-drop cascades to user mapping for unprivileged_role
+\set VERBOSITY default
 DROP SERVER s8 CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to user mapping for foreign_data_user

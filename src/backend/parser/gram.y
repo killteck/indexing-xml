@@ -597,7 +597,8 @@ static void SplitColQualList(List *qualList,
  * have any bad effects since obviously the keywords will still behave the
  * same as if they weren't keywords).  We need to do this for PARTITION,
  * RANGE, ROWS to support opt_existing_window_name; and for RANGE, ROWS
- * so that they can follow a_expr without creating
+ * so that they can follow a_expr without creating postfix-operator problems;
+ * and for NULL so that it can follow b_expr in ColQualList without creating
  * postfix-operator problems.
  *
  * The frame_bound productions UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING
@@ -610,16 +611,16 @@ static void SplitColQualList(List *qualList,
  * blame any funny behavior of UNBOUNDED on the SQL standard, though.
  */
 %nonassoc	UNBOUNDED		/* ideally should have same precedence as IDENT */
-%nonassoc	IDENT PARTITION RANGE ROWS PRECEDING FOLLOWING
+%nonassoc	IDENT NULL_P PARTITION RANGE ROWS PRECEDING FOLLOWING
 %left		Op OPERATOR		/* multi-character ops and user-defined operators */
 %nonassoc	NOTNULL
 %nonassoc	ISNULL
-%nonassoc	IS NULL_P TRUE_P FALSE_P UNKNOWN /* sets precedence for IS NULL, etc */
+%nonassoc	IS				/* sets precedence for IS NULL, etc */
 %left		'+' '-'
 %left		'*' '/' '%'
 %left		'^'
 /* Unary Operators */
-%left		AT ZONE			/* sets precedence for AT TIME ZONE */
+%left		AT				/* sets precedence for AT TIME ZONE */
 %left		COLLATE
 %right		UMINUS
 %left		'[' ']'
@@ -1933,6 +1934,23 @@ alter_table_cmd:
 					n->def = (Node *) $3;
 					$$ = (Node *)n;
 				}
+			/* ALTER TABLE <name> OF <type_name> */
+			| OF any_name
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					TypeName *def = makeTypeNameFromNameList($2);
+					def->location = @2;
+					n->subtype = AT_AddOf;
+					n->def = (Node *) def;
+					$$ = (Node *)n;
+				}
+			/* ALTER TABLE <name> NOT OF */
+			| NOT OF
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_DropOf;
+					$$ = (Node *)n;
+				}
 			/* ALTER TABLE <name> OWNER TO RoleId */
 			| OWNER TO RoleId
 				{
@@ -2621,6 +2639,7 @@ ColConstraintElem:
 					n->fk_upd_action	= (char) ($5 >> 8);
 					n->fk_del_action	= (char) ($5 & 0xFF);
 					n->skip_validation  = FALSE;
+					n->initially_valid  = true;
 					$$ = (Node *)n;
 				}
 		;
@@ -2820,6 +2839,7 @@ ConstraintElem:
 					n->deferrable		= ($11 & 1) != 0;
 					n->initdeferred		= ($11 & 2) != 0;
 					n->skip_validation  = false;
+					n->initially_valid  = true;
 					$$ = (Node *)n;
 				}
 			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
@@ -2836,6 +2856,7 @@ ConstraintElem:
 					n->fk_upd_action	= (char) ($10 >> 8);
 					n->fk_del_action	= (char) ($10 & 0xFF);
 					n->skip_validation  = true;
+					n->initially_valid  = false;
 					$$ = (Node *)n;
 				}
 		;
@@ -4791,11 +4812,12 @@ opt_restart_seqs:
  *	the object associated with the comment. The form of the statement is:
  *
  *	COMMENT ON [ [ DATABASE | DOMAIN | INDEX | SEQUENCE | TABLE | TYPE | VIEW |
- *				   COLLATION | CONVERSION | LANGUAGE | OPERATOR CLASS | LARGE OBJECT |
- *				   CAST | COLUMN | SCHEMA | TABLESPACE | EXTENSION | ROLE |
- *				   TEXT SEARCH PARSER | TEXT SEARCH DICTIONARY |
- *				   TEXT SEARCH TEMPLATE | TEXT SEARCH CONFIGURATION |
- *				   FOREIGN TABLE ] <objname> |
+ *				   COLLATION | CONVERSION | LANGUAGE | OPERATOR CLASS |
+ *				   LARGE OBJECT | CAST | COLUMN | SCHEMA | TABLESPACE |
+ *				   EXTENSION | ROLE | TEXT SEARCH PARSER |
+ *				   TEXT SEARCH DICTIONARY | TEXT SEARCH TEMPLATE |
+ *				   TEXT SEARCH CONFIGURATION | FOREIGN TABLE |
+ *				   FOREIGN DATA WRAPPER | SERVER ] <objname> |
  *				 AGGREGATE <aggname> (arg1, ...) |
  *				 FUNCTION <funcname> (arg1, arg2, ...) |
  *				 OPERATOR <op> (leftoperand_typ, rightoperand_typ) |
@@ -4975,6 +4997,8 @@ comment_type:
 			| EXTENSION 						{ $$ = OBJECT_EXTENSION; }
 			| ROLE								{ $$ = OBJECT_ROLE; }
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
+			| SERVER							{ $$ = OBJECT_FOREIGN_SERVER; }
+			| FOREIGN DATA_P WRAPPER			{ $$ = OBJECT_FDW; }
 		;
 
 comment_text:
@@ -5389,14 +5413,6 @@ privilege_target:
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
 					n->targtype = ACL_TARGET_OBJECT;
 					n->objtype = ACL_OBJECT_FOREIGN_SERVER;
-					n->objs = $3;
-					$$ = n;
-				}
-			| FOREIGN TABLE qualified_name_list
-				{
-					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
-					n->targtype = ACL_TARGET_OBJECT;
-					n->objtype = ACL_OBJECT_FOREIGN_TABLE;
 					n->objs = $3;
 					$$ = n;
 				}
@@ -9697,7 +9713,7 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->location = @2;
 					$$ = (Node *) n;
 				}
-			| a_expr AT TIME ZONE a_expr
+			| a_expr AT TIME ZONE a_expr			%prec AT
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = SystemFuncName("timezone");
@@ -9879,7 +9895,7 @@ a_expr:		c_expr									{ $$ = $1; }
 			 *	a ISNULL
 			 *	a NOTNULL
 			 */
-			| a_expr IS NULL_P
+			| a_expr IS NULL_P							%prec IS
 				{
 					NullTest *n = makeNode(NullTest);
 					n->arg = (Expr *) $1;
@@ -9893,7 +9909,7 @@ a_expr:		c_expr									{ $$ = $1; }
 					n->nulltesttype = IS_NULL;
 					$$ = (Node *)n;
 				}
-			| a_expr IS NOT NULL_P
+			| a_expr IS NOT NULL_P						%prec IS
 				{
 					NullTest *n = makeNode(NullTest);
 					n->arg = (Expr *) $1;
@@ -9911,42 +9927,42 @@ a_expr:		c_expr									{ $$ = $1; }
 				{
 					$$ = (Node *)makeOverlaps($1, $3, @2, yyscanner);
 				}
-			| a_expr IS TRUE_P
+			| a_expr IS TRUE_P							%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;
 					b->booltesttype = IS_TRUE;
 					$$ = (Node *)b;
 				}
-			| a_expr IS NOT TRUE_P
+			| a_expr IS NOT TRUE_P						%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;
 					b->booltesttype = IS_NOT_TRUE;
 					$$ = (Node *)b;
 				}
-			| a_expr IS FALSE_P
+			| a_expr IS FALSE_P							%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;
 					b->booltesttype = IS_FALSE;
 					$$ = (Node *)b;
 				}
-			| a_expr IS NOT FALSE_P
+			| a_expr IS NOT FALSE_P						%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;
 					b->booltesttype = IS_NOT_FALSE;
 					$$ = (Node *)b;
 				}
-			| a_expr IS UNKNOWN
+			| a_expr IS UNKNOWN							%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;
 					b->booltesttype = IS_UNKNOWN;
 					$$ = (Node *)b;
 				}
-			| a_expr IS NOT UNKNOWN
+			| a_expr IS NOT UNKNOWN						%prec IS
 				{
 					BooleanTest *b = makeNode(BooleanTest);
 					b->arg = (Expr *) $1;

@@ -56,6 +56,7 @@
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
 #include "parser/parse_coerce.h"
+#include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_func.h"
 #include "parser/parse_type.h"
@@ -142,7 +143,7 @@ DefineType(List *names, List *parameters)
 	DefElem    *byValueEl = NULL;
 	DefElem    *alignmentEl = NULL;
 	DefElem    *storageEl = NULL;
-	DefElem	   *collatableEl = NULL;
+	DefElem    *collatableEl = NULL;
 	Oid			inputOid;
 	Oid			outputOid;
 	Oid			receiveOid = InvalidOid;
@@ -541,7 +542,7 @@ DefineType(List *names, List *parameters)
 	 * now have TypeCreate do all the real work.
 	 *
 	 * Note: the pg_type.oid is stored in user tables as array elements (base
-	 * types) in ArrayType and in composite types in DatumTupleFields.  This
+	 * types) in ArrayType and in composite types in DatumTupleFields.	This
 	 * oid must be preserved by binary upgrades.
 	 */
 	typoid =
@@ -575,7 +576,7 @@ DefineType(List *names, List *parameters)
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array Dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
-				   collation);
+				   collation);	/* type's collation */
 
 	/*
 	 * Create the array type that goes with it.
@@ -615,7 +616,7 @@ DefineType(List *names, List *parameters)
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
-			   collation);
+			   collation);		/* type's collation */
 
 	pfree(array_type);
 }
@@ -1081,7 +1082,7 @@ DefineDomain(CreateDomainStmt *stmt)
 				   basetypeMod, /* typeMod value */
 				   typNDims,	/* Array dimensions for base type */
 				   typNotNull,	/* Type NOT NULL */
-				   domaincoll);
+				   domaincoll);	/* type's collation */
 
 	/*
 	 * Process constraints which refer to the domain ID returned by TypeCreate
@@ -1191,7 +1192,7 @@ DefineEnum(CreateEnumStmt *stmt)
 				   -1,			/* typMod (Domains only) */
 				   0,			/* Array dimensions of typbasetype */
 				   false,		/* Type NOT NULL */
-				   InvalidOid);	/* typcollation */
+				   InvalidOid); /* type's collation */
 
 	/* Enter the enum's values into pg_enum */
 	EnumValuesCreate(enumTypeOid, stmt->vals);
@@ -1231,7 +1232,7 @@ DefineEnum(CreateEnumStmt *stmt)
 			   -1,				/* typMod (Domains only) */
 			   0,				/* Array dimensions of typbasetype */
 			   false,			/* Type NOT NULL */
-			   InvalidOid);		/* typcollation */
+			   InvalidOid);		/* type's collation */
 
 	pfree(enumArrayName);
 }
@@ -1930,7 +1931,7 @@ AssignTypeArrayOid(void)
 	Oid			type_array_oid;
 
 	/* Use binary-upgrade override for pg_type.typarray, if supplied. */
-	if (OidIsValid(binary_upgrade_next_array_pg_type_oid))
+	if (IsBinaryUpgrade && OidIsValid(binary_upgrade_next_array_pg_type_oid))
 	{
 		type_array_oid = binary_upgrade_next_array_pg_type_oid;
 		binary_upgrade_next_array_pg_type_oid = InvalidOid;
@@ -2722,6 +2723,7 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 	domVal = makeNode(CoerceToDomainValue);
 	domVal->typeId = baseTypeOid;
 	domVal->typeMod = typMod;
+	domVal->collation = get_typcollation(baseTypeOid);
 	domVal->location = -1;		/* will be set when/if used */
 
 	pstate->p_value_substitute = (Node *) domVal;
@@ -2732,6 +2734,11 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 	 * Make sure it yields a boolean result.
 	 */
 	expr = coerce_to_boolean(pstate, expr, "CHECK");
+
+	/*
+	 * Fix up collation information.
+	 */
+	assign_expr_collations(pstate, expr);
 
 	/*
 	 * Make sure no outside relations are referred to.
@@ -2790,7 +2797,7 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 						  CONSTRAINT_CHECK,		/* Constraint Type */
 						  false,	/* Is Deferrable */
 						  false,	/* Is Deferred */
-						  true,		/* Is Validated */
+						  true, /* Is Validated */
 						  InvalidOid,	/* not a relation constraint */
 						  NULL,
 						  0,

@@ -220,7 +220,7 @@ transformArrayType(Oid *arrayType, int32 *arrayTypmod)
 	 * If the input is a domain, smash to base type, and extract the actual
 	 * typmod to be applied to the base type.  Subscripting a domain is an
 	 * operation that necessarily works on the base array type, not the domain
-	 * itself.  (Note that we provide no method whereby the creator of a
+	 * itself.	(Note that we provide no method whereby the creator of a
 	 * domain over an array type could hide its ability to be subscripted.)
 	 */
 	*arrayType = getBaseTypeAndTypmod(*arrayType, arrayTypmod);
@@ -270,7 +270,6 @@ transformArrayType(Oid *arrayType, int32 *arrayTypmod)
  * elementType	OID of array's element type (fetch with transformArrayType,
  *				or pass InvalidOid to do it here)
  * arrayTypMod	typmod for the array (which is also typmod for the elements)
- * arrayColl	OID of collation of array and array's elements
  * indirection	Untransformed list of subscripts (must not be NIL)
  * assignFrom	NULL for array fetch, else transformed expression for source.
  */
@@ -280,7 +279,6 @@ transformArraySubscripts(ParseState *pstate,
 						 Oid arrayType,
 						 Oid elementType,
 						 int32 arrayTypMod,
-						 Oid arrayColl,
 						 List *indirection,
 						 Node *assignFrom)
 {
@@ -292,8 +290,8 @@ transformArraySubscripts(ParseState *pstate,
 
 	/*
 	 * Caller may or may not have bothered to determine elementType.  Note
-	 * that if the caller did do so, arrayType/arrayTypMod must be as
-	 * modified by transformArrayType, ie, smash domain to base type.
+	 * that if the caller did do so, arrayType/arrayTypMod must be as modified
+	 * by transformArrayType, ie, smash domain to base type.
 	 */
 	if (!OidIsValid(elementType))
 		elementType = transformArrayType(&arrayType, &arrayTypMod);
@@ -349,6 +347,7 @@ transformArraySubscripts(ParseState *pstate,
 				/* Make a constant 1 */
 				subexpr = (Node *) makeConst(INT4OID,
 											 -1,
+											 InvalidOid,
 											 sizeof(int32),
 											 Int32GetDatum(1),
 											 false,
@@ -407,7 +406,7 @@ transformArraySubscripts(ParseState *pstate,
 	aref->refarraytype = arrayType;
 	aref->refelemtype = elementType;
 	aref->reftypmod = arrayTypMod;
-	aref->refcollid = arrayColl;
+	/* refcollid will be set by parse_collate.c */
 	aref->refupperindexpr = upperIndexpr;
 	aref->reflowerindexpr = lowerIndexpr;
 	aref->refexpr = (Expr *) arrayBase;
@@ -528,6 +527,7 @@ make_const(ParseState *pstate, Value *value, int location)
 			/* return a null const */
 			con = makeConst(UNKNOWNOID,
 							-1,
+							InvalidOid,
 							-2,
 							(Datum) 0,
 							true,
@@ -542,6 +542,7 @@ make_const(ParseState *pstate, Value *value, int location)
 
 	con = makeConst(typeid,
 					-1,			/* typmod -1 is OK for all cases */
+					InvalidOid, /* all cases are uncollatable types */
 					typelen,
 					val,
 					false,

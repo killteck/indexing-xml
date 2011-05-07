@@ -944,6 +944,18 @@ order by relname, attnum;
 
 drop table p1, p2 cascade;
 
+-- test attinhcount tracking with merged columns
+
+create table depth0();
+create table depth1(c text) inherits (depth0);
+create table depth2() inherits (depth1);
+alter table depth0 add c text;
+
+select attrelid::regclass, attname, attinhcount, attislocal
+from pg_attribute
+where attnum > 0 and attrelid::regclass in ('depth0', 'depth1', 'depth2')
+order by attrelid::regclass::text, attnum;
+
 --
 -- Test the ALTER TABLE SET WITH/WITHOUT OIDS command
 --
@@ -1111,6 +1123,25 @@ drop table another;
 create table tab1 (a int, b text);
 create table tab2 (x int, y tab1);
 alter table tab1 alter column b type varchar; -- fails
+
+-- disallow recursive containment of row types
+create temp table recur1 (f1 int);
+alter table recur1 add column f2 recur1; -- fails
+alter table recur1 add column f2 recur1[]; -- fails
+create temp table recur2 (f1 int, f2 recur1);
+alter table recur1 add column f2 recur2; -- fails
+alter table recur1 add column f2 int;
+alter table recur1 alter column f2 type recur2; -- fails
+
+-- SET STORAGE may need to add a TOAST table
+create table test_storage (a text);
+alter table test_storage alter a set storage plain;
+alter table test_storage add b int default 0; -- rewrite table to remove its TOAST table
+alter table test_storage alter a set storage extended; -- re-add TOAST table
+
+select reltoastrelid <> 0 as has_toast_table
+from pg_class
+where oid = 'test_storage'::regclass;
 
 --
 -- lock levels
@@ -1313,6 +1344,7 @@ ALTER TYPE test_type1 ALTER ATTRIBUTE b TYPE varchar; -- fails
 
 CREATE TYPE test_type2 AS (a int, b text);
 CREATE TABLE test_tbl2 OF test_type2;
+CREATE TABLE test_tbl2_subclass () INHERITS (test_tbl2);
 \d test_type2
 \d test_tbl2
 
@@ -1335,6 +1367,39 @@ ALTER TYPE test_type2 RENAME ATTRIBUTE a TO aa; -- fails
 ALTER TYPE test_type2 RENAME ATTRIBUTE a TO aa CASCADE;
 \d test_type2
 \d test_tbl2
+\d test_tbl2_subclass
+
+DROP TABLE test_tbl2_subclass;
 
 CREATE TYPE test_type_empty AS ();
 DROP TYPE test_type_empty;
+
+--
+-- typed tables: OF / NOT OF
+--
+
+CREATE TYPE tt_t0 AS (z inet, x int, y numeric(8,2));
+ALTER TYPE tt_t0 DROP ATTRIBUTE z;
+CREATE TABLE tt0 (x int NOT NULL, y numeric(8,2));	-- OK
+CREATE TABLE tt1 (x int, y bigint);					-- wrong base type
+CREATE TABLE tt2 (x int, y numeric(9,2));			-- wrong typmod
+CREATE TABLE tt3 (y numeric(8,2), x int);			-- wrong column order
+CREATE TABLE tt4 (x int);							-- too few columns
+CREATE TABLE tt5 (x int, y numeric(8,2), z int);	-- too few columns
+CREATE TABLE tt6 () INHERITS (tt0);					-- can't have a parent
+CREATE TABLE tt7 (x int, q text, y numeric(8,2)) WITH OIDS;
+ALTER TABLE tt7 DROP q;								-- OK
+
+ALTER TABLE tt0 OF tt_t0;
+ALTER TABLE tt1 OF tt_t0;
+ALTER TABLE tt2 OF tt_t0;
+ALTER TABLE tt3 OF tt_t0;
+ALTER TABLE tt4 OF tt_t0;
+ALTER TABLE tt5 OF tt_t0;
+ALTER TABLE tt6 OF tt_t0;
+ALTER TABLE tt7 OF tt_t0;
+
+CREATE TYPE tt_t1 AS (x int, y numeric(8,2));
+ALTER TABLE tt7 OF tt_t1;			-- reassign an already-typed table
+ALTER TABLE tt7 NOT OF;
+\d tt7

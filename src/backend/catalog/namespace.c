@@ -361,6 +361,35 @@ RangeVarGetCreationNamespace(const RangeVar *newRelation)
 }
 
 /*
+ * RangeVarGetAndCheckCreationNamespace
+ *      As RangeVarGetCreationNamespace, but with a permissions check.
+ */
+Oid
+RangeVarGetAndCheckCreationNamespace(const RangeVar *newRelation)
+{
+	Oid			namespaceId;
+
+	namespaceId = RangeVarGetCreationNamespace(newRelation);
+
+	/*
+	 * Check we have permission to create there. Skip check if bootstrapping,
+	 * since permissions machinery may not be working yet.
+	 */
+	if (!IsBootstrapProcessingMode())
+	{
+		AclResult	aclresult;
+
+		aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(),
+										  ACL_CREATE);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error(aclresult, ACL_KIND_NAMESPACE,
+						   get_namespace_name(namespaceId));
+	}
+
+	return namespaceId;
+}
+
+/*
  * RelnameGetRelid
  *		Try to resolve an unqualified relation name.
  *		Returns OID if relation found in search path, else InvalidOid.
@@ -2446,10 +2475,10 @@ CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
 	if (oldNspOid == nspOid)
 		ereport(ERROR,
 				(classid == RelationRelationId ?
-					errcode(ERRCODE_DUPLICATE_TABLE) :
+				 errcode(ERRCODE_DUPLICATE_TABLE) :
 				 classid == ProcedureRelationId ?
-					errcode(ERRCODE_DUPLICATE_FUNCTION) :
-					errcode(ERRCODE_DUPLICATE_OBJECT),
+				 errcode(ERRCODE_DUPLICATE_FUNCTION) :
+				 errcode(ERRCODE_DUPLICATE_OBJECT),
 				 errmsg("%s is already in schema \"%s\"",
 						getObjectDescriptionOids(classid, objid),
 						get_namespace_name(nspOid))));
@@ -2458,7 +2487,7 @@ CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid, Oid objid)
 	if (isAnyTempNamespace(nspOid) || isAnyTempNamespace(oldNspOid))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot move objects into or out of temporary schemas")));
+			errmsg("cannot move objects into or out of temporary schemas")));
 
 	/* same for TOAST schema */
 	if (nspOid == PG_TOAST_NAMESPACE || oldNspOid == PG_TOAST_NAMESPACE)
@@ -2525,7 +2554,7 @@ QualifiedNameGetCreationNamespace(List *names, char **objname_p)
 /*
  * get_namespace_oid - given a namespace name, look up the OID
  *
- * If missing_ok is false, throw an error if namespace name not found.  If
+ * If missing_ok is false, throw an error if namespace name not found.	If
  * true, just return InvalidOid.
  */
 Oid
@@ -2535,9 +2564,9 @@ get_namespace_oid(const char *nspname, bool missing_ok)
 
 	oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum(nspname));
 	if (!OidIsValid(oid) && !missing_ok)
-        ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_SCHEMA),
-                 errmsg("schema \"%s\" does not exist", nspname)));
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_SCHEMA),
+				 errmsg("schema \"%s\" does not exist", nspname)));
 
 	return oid;
 }
@@ -2727,7 +2756,7 @@ GetTempNamespaceBackendId(Oid namespaceId)
 	/* See if the namespace name starts with "pg_temp_" or "pg_toast_temp_" */
 	nspname = get_namespace_name(namespaceId);
 	if (!nspname)
-		return InvalidBackendId;				/* no such namespace? */
+		return InvalidBackendId;	/* no such namespace? */
 	if (strncmp(nspname, "pg_temp_", 8) == 0)
 		result = atoi(nspname + 8);
 	else if (strncmp(nspname, "pg_toast_temp_", 14) == 0)
@@ -2798,8 +2827,8 @@ GetOverrideSearchPath(MemoryContext context)
  *
  * It's possible that newpath->useTemp is set but there is no longer any
  * active temp namespace, if the path was saved during a transaction that
- * created a temp namespace and was later rolled back.  In that case we just
- * ignore useTemp.  A plausible alternative would be to create a new temp
+ * created a temp namespace and was later rolled back.	In that case we just
+ * ignore useTemp.	A plausible alternative would be to create a new temp
  * namespace, but for existing callers that's not necessary because an empty
  * temp namespace wouldn't affect their results anyway.
  *
@@ -3468,31 +3497,33 @@ ResetTempTableNamespace(void)
  * Routines for handling the GUC variable 'search_path'.
  */
 
-/* assign_hook: validate new search_path, do extra actions as needed */
-const char *
-assign_search_path(const char *newval, bool doit, GucSource source)
+/* check_hook: validate new search_path, if possible */
+bool
+check_search_path(char **newval, void **extra, GucSource source)
 {
+	bool		result = true;
 	char	   *rawname;
 	List	   *namelist;
 	ListCell   *l;
 
 	/* Need a modifiable copy of string */
-	rawname = pstrdup(newval);
+	rawname = pstrdup(*newval);
 
 	/* Parse string into list of identifiers */
 	if (!SplitIdentifierString(rawname, ',', &namelist))
 	{
 		/* syntax error in name list */
+		GUC_check_errdetail("List syntax is invalid.");
 		pfree(rawname);
 		list_free(namelist);
-		return NULL;
+		return false;
 	}
 
 	/*
 	 * If we aren't inside a transaction, we cannot do database access so
 	 * cannot verify the individual names.	Must accept the list on faith.
 	 */
-	if (source >= PGC_S_INTERACTIVE && IsTransactionState())
+	if (IsTransactionState())
 	{
 		/*
 		 * Verify that all the names are either valid namespace names or
@@ -3504,7 +3535,7 @@ assign_search_path(const char *newval, bool doit, GucSource source)
 		 * DATABASE SET or ALTER USER SET command.	It could be that the
 		 * intended use of the search path is for some other database, so we
 		 * should not error out if it mentions schemas not present in the
-		 * current database.  We reduce the message to NOTICE instead.
+		 * current database.  We issue a NOTICE instead.
 		 */
 		foreach(l, namelist)
 		{
@@ -3516,24 +3547,37 @@ assign_search_path(const char *newval, bool doit, GucSource source)
 				continue;
 			if (!SearchSysCacheExists1(NAMESPACENAME,
 									   CStringGetDatum(curname)))
-				ereport((source == PGC_S_TEST) ? NOTICE : ERROR,
-						(errcode(ERRCODE_UNDEFINED_SCHEMA),
-						 errmsg("schema \"%s\" does not exist", curname)));
+			{
+				if (source == PGC_S_TEST)
+					ereport(NOTICE,
+							(errcode(ERRCODE_UNDEFINED_SCHEMA),
+						   errmsg("schema \"%s\" does not exist", curname)));
+				else
+				{
+					GUC_check_errdetail("schema \"%s\" does not exist", curname);
+					result = false;
+					break;
+				}
+			}
 		}
 	}
 
 	pfree(rawname);
 	list_free(namelist);
 
+	return result;
+}
+
+/* assign_hook: do extra actions as needed */
+void
+assign_search_path(const char *newval, void *extra)
+{
 	/*
 	 * We mark the path as needing recomputation, but don't do anything until
 	 * it's needed.  This avoids trying to do database access during GUC
-	 * initialization.
+	 * initialization, or outside a transaction.
 	 */
-	if (doit)
-		baseSearchPathValid = false;
-
-	return newval;
+	baseSearchPathValid = false;
 }
 
 /*

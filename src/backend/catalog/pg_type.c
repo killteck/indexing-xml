@@ -115,7 +115,7 @@ TypeShellMake(const char *typeName, Oid typeNamespace, Oid ownerId)
 	values[i++] = ObjectIdGetDatum(InvalidOid); /* typbasetype */
 	values[i++] = Int32GetDatum(-1);	/* typtypmod */
 	values[i++] = Int32GetDatum(0);		/* typndims */
-	values[i++] = ObjectIdGetDatum(InvalidOid);	/* typcollation */
+	values[i++] = ObjectIdGetDatum(InvalidOid); /* typcollation */
 	nulls[i++] = true;			/* typdefaultbin */
 	nulls[i++] = true;			/* typdefault */
 
@@ -125,7 +125,7 @@ TypeShellMake(const char *typeName, Oid typeNamespace, Oid ownerId)
 	tup = heap_form_tuple(tupDesc, values, nulls);
 
 	/* Use binary-upgrade override for pg_type.oid, if supplied. */
-	if (OidIsValid(binary_upgrade_next_pg_type_oid))
+	if (IsBinaryUpgrade && OidIsValid(binary_upgrade_next_pg_type_oid))
 	{
 		HeapTupleSetOid(tup, binary_upgrade_next_pg_type_oid);
 		binary_upgrade_next_pg_type_oid = InvalidOid;
@@ -352,7 +352,7 @@ TypeCreate(Oid newTypeOid,
 	values[i++] = ObjectIdGetDatum(baseType);	/* typbasetype */
 	values[i++] = Int32GetDatum(typeMod);		/* typtypmod */
 	values[i++] = Int32GetDatum(typNDims);		/* typndims */
-	values[i++] = ObjectIdGetDatum(typeCollation);	/* typcollation */
+	values[i++] = ObjectIdGetDatum(typeCollation);		/* typcollation */
 
 	/*
 	 * initialize the default binary value for this type.  Check for nulls of
@@ -430,7 +430,7 @@ TypeCreate(Oid newTypeOid,
 		if (OidIsValid(newTypeOid))
 			HeapTupleSetOid(tup, newTypeOid);
 		/* Use binary-upgrade override for pg_type.oid, if supplied. */
-		else if (OidIsValid(binary_upgrade_next_pg_type_oid))
+		else if (IsBinaryUpgrade && OidIsValid(binary_upgrade_next_pg_type_oid))
 		{
 			HeapTupleSetOid(tup, binary_upgrade_next_pg_type_oid);
 			binary_upgrade_next_pg_type_oid = InvalidOid;
@@ -643,8 +643,9 @@ GenerateTypeDependencies(Oid typeNamespace,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
 
-	/* Normal dependency from a domain to its base type's collation. */
-	if (OidIsValid(typeCollation))
+	/* Normal dependency from a domain to its collation. */
+	/* We know the default collation is pinned, so don't bother recording it */
+	if (OidIsValid(typeCollation) && typeCollation != DEFAULT_COLLATION_OID)
 	{
 		referenced.classId = CollationRelationId;
 		referenced.objectId = typeCollation;

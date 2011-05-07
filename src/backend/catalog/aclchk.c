@@ -274,9 +274,6 @@ restrict_and_check_grant(bool is_grant, AclMode avail_goptions, bool all_privs,
 		case ACL_KIND_FOREIGN_SERVER:
 			whole_mask = ACL_ALL_RIGHTS_FOREIGN_SERVER;
 			break;
-		case ACL_KIND_FOREIGN_TABLE:
-			whole_mask = ACL_ALL_RIGHTS_FOREIGN_TABLE;
-			break;
 		default:
 			elog(ERROR, "unrecognized object kind: %d", objkind);
 			/* not reached, but keep compiler quiet */
@@ -480,10 +477,6 @@ ExecuteGrantStmt(GrantStmt *stmt)
 			all_privileges = ACL_ALL_RIGHTS_FOREIGN_SERVER;
 			errormsg = gettext_noop("invalid privilege type %s for foreign server");
 			break;
-		case ACL_OBJECT_FOREIGN_TABLE:
-			all_privileges = ACL_ALL_RIGHTS_FOREIGN_TABLE;
-			errormsg = gettext_noop("invalid privilege type %s for foreign table");
-			break;
 		default:
 			elog(ERROR, "unrecognized GrantStmt.objtype: %d",
 				 (int) stmt->objtype);
@@ -554,7 +547,6 @@ ExecGrantStmt_oids(InternalGrant *istmt)
 	{
 		case ACL_OBJECT_RELATION:
 		case ACL_OBJECT_SEQUENCE:
-		case ACL_OBJECT_FOREIGN_TABLE:
 			ExecGrant_Relation(istmt);
 			break;
 		case ACL_OBJECT_DATABASE:
@@ -604,7 +596,6 @@ objectNamesToOids(GrantObjectType objtype, List *objnames)
 	{
 		case ACL_OBJECT_RELATION:
 		case ACL_OBJECT_SEQUENCE:
-		case ACL_OBJECT_FOREIGN_TABLE:
 			foreach(cell, objnames)
 			{
 				RangeVar   *relvar = (RangeVar *) lfirst(cell);
@@ -683,7 +674,7 @@ objectNamesToOids(GrantObjectType objtype, List *objnames)
 			foreach(cell, objnames)
 			{
 				char	   *fdwname = strVal(lfirst(cell));
-				Oid			fdwid = GetForeignDataWrapperOidByName(fdwname, false);
+				Oid			fdwid = get_foreign_data_wrapper_oid(fdwname, false);
 
 				objects = lappend_oid(objects, fdwid);
 			}
@@ -692,7 +683,7 @@ objectNamesToOids(GrantObjectType objtype, List *objnames)
 			foreach(cell, objnames)
 			{
 				char	   *srvname = strVal(lfirst(cell));
-				Oid			srvid = GetForeignServerOidByName(srvname, false);
+				Oid			srvid = get_foreign_server_oid(srvname, false);
 
 				objects = lappend_oid(objects, srvid);
 			}
@@ -1011,8 +1002,8 @@ SetDefaultACLsInSchemas(InternalDefaultACL *iacls, List *nspnames)
 
 			/*
 			 * Note that we must do the permissions check against the target
-			 * role not the calling user.  We require CREATE privileges,
-			 * since without CREATE you won't be able to do anything using the
+			 * role not the calling user.  We require CREATE privileges, since
+			 * without CREATE you won't be able to do anything using the
 			 * default privs anyway.
 			 */
 			iacls->nspid = get_namespace_oid(nspname, false);
@@ -1299,7 +1290,7 @@ RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
 			case DEFACLOBJ_RELATION:
 				iacls.objtype = ACL_OBJECT_RELATION;
 				break;
-			case ACL_OBJECT_SEQUENCE:
+			case DEFACLOBJ_SEQUENCE:
 				iacls.objtype = ACL_OBJECT_SEQUENCE;
 				break;
 			case DEFACLOBJ_FUNCTION:
@@ -1702,21 +1693,11 @@ ExecGrant_Relation(InternalGrant *istmt)
 					 errmsg("\"%s\" is not a sequence",
 							NameStr(pg_class_tuple->relname))));
 
-		/* Used GRANT FOREIGN TABLE on a non-foreign-table? */
-		if (istmt->objtype == ACL_OBJECT_FOREIGN_TABLE &&
-			pg_class_tuple->relkind != RELKIND_FOREIGN_TABLE)
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					errmsg("\"%s\" is not a foreign table",
-							NameStr(pg_class_tuple->relname))));
-
 		/* Adjust the default permissions based on object type */
 		if (istmt->all_privs && istmt->privileges == ACL_NO_RIGHTS)
 		{
 			if (pg_class_tuple->relkind == RELKIND_SEQUENCE)
 				this_privileges = ACL_ALL_RIGHTS_SEQUENCE;
-			else if (pg_class_tuple->relkind == RELKIND_FOREIGN_TABLE)
-				this_privileges = ACL_ALL_RIGHTS_FOREIGN_TABLE;
 			else
 				this_privileges = ACL_ALL_RIGHTS_RELATION;
 		}
@@ -1750,16 +1731,6 @@ ExecGrant_Relation(InternalGrant *istmt)
 							 errmsg("sequence \"%s\" only supports USAGE, SELECT, and UPDATE privileges",
 									NameStr(pg_class_tuple->relname))));
 					this_privileges &= (AclMode) ACL_ALL_RIGHTS_SEQUENCE;
-				}
-			}
-			else if (pg_class_tuple->relkind == RELKIND_FOREIGN_TABLE)
-			{
-				if (this_privileges & ~((AclMode) ACL_ALL_RIGHTS_FOREIGN_TABLE))
-				{
-					ereport(ERROR,
-							(errcode(ERRCODE_INVALID_GRANT_OPERATION),
-							 errmsg("foreign table \"%s\" only supports SELECT privileges",
-									NameStr(pg_class_tuple->relname))));
 				}
 			}
 			else
@@ -1819,9 +1790,6 @@ ExecGrant_Relation(InternalGrant *istmt)
 				case RELKIND_SEQUENCE:
 					old_acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
 					break;
-				case RELKIND_FOREIGN_TABLE:
-					old_acl = acldefault(ACL_OBJECT_FOREIGN_TABLE, ownerId);
-					break;
 				default:
 					old_acl = acldefault(ACL_OBJECT_RELATION, ownerId);
 					break;
@@ -1865,9 +1833,6 @@ ExecGrant_Relation(InternalGrant *istmt)
 			{
 				case RELKIND_SEQUENCE:
 					aclkind = ACL_KIND_SEQUENCE;
-					break;
-				case RELKIND_FOREIGN_TABLE:
-					aclkind = ACL_KIND_FOREIGN_TABLE;
 					break;
 				default:
 					aclkind = ACL_KIND_CLASS;
@@ -1961,16 +1926,6 @@ ExecGrant_Relation(InternalGrant *istmt)
 						 errmsg("sequence \"%s\" only supports SELECT column privileges",
 								NameStr(pg_class_tuple->relname))));
 
-				this_privileges &= (AclMode) ACL_SELECT;
-			}
-			else if (pg_class_tuple->relkind == RELKIND_FOREIGN_TABLE &&
-				this_privileges & ~((AclMode) ACL_SELECT))
-			{
-				/* Foreign tables have the same restriction as sequences. */
-				ereport(WARNING,
-					(errcode(ERRCODE_INVALID_GRANT_OPERATION),
-					 errmsg("foreign table \"%s\" only supports SELECT column privileges",
-							NameStr(pg_class_tuple->relname))));
 				this_privileges &= (AclMode) ACL_SELECT;
 			}
 
@@ -3147,8 +3102,6 @@ static const char *const no_priv_msg[MAX_ACL_KIND] =
 	gettext_noop("permission denied for foreign-data wrapper %s"),
 	/* ACL_KIND_FOREIGN_SERVER */
 	gettext_noop("permission denied for foreign server %s"),
-	/* ACL_KIND_FOREIGN_TABLE */
-	gettext_noop("permission denied for foreign table %s"),
 	/* ACL_KIND_EXTENSION */
 	gettext_noop("permission denied for extension %s"),
 };
@@ -3193,8 +3146,6 @@ static const char *const not_owner_msg[MAX_ACL_KIND] =
 	gettext_noop("must be owner of foreign-data wrapper %s"),
 	/* ACL_KIND_FOREIGN_SERVER */
 	gettext_noop("must be owner of foreign server %s"),
-	/* ACL_KIND_FOREIGN_TABLE */
-	gettext_noop("must be owner of foreign table %s"),
 	/* ACL_KIND_EXTENSION */
 	gettext_noop("must be owner of extension %s"),
 };
@@ -3490,9 +3441,6 @@ pg_class_aclmask(Oid table_oid, Oid roleid,
 		{
 			case RELKIND_SEQUENCE:
 				acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
-				break;
-			case RELKIND_FOREIGN_TABLE:
-				acl = acldefault(ACL_OBJECT_FOREIGN_TABLE, ownerId);
 				break;
 			default:
 				acl = acldefault(ACL_OBJECT_RELATION, ownerId);
@@ -4589,6 +4537,33 @@ pg_ts_config_ownercheck(Oid cfg_oid, Oid roleid)
 }
 
 /*
+ * Ownership check for a foreign-data wrapper (specified by OID).
+ */
+bool
+pg_foreign_data_wrapper_ownercheck(Oid srv_oid, Oid roleid)
+{
+	HeapTuple	tuple;
+	Oid			ownerId;
+
+	/* Superusers bypass all permission checking. */
+	if (superuser_arg(roleid))
+		return true;
+
+	tuple = SearchSysCache1(FOREIGNDATAWRAPPEROID, ObjectIdGetDatum(srv_oid));
+	if (!HeapTupleIsValid(tuple))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("foreign-data wrapper with OID %u does not exist",
+						srv_oid)));
+
+	ownerId = ((Form_pg_foreign_data_wrapper) GETSTRUCT(tuple))->fdwowner;
+
+	ReleaseSysCache(tuple);
+
+	return has_privs_of_role(roleid, ownerId);
+}
+
+/*
  * Ownership check for a foreign server (specified by OID).
  */
 bool
@@ -4741,7 +4716,7 @@ pg_extension_ownercheck(Oid ext_oid, Oid roleid)
  * Note: roles do not have owners per se; instead we use this test in
  * places where an ownership-like permissions test is needed for a role.
  * Be sure to apply it to the role trying to do the operation, not the
- * role being operated on!  Also note that this generally should not be
+ * role being operated on!	Also note that this generally should not be
  * considered enough privilege if the target role is a superuser.
  * (We don't handle that consideration here because we want to give a
  * separate error message for such cases, so the caller has to deal with it.)

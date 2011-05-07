@@ -18,13 +18,13 @@
 
 PG_MODULE_MAGIC;
 
-void _PG_init(void);
+void		_PG_init(void);
 
 /* GUC Variables */
 static int	auth_delay_milliseconds;
 
 /* Original Hook */
-static ClientAuthentication_hook_type	original_client_auth_hook = NULL;
+static ClientAuthentication_hook_type original_client_auth_hook = NULL;
 
 /*
  * Check authentication
@@ -53,15 +53,16 @@ auth_delay_checks(Port *port, int status)
 void
 _PG_init(void)
 {
-	/* Define custome GUC variables */
+	/* Define custom GUC variables */
 	DefineCustomIntVariable("auth_delay.milliseconds",
-							"Milliseconds to delay before reporting authentication failure",
+			 "Milliseconds to delay before reporting authentication failure",
 							NULL,
 							&auth_delay_milliseconds,
 							0,
 							0, INT_MAX,
 							PGC_SIGHUP,
 							GUC_UNIT_MS,
+							NULL,
 							NULL,
 							NULL);
 	/* Install Hooks */

@@ -102,6 +102,7 @@ static bool port_specified_by_user = false;
 static char *dlpath = PKGLIBDIR;
 static char *user = NULL;
 static _stringlist *extraroles = NULL;
+static _stringlist *extra_install = NULL;
 
 /* internal variables */
 static const char *progname;
@@ -125,23 +126,25 @@ static void
 header(const char *fmt,...)
 /* This extension allows gcc to check the format string for consistency with
    the supplied arguments. */
-__attribute__((format(printf, 1, 2)));
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 static void
 status(const char *fmt,...)
 /* This extension allows gcc to check the format string for consistency with
    the supplied arguments. */
-__attribute__((format(printf, 1, 2)));
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 static void
 psql_command(const char *database, const char *query,...)
 /* This extension allows gcc to check the format string for consistency with
    the supplied arguments. */
-__attribute__((format(printf, 2, 3)));
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
 #ifdef WIN32
 typedef BOOL (WINAPI * __CreateRestrictedToken) (HANDLE, DWORD, DWORD, PSID_AND_ATTRIBUTES, DWORD, PLUID_AND_ATTRIBUTES, DWORD, PSID_AND_ATTRIBUTES, PHANDLE);
 
-/* Windows API define missing from MingW headers */
+/* Windows API define missing from some versions of MingW headers */
+#ifndef  DISABLE_MAX_PRIVILEGE
 #define DISABLE_MAX_PRIVILEGE	0x1
+#endif
 #endif
 
 /*
@@ -727,7 +730,7 @@ initialize_environment(void)
 	putenv("LC_MESSAGES=C");
 
 	/*
-	 * Set multibyte as requested
+	 * Set encoding as requested
 	 */
 	if (encoding)
 		doputenv("PGCLIENTENCODING", encoding);
@@ -817,8 +820,10 @@ initialize_environment(void)
 		add_to_path("LD_LIBRARY_PATH", ':', libdir);
 		add_to_path("DYLD_LIBRARY_PATH", ':', libdir);
 		add_to_path("LIBPATH", ':', libdir);
-#if defined(WIN32) || defined(__CYGWIN__)
+#if defined(WIN32)
 		add_to_path("PATH", ';', libdir);
+#elif defined(__CYGWIN__)
+		add_to_path("PATH", ':', libdir);
 #endif
 	}
 	else
@@ -1803,8 +1808,8 @@ create_database(const char *dbname)
 	}
 
 	/*
-	 * Install any requested extensions.  We use CREATE IF NOT EXISTS
-	 * so that this will work whether or not the extension is preinstalled.
+	 * Install any requested extensions.  We use CREATE IF NOT EXISTS so that
+	 * this will work whether or not the extension is preinstalled.
 	 */
 	for (sl = loadextension; sl != NULL; sl = sl->next)
 	{
@@ -1878,7 +1883,7 @@ help(void)
 	printf(_("  --create-role=ROLE        create the specified role before testing\n"));
 	printf(_("  --max-connections=N       maximum number of concurrent connections\n"));
 	printf(_("                            (default is 0 meaning unlimited)\n"));
-	printf(_("  --multibyte=ENCODING      use ENCODING as the multibyte encoding\n"));
+	printf(_("  --encoding=ENCODING       use ENCODING as the encoding\n"));
 	printf(_("  --outputdir=DIR           place output files in DIR (default \".\")\n"));
 	printf(_("  --schedule=FILE           use test ordering schedule from FILE\n"));
 	printf(_("                            (can be used multiple times to concatenate)\n"));
@@ -1892,6 +1897,7 @@ help(void)
 	printf(_("  --top-builddir=DIR        (relative) path to top level build directory\n"));
 	printf(_("  --port=PORT               start postmaster on PORT\n"));
 	printf(_("  --temp-config=PATH        append contents of PATH to temporary config\n"));
+	printf(_("  --extra-install=DIR       additional directory to install (e.g., contrib\n"));
 	printf(_("\n"));
 	printf(_("Options for using an existing installation:\n"));
 	printf(_("  --host=HOST               use postmaster running on HOST\n"));
@@ -1923,7 +1929,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"inputdir", required_argument, NULL, 3},
 		{"load-language", required_argument, NULL, 4},
 		{"max-connections", required_argument, NULL, 5},
-		{"multibyte", required_argument, NULL, 6},
+		{"encoding", required_argument, NULL, 6},
 		{"outputdir", required_argument, NULL, 7},
 		{"schedule", required_argument, NULL, 8},
 		{"temp-install", required_argument, NULL, 9},
@@ -1939,6 +1945,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"use-existing", no_argument, NULL, 20},
 		{"launcher", required_argument, NULL, 21},
 		{"load-extension", required_argument, NULL, 22},
+		{"extra-install", required_argument, NULL, 23},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2038,6 +2045,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 			case 22:
 				add_stringlist_item(&loadextension, optarg);
 				break;
+			case 23:
+				add_stringlist_item(&extra_install, optarg);
+				break;
 			default:
 				/* getopt_long already emitted a complaint */
 				fprintf(stderr, _("\nTry \"%s -h\" for more information.\n"),
@@ -2082,6 +2092,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	if (temp_install)
 	{
 		FILE	   *pg_conf;
+		_stringlist *sl;
 
 		/*
 		 * Prepare the temp installation
@@ -2122,6 +2133,24 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{
 			fprintf(stderr, _("\n%s: installation failed\nExamine %s/log/install.log for the reason.\nCommand was: %s\n"), progname, outputdir, buf);
 			exit_nicely(2);
+		}
+
+		for (sl = extra_install; sl != NULL; sl = sl->next)
+		{
+#ifndef WIN32_ONLY_COMPILER
+			snprintf(buf, sizeof(buf),
+					 SYSTEMQUOTE "\"%s\" -C \"%s/%s\" DESTDIR=\"%s/install\" install >> \"%s/log/install.log\" 2>&1" SYSTEMQUOTE,
+					 makeprog, top_builddir, sl->str, temp_install, outputdir);
+#else
+			fprintf(stderr, _("\n%s: --extra-install option not supported on this platform\n", progname));
+			exit_nicely(2);
+#endif
+
+			if (system(buf))
+			{
+				fprintf(stderr, _("\n%s: installation failed\nExamine %s/log/install.log for the reason.\nCommand was: %s\n"), progname, outputdir, buf);
+				exit_nicely(2);
+			}
 		}
 
 		/* initdb */
@@ -2275,8 +2304,14 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 
 		postmaster_running = true;
 
+#ifdef WIN64
+/* need a series of two casts to convert HANDLE without compiler warning */
+#define ULONGPID(x) (unsigned long) (unsigned long long) (x)
+#else
+#define ULONGPID(x) (unsigned long) (x)
+#endif
 		printf(_("running on port %d with pid %lu\n"),
-			   port, (unsigned long) postmaster_pid);
+			   port, ULONGPID(postmaster_pid));
 	}
 	else
 	{

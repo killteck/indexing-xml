@@ -222,8 +222,8 @@ PerformAuthentication(Port *port)
 	{
 		if (am_walsender)
 			ereport(LOG,
-				(errmsg("replication connection authorized: user=%s",
-						port->user_name)));
+					(errmsg("replication connection authorized: user=%s",
+							port->user_name)));
 		else
 			ereport(LOG,
 					(errmsg("connection authorized: user=%s database=%s",
@@ -626,6 +626,16 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 	}
 
 	/*
+	 * Binary upgrades only allowed super-user connections
+	 */
+	if (IsBinaryUpgrade && !am_superuser)
+	{
+			ereport(FATAL,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+			errmsg("must be superuser to connect in binary upgrade mode")));
+	}
+
+	/*
 	 * The last few connections slots are reserved for superusers. Although
 	 * replication connections currently require superuser privileges, we
 	 * don't allow them to consume the reserved slots, which are intended for
@@ -639,9 +649,9 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 				 errmsg("remaining connection slots are reserved for non-replication superuser connections")));
 
 	/*
-	 * If walsender, we don't want to connect to any particular database.
-	 * Just finish the backend startup by processing any options from the
-	 * startup packet, and we're done.
+	 * If walsender, we don't want to connect to any particular database. Just
+	 * finish the backend startup by processing any options from the startup
+	 * packet, and we're done.
 	 */
 	if (am_walsender)
 	{

@@ -346,13 +346,13 @@
         <entry><type>decimal</></entry>
         <entry>variable</entry>
         <entry>user-specified precision, exact</entry>
-        <entry>no limit</entry>
+        <entry>up to 131072 digits before the decimal point; up to 16383 digits after the decimal point</entry>
        </row>
        <row>
         <entry><type>numeric</></entry>
         <entry>variable</entry>
         <entry>user-specified precision, exact</entry>
-        <entry>no limit</entry>
+        <entry>up to 131072 digits before the decimal point; up to 16383 digits after the decimal point</entry>
        </row>
 
        <row>
@@ -476,8 +476,8 @@
     </indexterm>
 
     <para>
-     The type <type>numeric</type> can store numbers with up to 1000
-     digits of precision and perform calculations exactly. It is
+     The type <type>numeric</type> can store numbers with a
+     very large number of digits and perform calculations exactly. It is
      especially recommended for storing monetary amounts and other
      quantities where exactness is required. However, arithmetic on
      <type>numeric</type> values is very slow compared to the integer
@@ -524,6 +524,15 @@ NUMERIC
      about portability, always specify the precision and scale
      explicitly.)
     </para>
+
+    <note>
+     <para>
+      The maximum allowed precision when explicitly specified in the
+      type declaration is 1000; <type>NUMERIC</type> without a specified
+      precision is subject to the limits described in <xref
+      linkend="datatype-numeric-table">.
+     </para>
+    </note>
 
     <para>
      If the scale of a value to be stored is greater than the declared
@@ -877,15 +886,22 @@ ALTER SEQUENCE <replaceable class="parameter">tablename</replaceable>_<replaceab
    </para>
 
    <para>
-    Values of the <type>numeric</type> data type can be cast to
-    <type>money</type>.  Other numeric types can be converted to
-    <type>money</type> by casting to <type>numeric</type> first, for example:
+    Values of the <type>numeric</type>, <type>int</type>, and
+    <type>bigint</type> data types can be cast to <type>money</type>.
+    Conversion from the <type>real</type> and <type>double precision</type>
+    data types can be done by casting to <type>numeric</type> first, for
+    example:
 <programlisting>
-SELECT 1234::numeric::money;
+SELECT '12.34'::float8::numeric::money;
 </programlisting>
+    However, this is not recommended.  Floating point numbers should not be
+    used to handle money due to the potential for rounding errors.
+   </para>
+
+   <para>
     A <type>money</type> value can be cast to <type>numeric</type> without
     loss of precision. Conversion to other types could potentially lose
-    precision, and it must be done in two stages, for example:
+    precision, and must also be done in two stages:
 <programlisting>
 SELECT '52093.89'::money::numeric::float8;
 </programlisting>

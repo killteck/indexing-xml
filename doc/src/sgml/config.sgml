@@ -1,6 +1,6 @@
 <!-- doc/src/sgml/config.sgml -->
 
-<chapter Id="runtime-config">
+<chapter id="runtime-config">
   <title>Server Configuration</title>
 
   <indexterm>
@@ -135,7 +135,7 @@ env PGOPTIONS='-c geqo=off' psql
     Furthermore, it is possible to assign a set of parameter settings to
     a user or a database.  Whenever a session is started, the default
     settings for the user and database involved are loaded.  The
-    commands <xref linkend="sql-alteruser">
+    commands <xref linkend="sql-alterrole">
     and <xref linkend="sql-alterdatabase">,
     respectively, are used to configure these settings.  Per-database
     settings override anything received from the
@@ -166,10 +166,12 @@ SET ENABLE_SEQSCAN TO OFF;
    </para>
 
    <para>
-    The virtual table <structname>pg_settings</structname>
-    (described in <xref linkend="view-pg-settings">) also allows
-    displaying and updating session run-time parameters.  It is equivalent
-    to <command>SHOW</> and <command>SET</>, but can be more convenient
+    The virtual table <structname>pg_settings</structname> also allows
+    displaying and updating session run-time parameters;  see <xref
+    linkend="view-pg-settings"> for details and a description of the
+    different variable types and when they can be changed.
+    <structname>pg_settings</structname> is equivalent to <command>SHOW</>
+    and <command>SET</>, but can be more convenient
     to use because it can be joined with other tables, or selected from using
     any desired selection condition. It also contains more information about
     what values are allowed for the parameters.
@@ -703,7 +705,7 @@ SET ENABLE_SEQSCAN TO OFF;
        <para>
         When a password is specified in <xref
         linkend="sql-createuser"> or
-        <xref linkend="sql-alteruser">
+        <xref linkend="sql-alterrole">
         without writing either <literal>ENCRYPTED</> or
         <literal>UNENCRYPTED</>, this parameter determines whether the
         password is to be encrypted. The default is <literal>on</>
@@ -1505,8 +1507,9 @@ SET ENABLE_SEQSCAN TO OFF;
        <para>
         Specifies whether transaction commit will wait for WAL records
         to be written to disk before the command returns a <quote>success</>
-        indication to the client.  The default, and safe, setting is
-        <literal>on</>.  When <literal>off</>, there can be a delay between
+        indication to the client.  Valid values are <literal>on</>,
+        <literal>local</>, and <literal>off</>.  The default, and safe, value
+        is <literal>on</>.  When <literal>off</>, there can be a delay between
         when success is reported to the client and when the transaction is
         really guaranteed to be safe against a server crash.  (The maximum
         delay is three times <xref linkend="guc-wal-writer-delay">.)  Unlike
@@ -1519,6 +1522,19 @@ SET ENABLE_SEQSCAN TO OFF;
         can be a useful alternative when performance is more important than
         exact certainty about the durability of a transaction.  For more
         discussion see <xref linkend="wal-async-commit">.
+       </para>
+       <para>
+        If <xref linkend="guc-synchronous-standby-names"> is set, this
+        parameter also controls whether or not transaction commit will wait
+        for the transaction's WAL records to be flushed to disk and replicated
+        to the standby server.  The commit wait will last until a reply from
+        the current synchronous standby indicates it has written the commit
+        record of the transaction to durable storage.  If synchronous
+        replication is in use, it will normally be sensible either to wait
+        both for WAL records to reach both the local and remote disks, or
+        to allow the transaction to commit asynchronously.  However, the
+        special value <literal>local</> is available for transactions that
+        wish to wait for local flush to disk, but not synchronous replication.
        </para>
        <para>
         This parameter can be changed at any time; the behavior for any
@@ -2017,6 +2033,30 @@ SET ENABLE_SEQSCAN TO OFF;
        </para>
       </listitem>
      </varlistentry>
+
+     <varlistentry id="guc-replication-timeout" xreflabel="replication_timeout">
+      <term><varname>replication_timeout</varname> (<type>integer</type>)</term>
+      <indexterm>
+       <primary><varname>replication_timeout</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Terminate replication connections that are inactive longer
+        than the specified number of milliseconds. This is useful for
+        the primary server to detect a standby crash or network outage.
+        A value of zero disables the timeout mechanism.  This parameter
+        can only be set in
+        the <filename>postgresql.conf</> file or on the server command line.
+        The default value is 60 seconds.
+       </para>
+       <para>
+        To prevent connections from being terminated prematurely,
+        <xref linkend="guc-wal-receiver-status-interval">
+        must be enabled on the standby, and its value must be less than the
+        value of <varname>replication_timeout</>.
+       </para>
+      </listitem>
+     </varlistentry>
      </variablelist>
     </sect2>
 
@@ -2031,39 +2071,6 @@ SET ENABLE_SEQSCAN TO OFF;
      </para>
 
      <variablelist>
-     <varlistentry id="guc-synchronous-replication" xreflabel="synchronous_replication">
-      <term><varname>synchronous_replication</varname> (<type>boolean</type>)</term>
-      <indexterm>
-       <primary><varname>synchronous_replication</> configuration parameter</primary>
-      </indexterm>
-      <listitem>
-       <para>
-        Specifies whether transaction commit will wait for WAL records
-        to be replicated before the command returns a <quote>success</>
-        indication to the client.  The default setting is <literal>off</>.
-        When <literal>on</>, there will be a delay while the client waits
-        for confirmation of successful replication. That delay will
-        increase depending upon the physical distance and network activity
-        between primary and standby. The commit wait will last until a
-        reply from the current synchronous standby indicates it has written
-        the commit record of the transaction to durable storage.  This
-        parameter has no effect if
-        <xref linkend="guc-synchronous-standby-names"> is empty or
-        <xref linkend="guc-max-wal-senders"> is zero.
-       </para>
-       <para>
-        This parameter can be changed at any time; the
-        behavior for any one transaction is determined by the setting in
-        effect when it commits.  It is therefore possible, and useful, to have
-        some transactions replicate synchronously and others asynchronously.
-        For example, to make a single multistatement transaction commit
-        asynchronously when the default is synchronous replication, issue
-        <command>SET LOCAL synchronous_replication TO OFF</> within the
-        transaction.
-       </para>
-      </listitem>
-     </varlistentry>
-
      <varlistentry id="guc-synchronous-standby-names" xreflabel="synchronous_standby_names">
       <term><varname>synchronous_standby_names</varname> (<type>string</type>)</term>
       <indexterm>
@@ -2072,7 +2079,7 @@ SET ENABLE_SEQSCAN TO OFF;
       <listitem>
        <para>
         Specifies a priority ordered list of standby names that can offer
-        synchronous replication.  At any one time there will be just one
+        synchronous replication.  At any one time there will be at most one
         synchronous standby that will wake sleeping users following commit.
         The synchronous standby will be the first named standby that is
         both currently connected and streaming in real-time to the standby
@@ -2088,19 +2095,17 @@ SET ENABLE_SEQSCAN TO OFF;
         not enforced for uniqueness. In case of duplicates one of the standbys
         will be chosen to be the synchronous standby, though exactly which
         one is indeterminate.
-       </para>
-       <para>
-        No value is set by default.
         The special entry <literal>*</> matches any application_name, including
         the default application name of <literal>walreceiver</>.
        </para>
        <para>
-        If a standby is removed from the list of servers then it will stop
-        being the synchronous standby, allowing another to take its place.
-        If the list is empty, synchronous replication will not be
-        possible, whatever the setting of <varname>synchronous_replication</>,
-        however, already waiting commits will continue to wait.
-        Standbys may also be added to the list without restarting the server.
+        If no synchronous standby names are specified, then synchronous
+        replication is not enabled and transaction commit will never wait for
+        replication.  This is the default configuration.  Even when
+        synchronous replication is enabled, individual transactions can be
+        configured not to wait for replication by setting the
+        <xref linkend="guc-synchronous-commit"> parameter to
+        <literal>local</> or <literal>off</>.
        </para>
       </listitem>
      </varlistentry>
@@ -2215,6 +2220,11 @@ SET ENABLE_SEQSCAN TO OFF;
        the <filename>postgresql.conf</> file or on the server command line.
        The default value is 10 seconds.
       </para>
+      <para>
+       When <xref linkend="guc-replication-timeout"> is enabled on the primary,
+       <varname>wal_receiver_status_interval</> must be enabled, and its value
+       must be less than the value of <varname>replication_timeout</>.
+      </para>
       </listitem>
      </varlistentry>
 
@@ -2227,7 +2237,7 @@ SET ENABLE_SEQSCAN TO OFF;
        <para>
         Specifies whether or not a hot standby will send feedback to the primary
         about queries currently executing on the standby. This parameter can
-        be used to eliminate query cancels caused by cleanup records, but 
+        be used to eliminate query cancels caused by cleanup records, but
         can cause database bloat on the primary for some workloads.
         The default value is <literal>off</literal>.  Feedback messages will not
         be sent more frequently than once per <varname>wal_receiver_status_interval</>.
@@ -5195,7 +5205,7 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
         libraries to be loaded into specific sessions without an explicit
         <command>LOAD</> command being given.  For example, debugging could
         be enabled for all sessions under a given user name by setting
-        this parameter with <command>ALTER USER SET</>.
+        this parameter with <command>ALTER ROLE SET</>.
        </para>
 
        <para>
@@ -5451,9 +5461,9 @@ dynamic_library_path = 'C:\tools\postgresql;H:\my_project\lib;$libdir'
        <para>
         Applications that wish to use backslash as escape should be
         modified to use escape string syntax (<literal>E'...'</>),
-        because the default behavior of ordinary strings will change
-        in a future release for SQL compatibility.  This variable can
-        be enabled to help detect applications that will break.
+        because the default behavior of ordinary strings is now to treat
+        backslash as an ordinary character, per SQL standard.  This variable
+        can be enabled to help locate code that needs to be changed.
        </para>
       </listitem>
      </varlistentry>

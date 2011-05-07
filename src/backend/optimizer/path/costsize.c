@@ -1096,7 +1096,7 @@ cost_recursive_union(Plan *runion, Plan *nrterm, Plan *rterm)
  * accesses (XXX can't we refine that guess?)
  *
  * By default, we charge two operator evals per tuple comparison, which should
- * be in the right ballpark in most cases.  The caller can tweak this by
+ * be in the right ballpark in most cases.	The caller can tweak this by
  * specifying nonzero comparison_cost; typically that's used for any extra
  * work that has to be done to prepare the inputs to the comparison operators.
  *
@@ -1218,7 +1218,7 @@ cost_sort(Path *path, PlannerInfo *root,
  *	  Determines and returns the cost of a MergeAppend node.
  *
  * MergeAppend merges several pre-sorted input streams, using a heap that
- * at any given instant holds the next tuple from each stream.  If there
+ * at any given instant holds the next tuple from each stream.	If there
  * are N streams, we need about N*log2(N) tuple comparisons to construct
  * the heap at startup, and then for each output tuple, about log2(N)
  * comparisons to delete the top heap entry and another log2(N) comparisons
@@ -1335,25 +1335,40 @@ cost_material(Path *path,
  *		Determines and returns the cost of performing an Agg plan node,
  *		including the cost of its input.
  *
+ * aggcosts can be NULL when there are no actual aggregate functions (i.e.,
+ * we are using a hashed Agg node just to do grouping).
+ *
  * Note: when aggstrategy == AGG_SORTED, caller must ensure that input costs
  * are for appropriately-sorted input.
  */
 void
 cost_agg(Path *path, PlannerInfo *root,
-		 AggStrategy aggstrategy, int numAggs,
+		 AggStrategy aggstrategy, const AggClauseCosts *aggcosts,
 		 int numGroupCols, double numGroups,
 		 Cost input_startup_cost, Cost input_total_cost,
 		 double input_tuples)
 {
 	Cost		startup_cost;
 	Cost		total_cost;
+	AggClauseCosts dummy_aggcosts;
+
+	/* Use all-zero per-aggregate costs if NULL is passed */
+	if (aggcosts == NULL)
+	{
+		Assert(aggstrategy == AGG_HASHED);
+		MemSet(&dummy_aggcosts, 0, sizeof(AggClauseCosts));
+		aggcosts = &dummy_aggcosts;
+	}
 
 	/*
-	 * We charge one cpu_operator_cost per aggregate function per input tuple,
-	 * and another one per output tuple (corresponding to transfn and finalfn
-	 * calls respectively).  If we are grouping, we charge an additional
-	 * cpu_operator_cost per grouping column per input tuple for grouping
-	 * comparisons.
+	 * The transCost.per_tuple component of aggcosts should be charged once
+	 * per input tuple, corresponding to the costs of evaluating the aggregate
+	 * transfns and their input expressions (with any startup cost of course
+	 * charged but once).  The finalCost component is charged once per output
+	 * tuple, corresponding to the costs of evaluating the finalfns.
+	 *
+	 * If we are grouping, we charge an additional cpu_operator_cost per
+	 * grouping column per input tuple for grouping comparisons.
 	 *
 	 * We will produce a single output tuple if not grouping, and a tuple per
 	 * group otherwise.  We charge cpu_tuple_cost for each output tuple.
@@ -1366,15 +1381,13 @@ cost_agg(Path *path, PlannerInfo *root,
 	 * there's roundoff error we might do the wrong thing.  So be sure that
 	 * the computations below form the same intermediate values in the same
 	 * order.
-	 *
-	 * Note: ideally we should use the pg_proc.procost costs of each
-	 * aggregate's component functions, but for now that seems like an
-	 * excessive amount of work.
 	 */
 	if (aggstrategy == AGG_PLAIN)
 	{
 		startup_cost = input_total_cost;
-		startup_cost += cpu_operator_cost * (input_tuples + 1) * numAggs;
+		startup_cost += aggcosts->transCost.startup;
+		startup_cost += aggcosts->transCost.per_tuple * input_tuples;
+		startup_cost += aggcosts->finalCost;
 		/* we aren't grouping */
 		total_cost = startup_cost + cpu_tuple_cost;
 	}
@@ -1384,19 +1397,21 @@ cost_agg(Path *path, PlannerInfo *root,
 		startup_cost = input_startup_cost;
 		total_cost = input_total_cost;
 		/* calcs phrased this way to match HASHED case, see note above */
-		total_cost += cpu_operator_cost * input_tuples * numGroupCols;
-		total_cost += cpu_operator_cost * input_tuples * numAggs;
-		total_cost += cpu_operator_cost * numGroups * numAggs;
+		total_cost += aggcosts->transCost.startup;
+		total_cost += aggcosts->transCost.per_tuple * input_tuples;
+		total_cost += (cpu_operator_cost * numGroupCols) * input_tuples;
+		total_cost += aggcosts->finalCost * numGroups;
 		total_cost += cpu_tuple_cost * numGroups;
 	}
 	else
 	{
 		/* must be AGG_HASHED */
 		startup_cost = input_total_cost;
-		startup_cost += cpu_operator_cost * input_tuples * numGroupCols;
-		startup_cost += cpu_operator_cost * input_tuples * numAggs;
+		startup_cost += aggcosts->transCost.startup;
+		startup_cost += aggcosts->transCost.per_tuple * input_tuples;
+		startup_cost += (cpu_operator_cost * numGroupCols) * input_tuples;
 		total_cost = startup_cost;
-		total_cost += cpu_operator_cost * numGroups * numAggs;
+		total_cost += aggcosts->finalCost * numGroups;
 		total_cost += cpu_tuple_cost * numGroups;
 	}
 
@@ -1413,25 +1428,53 @@ cost_agg(Path *path, PlannerInfo *root,
  */
 void
 cost_windowagg(Path *path, PlannerInfo *root,
-			   int numWindowFuncs, int numPartCols, int numOrderCols,
+			   List *windowFuncs, int numPartCols, int numOrderCols,
 			   Cost input_startup_cost, Cost input_total_cost,
 			   double input_tuples)
 {
 	Cost		startup_cost;
 	Cost		total_cost;
+	ListCell   *lc;
 
 	startup_cost = input_startup_cost;
 	total_cost = input_total_cost;
 
 	/*
-	 * We charge one cpu_operator_cost per window function per tuple (often a
-	 * drastic underestimate, but without a way to gauge how many tuples the
-	 * window function will fetch, it's hard to do better).  We also charge
-	 * cpu_operator_cost per grouping column per tuple for grouping
-	 * comparisons, plus cpu_tuple_cost per tuple for general overhead.
+	 * Window functions are assumed to cost their stated execution cost, plus
+	 * the cost of evaluating their input expressions, per tuple.  Since they
+	 * may in fact evaluate their inputs at multiple rows during each cycle,
+	 * this could be a drastic underestimate; but without a way to know how
+	 * many rows the window function will fetch, it's hard to do better.  In
+	 * any case, it's a good estimate for all the built-in window functions,
+	 * so we'll just do this for now.
 	 */
-	total_cost += cpu_operator_cost * input_tuples * numWindowFuncs;
-	total_cost += cpu_operator_cost * input_tuples * (numPartCols + numOrderCols);
+	foreach(lc, windowFuncs)
+	{
+		WindowFunc *wfunc = (WindowFunc *) lfirst(lc);
+		Cost		wfunccost;
+		QualCost	argcosts;
+
+		Assert(IsA(wfunc, WindowFunc));
+
+		wfunccost = get_func_cost(wfunc->winfnoid) * cpu_operator_cost;
+
+		/* also add the input expressions' cost to per-input-row costs */
+		cost_qual_eval_node(&argcosts, (Node *) wfunc->args, root);
+		startup_cost += argcosts.startup;
+		wfunccost += argcosts.per_tuple;
+
+		total_cost += wfunccost * input_tuples;
+	}
+
+	/*
+	 * We also charge cpu_operator_cost per grouping column per tuple for
+	 * grouping comparisons, plus cpu_tuple_cost per tuple for general
+	 * overhead.
+	 *
+	 * XXX this neglects costs of spooling the data to disk when it overflows
+	 * work_mem.  Sooner or later that should get accounted for.
+	 */
+	total_cost += cpu_operator_cost * (numPartCols + numOrderCols) * input_tuples;
 	total_cost += cpu_tuple_cost * input_tuples;
 
 	path->startup_cost = startup_cost;
@@ -1704,10 +1747,10 @@ cost_mergejoin(MergePath *path, PlannerInfo *root, SpecialJoinInfo *sjinfo)
 				innerendsel;
 	Path		sort_path;		/* dummy for result of cost_sort */
 
-	/* Protect some assumptions below that rowcounts aren't zero */
-	if (outer_path_rows <= 0)
+	/* Protect some assumptions below that rowcounts aren't zero or NaN */
+	if (outer_path_rows <= 0 || isnan(outer_path_rows))
 		outer_path_rows = 1;
-	if (inner_path_rows <= 0)
+	if (inner_path_rows <= 0 || isnan(inner_path_rows))
 		inner_path_rows = 1;
 
 	if (!enable_mergejoin)
@@ -1795,7 +1838,7 @@ cost_mergejoin(MergePath *path, PlannerInfo *root, SpecialJoinInfo *sjinfo)
 		ipathkey = (PathKey *) linitial(ipathkeys);
 		/* debugging check */
 		if (opathkey->pk_opfamily != ipathkey->pk_opfamily ||
-			opathkey->pk_collation != ipathkey->pk_collation ||
+			opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation ||
 			opathkey->pk_strategy != ipathkey->pk_strategy ||
 			opathkey->pk_nulls_first != ipathkey->pk_nulls_first)
 			elog(ERROR, "left and right pathkeys do not match in mergejoin");
@@ -2046,7 +2089,7 @@ cached_scansel(PlannerInfo *root, RestrictInfo *rinfo, PathKey *pathkey)
 	{
 		cache = (MergeScanSelCache *) lfirst(lc);
 		if (cache->opfamily == pathkey->pk_opfamily &&
-			cache->collation == pathkey->pk_collation &&
+			cache->collation == pathkey->pk_eclass->ec_collation &&
 			cache->strategy == pathkey->pk_strategy &&
 			cache->nulls_first == pathkey->pk_nulls_first)
 			return cache;
@@ -2068,7 +2111,7 @@ cached_scansel(PlannerInfo *root, RestrictInfo *rinfo, PathKey *pathkey)
 
 	cache = (MergeScanSelCache *) palloc(sizeof(MergeScanSelCache));
 	cache->opfamily = pathkey->pk_opfamily;
-	cache->collation = pathkey->pk_collation;
+	cache->collation = pathkey->pk_eclass->ec_collation;
 	cache->strategy = pathkey->pk_strategy;
 	cache->nulls_first = pathkey->pk_nulls_first;
 	cache->leftstartsel = leftstartsel;
@@ -2640,17 +2683,12 @@ cost_qual_eval_walker(Node *node, cost_qual_eval_context *context)
 	 * Vars and Consts are charged zero, and so are boolean operators (AND,
 	 * OR, NOT). Simplistic, but a lot better than no model at all.
 	 *
-	 * Note that Aggref and WindowFunc nodes are (and should be) treated like
-	 * Vars --- whatever execution cost they have is absorbed into
-	 * plan-node-specific costing.	As far as expression evaluation is
-	 * concerned they're just like Vars.
-	 *
 	 * Should we try to account for the possibility of short-circuit
 	 * evaluation of AND/OR?  Probably *not*, because that would make the
 	 * results depend on the clause ordering, and we are not in any position
 	 * to expect that the current ordering of the clauses is the one that's
-	 * going to end up being used.	(Is it worth applying order_qual_clauses
-	 * much earlier in the planning process to fix this?)
+	 * going to end up being used.  The above per-RestrictInfo caching would
+	 * not mix well with trying to re-order clauses anyway.
 	 */
 	if (IsA(node, FuncExpr))
 	{
@@ -2678,6 +2716,20 @@ cost_qual_eval_walker(Node *node, cost_qual_eval_context *context)
 		set_sa_opfuncid(saop);
 		context->total.per_tuple += get_func_cost(saop->opfuncid) *
 			cpu_operator_cost * estimate_array_length(arraynode) * 0.5;
+	}
+	else if (IsA(node, Aggref) ||
+			 IsA(node, WindowFunc))
+	{
+		/*
+		 * Aggref and WindowFunc nodes are (and should be) treated like Vars,
+		 * ie, zero execution cost in the current model, because they behave
+		 * essentially like Vars in execQual.c.  We disregard the costs of
+		 * their input expressions for the same reason.  The actual execution
+		 * costs of the aggregate/window functions and their arguments have to
+		 * be factored into plan-node-specific costing of the Agg or WindowAgg
+		 * plan node.
+		 */
+		return false;			/* don't recurse into children */
 	}
 	else if (IsA(node, CoerceViaIO))
 	{
@@ -2909,7 +2961,7 @@ adjust_semi_join(PlannerInfo *root, JoinPath *path, SpecialJoinInfo *sjinfo,
 			List	   *nrclauses;
 
 			nrclauses = select_nonredundant_join_clauses(root,
-														 path->joinrestrictinfo,
+													  path->joinrestrictinfo,
 														 path->innerjoinpath);
 			*indexed_join_quals = (nrclauses == NIL);
 		}
@@ -3185,7 +3237,7 @@ set_subquery_size_estimates(PlannerInfo *root, RelOptInfo *rel,
 
 	/*
 	 * Compute per-output-column width estimates by examining the subquery's
-	 * targetlist.  For any output that is a plain Var, get the width estimate
+	 * targetlist.	For any output that is a plain Var, get the width estimate
 	 * that was made while planning the subquery.  Otherwise, fall back on a
 	 * datatype-based estimate.
 	 */
@@ -3210,7 +3262,7 @@ set_subquery_size_estimates(PlannerInfo *root, RelOptInfo *rel,
 		if (IsA(texpr, Var) &&
 			subroot->parse->setOperations == NULL)
 		{
-			Var	   *var = (Var *) texpr;
+			Var		   *var = (Var *) texpr;
 			RelOptInfo *subrel = find_base_rel(subroot, var->varno);
 
 			item_width = subrel->attr_widths[var->varattno - subrel->min_attr];
@@ -3332,7 +3384,7 @@ set_cte_size_estimates(PlannerInfo *root, RelOptInfo *rel, Plan *cteplan)
  * of estimating baserestrictcost, so we set that, and we also set up width
  * using what will be purely datatype-driven estimates from the targetlist.
  * There is no way to do anything sane with the rows value, so we just put
- * a default estimate and hope that the wrapper can improve on it.  The
+ * a default estimate and hope that the wrapper can improve on it.	The
  * wrapper's PlanForeignScan function will be called momentarily.
  *
  * The rel's targetlist and restrictinfo list must have been constructed
@@ -3396,8 +3448,8 @@ set_rel_width(PlannerInfo *root, RelOptInfo *rel)
 			ndx = var->varattno - rel->min_attr;
 
 			/*
-			 * If it's a whole-row Var, we'll deal with it below after we
-			 * have already cached as many attr widths as possible.
+			 * If it's a whole-row Var, we'll deal with it below after we have
+			 * already cached as many attr widths as possible.
 			 */
 			if (var->varattno == 0)
 			{
@@ -3406,8 +3458,8 @@ set_rel_width(PlannerInfo *root, RelOptInfo *rel)
 			}
 
 			/*
-			 * The width may have been cached already (especially if it's
-			 * a subquery), so don't duplicate effort.
+			 * The width may have been cached already (especially if it's a
+			 * subquery), so don't duplicate effort.
 			 */
 			if (rel->attr_widths[ndx] > 0)
 			{
@@ -3464,13 +3516,13 @@ set_rel_width(PlannerInfo *root, RelOptInfo *rel)
 	 */
 	if (have_wholerow_var)
 	{
-		int32	wholerow_width = sizeof(HeapTupleHeaderData);
+		int32		wholerow_width = sizeof(HeapTupleHeaderData);
 
 		if (reloid != InvalidOid)
 		{
 			/* Real relation, so estimate true tuple width */
 			wholerow_width += get_relation_data_width(reloid,
-													  rel->attr_widths - rel->min_attr);
+										   rel->attr_widths - rel->min_attr);
 		}
 		else
 		{
@@ -3484,8 +3536,8 @@ set_rel_width(PlannerInfo *root, RelOptInfo *rel)
 		rel->attr_widths[0 - rel->min_attr] = wholerow_width;
 
 		/*
-		 * Include the whole-row Var as part of the output tuple.  Yes,
-		 * that really is what happens at runtime.
+		 * Include the whole-row Var as part of the output tuple.  Yes, that
+		 * really is what happens at runtime.
 		 */
 		tuple_width += wholerow_width;
 	}

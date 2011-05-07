@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * seclabel.c
- *    routines to support security label feature.
+ *	  routines to support security label feature.
  *
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -15,7 +15,6 @@
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
-#include "catalog/pg_collation.h"
 #include "catalog/pg_seclabel.h"
 #include "commands/seclabel.h"
 #include "miscadmin.h"
@@ -29,7 +28,7 @@
 typedef struct
 {
 	const char *provider_name;
-	check_object_relabel_type	hook;
+	check_object_relabel_type hook;
 } LabelProvider;
 
 static List *label_provider_list = NIL;
@@ -43,9 +42,9 @@ void
 ExecSecLabelStmt(SecLabelStmt *stmt)
 {
 	LabelProvider *provider = NULL;
-	ObjectAddress	address;
-	Relation		relation;
-	ListCell	   *lc;
+	ObjectAddress address;
+	Relation	relation;
+	ListCell   *lc;
 
 	/*
 	 * Find the named label provider, or if none specified, check whether
@@ -56,16 +55,16 @@ ExecSecLabelStmt(SecLabelStmt *stmt)
 		if (label_provider_list == NIL)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("no security label providers have been loaded")));
+					 errmsg("no security label providers have been loaded")));
 		if (lnext(list_head(label_provider_list)) != NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("must specify provider when multiple security label providers have been loaded")));
+					 errmsg("must specify provider when multiple security label providers have been loaded")));
 		provider = (LabelProvider *) linitial(label_provider_list);
 	}
 	else
 	{
-		foreach (lc, label_provider_list)
+		foreach(lc, label_provider_list)
 		{
 			LabelProvider *lp = lfirst(lc);
 
@@ -83,10 +82,10 @@ ExecSecLabelStmt(SecLabelStmt *stmt)
 	}
 
 	/*
-	 * Translate the parser representation which identifies this object
-	 * into an ObjectAddress. get_object_address() will throw an error if
-     * the object does not exist, and will also acquire a lock on the
-     * target to guard against concurrent modifications.
+	 * Translate the parser representation which identifies this object into
+	 * an ObjectAddress. get_object_address() will throw an error if the
+	 * object does not exist, and will also acquire a lock on the target to
+	 * guard against concurrent modifications.
 	 */
 	address = get_object_address(stmt->objtype, stmt->objname, stmt->objargs,
 								 &relation, ShareUpdateExclusiveLock);
@@ -99,6 +98,7 @@ ExecSecLabelStmt(SecLabelStmt *stmt)
 	switch (stmt->objtype)
 	{
 		case OBJECT_COLUMN:
+
 			/*
 			 * Allow security labels only on columns of tables, views,
 			 * composite types, and foreign tables (which are the only
@@ -118,7 +118,7 @@ ExecSecLabelStmt(SecLabelStmt *stmt)
 	}
 
 	/* Provider gets control here, may throw ERROR to veto new label. */
-	(*provider->hook)(&address, stmt->label);
+	(*provider->hook) (&address, stmt->label);
 
 	/* Apply new label. */
 	SetSecurityLabel(&address, provider->provider_name, stmt->label);
@@ -141,8 +141,8 @@ char *
 GetSecurityLabel(const ObjectAddress *object, const char *provider)
 {
 	Relation	pg_seclabel;
-	ScanKeyData	keys[4];
-	SysScanDesc	scan;
+	ScanKeyData keys[4];
+	SysScanDesc scan;
 	HeapTuple	tuple;
 	Datum		datum;
 	bool		isnull;
@@ -166,7 +166,6 @@ GetSecurityLabel(const ObjectAddress *object, const char *provider)
 				Anum_pg_seclabel_provider,
 				BTEqualStrategyNumber, F_TEXTEQ,
 				CStringGetTextDatum(provider));
-	ScanKeyEntryInitializeCollation(&keys[3], DEFAULT_COLLATION_OID);
 
 	pg_seclabel = heap_open(SecLabelRelationId, AccessShareLock);
 
@@ -198,8 +197,8 @@ SetSecurityLabel(const ObjectAddress *object,
 				 const char *provider, const char *label)
 {
 	Relation	pg_seclabel;
-	ScanKeyData	keys[4];
-	SysScanDesc	scan;
+	ScanKeyData keys[4];
+	SysScanDesc scan;
 	HeapTuple	oldtup;
 	HeapTuple	newtup = NULL;
 	Datum		values[Natts_pg_seclabel];
@@ -236,7 +235,6 @@ SetSecurityLabel(const ObjectAddress *object,
 				Anum_pg_seclabel_provider,
 				BTEqualStrategyNumber, F_TEXTEQ,
 				CStringGetTextDatum(provider));
-	ScanKeyEntryInitializeCollation(&keys[3], DEFAULT_COLLATION_OID);
 
 	pg_seclabel = heap_open(SecLabelRelationId, RowExclusiveLock);
 
@@ -284,8 +282,8 @@ void
 DeleteSecurityLabel(const ObjectAddress *object)
 {
 	Relation	pg_seclabel;
-	ScanKeyData	skey[3];
-	SysScanDesc	scan;
+	ScanKeyData skey[3];
+	SysScanDesc scan;
 	HeapTuple	oldtup;
 	int			nkeys;
 
@@ -326,8 +324,8 @@ DeleteSecurityLabel(const ObjectAddress *object)
 void
 register_label_provider(const char *provider_name, check_object_relabel_type hook)
 {
-	LabelProvider  *provider;
-	MemoryContext	oldcxt;
+	LabelProvider *provider;
+	MemoryContext oldcxt;
 
 	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	provider = palloc(sizeof(LabelProvider));

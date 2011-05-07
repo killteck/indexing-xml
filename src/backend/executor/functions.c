@@ -81,7 +81,8 @@ typedef struct
 	char	   *fname;			/* function name (for error msgs) */
 	char	   *src;			/* function body text (for error msgs) */
 
-	Oid		   *argtypes;		/* resolved types of arguments */
+	SQLFunctionParseInfoPtr pinfo;		/* data for parser callback hooks */
+
 	Oid			rettype;		/* actual return type */
 	int16		typlen;			/* length of the return type */
 	bool		typbyval;		/* true if return type is pass by value */
@@ -108,12 +109,25 @@ typedef struct
 
 typedef SQLFunctionCache *SQLFunctionCachePtr;
 
+/*
+ * Data structure needed by the parser callback hooks to resolve parameter
+ * references during parsing of a SQL function's body.  This is separate from
+ * SQLFunctionCache since we sometimes do parsing separately from execution.
+ */
+typedef struct SQLFunctionParseInfo
+{
+	Oid		   *argtypes;		/* resolved types of input arguments */
+	int			nargs;			/* number of input arguments */
+	Oid			collation;		/* function's input collation, if known */
+}	SQLFunctionParseInfo;
+
 
 /* non-export function prototypes */
+static Node *sql_fn_param_ref(ParseState *pstate, ParamRef *pref);
 static List *init_execution_state(List *queryTree_list,
 					 SQLFunctionCachePtr fcache,
 					 bool lazyEvalOK);
-static void init_sql_fcache(FmgrInfo *finfo, bool lazyEvalOK);
+static void init_sql_fcache(FmgrInfo *finfo, Oid collation, bool lazyEvalOK);
 static void postquel_start(execution_state *es, SQLFunctionCachePtr fcache);
 static bool postquel_getnext(execution_state *es, SQLFunctionCachePtr fcache);
 static void postquel_end(execution_state *es);
@@ -132,10 +146,116 @@ static void sqlfunction_destroy(DestReceiver *self);
 
 
 /*
+ * Prepare the SQLFunctionParseInfo struct for parsing a SQL function body
+ *
+ * This includes resolving actual types of polymorphic arguments.
+ *
+ * call_expr can be passed as NULL, but then we will fail if there are any
+ * polymorphic arguments.
+ */
+SQLFunctionParseInfoPtr
+prepare_sql_fn_parse_info(HeapTuple procedureTuple,
+						  Node *call_expr,
+						  Oid inputCollation)
+{
+	SQLFunctionParseInfoPtr pinfo;
+	Form_pg_proc procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
+	int			nargs;
+
+	pinfo = (SQLFunctionParseInfoPtr) palloc0(sizeof(SQLFunctionParseInfo));
+
+	/* Save the function's input collation */
+	pinfo->collation = inputCollation;
+
+	/*
+	 * Copy input argument types from the pg_proc entry, then resolve any
+	 * polymorphic types.
+	 */
+	pinfo->nargs = nargs = procedureStruct->pronargs;
+	if (nargs > 0)
+	{
+		Oid		   *argOidVect;
+		int			argnum;
+
+		argOidVect = (Oid *) palloc(nargs * sizeof(Oid));
+		memcpy(argOidVect,
+			   procedureStruct->proargtypes.values,
+			   nargs * sizeof(Oid));
+
+		for (argnum = 0; argnum < nargs; argnum++)
+		{
+			Oid			argtype = argOidVect[argnum];
+
+			if (IsPolymorphicType(argtype))
+			{
+				argtype = get_call_expr_argtype(call_expr, argnum);
+				if (argtype == InvalidOid)
+					ereport(ERROR,
+							(errcode(ERRCODE_DATATYPE_MISMATCH),
+							 errmsg("could not determine actual type of argument declared %s",
+									format_type_be(argOidVect[argnum]))));
+				argOidVect[argnum] = argtype;
+			}
+		}
+
+		pinfo->argtypes = argOidVect;
+	}
+
+	return pinfo;
+}
+
+/*
+ * Parser setup hook for parsing a SQL function body.
+ */
+void
+sql_fn_parser_setup(struct ParseState *pstate, SQLFunctionParseInfoPtr pinfo)
+{
+	/* Later we might use these hooks to support parameter names */
+	pstate->p_pre_columnref_hook = NULL;
+	pstate->p_post_columnref_hook = NULL;
+	pstate->p_paramref_hook = sql_fn_param_ref;
+	/* no need to use p_coerce_param_hook */
+	pstate->p_ref_hook_state = (void *) pinfo;
+}
+
+/*
+ * sql_fn_param_ref		parser callback for ParamRefs ($n symbols)
+ */
+static Node *
+sql_fn_param_ref(ParseState *pstate, ParamRef *pref)
+{
+	SQLFunctionParseInfoPtr pinfo = (SQLFunctionParseInfoPtr) pstate->p_ref_hook_state;
+	int			paramno = pref->number;
+	Param	   *param;
+
+	/* Check parameter number is valid */
+	if (paramno <= 0 || paramno > pinfo->nargs)
+		return NULL;			/* unknown parameter number */
+
+	param = makeNode(Param);
+	param->paramkind = PARAM_EXTERN;
+	param->paramid = paramno;
+	param->paramtype = pinfo->argtypes[paramno - 1];
+	param->paramtypmod = -1;
+	param->paramcollid = get_typcollation(param->paramtype);
+	param->location = pref->location;
+
+	/*
+	 * If we have a function input collation, allow it to override the
+	 * type-derived collation for parameter symbols.  (XXX perhaps this should
+	 * not happen if the type collation is not default?)
+	 */
+	if (OidIsValid(pinfo->collation) && OidIsValid(param->paramcollid))
+		param->paramcollid = pinfo->collation;
+
+	return (Node *) param;
+}
+
+/*
  * Set up the per-query execution_state records for a SQL function.
  *
  * The input is a List of Lists of parsed and rewritten, but not planned,
- * querytrees.  The sublist structure denotes the original query boundaries.
+ * querytrees.	The sublist structure denotes the original query boundaries.
  */
 static List *
 init_execution_state(List *queryTree_list,
@@ -179,8 +299,8 @@ init_execution_state(List *queryTree_list,
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				/* translator: %s is a SQL statement name */
-						 errmsg("%s is not allowed in a non-volatile function",
-								CreateCommandTag(stmt))));
+					   errmsg("%s is not allowed in a non-volatile function",
+							  CreateCommandTag(stmt))));
 
 			/* OK, build the execution_state for this query */
 			newes = (execution_state *) palloc(sizeof(execution_state));
@@ -191,8 +311,8 @@ init_execution_state(List *queryTree_list,
 
 			newes->next = NULL;
 			newes->status = F_EXEC_START;
-			newes->setsResult = false;		/* might change below */
-			newes->lazyEval = false;		/* might change below */
+			newes->setsResult = false;	/* might change below */
+			newes->lazyEval = false;	/* might change below */
 			newes->stmt = stmt;
 			newes->qd = NULL;
 
@@ -239,17 +359,17 @@ init_execution_state(List *queryTree_list,
 	return eslist;
 }
 
-/* Initialize the SQLFunctionCache for a SQL function */
+/*
+ * Initialize the SQLFunctionCache for a SQL function
+ */
 static void
-init_sql_fcache(FmgrInfo *finfo, bool lazyEvalOK)
+init_sql_fcache(FmgrInfo *finfo, Oid collation, bool lazyEvalOK)
 {
 	Oid			foid = finfo->fn_oid;
 	Oid			rettype;
 	HeapTuple	procedureTuple;
 	Form_pg_proc procedureStruct;
 	SQLFunctionCachePtr fcache;
-	Oid		   *argOidVect;
-	int			nargs;
 	List	   *raw_parsetree_list;
 	List	   *queryTree_list;
 	List	   *flat_query_list;
@@ -302,37 +422,13 @@ init_sql_fcache(FmgrInfo *finfo, bool lazyEvalOK)
 		(procedureStruct->provolatile != PROVOLATILE_VOLATILE);
 
 	/*
-	 * We need the actual argument types to pass to the parser.
+	 * We need the actual argument types to pass to the parser.  Also make
+	 * sure that parameter symbols are considered to have the function's
+	 * resolved input collation.
 	 */
-	nargs = procedureStruct->pronargs;
-	if (nargs > 0)
-	{
-		int			argnum;
-
-		argOidVect = (Oid *) palloc(nargs * sizeof(Oid));
-		memcpy(argOidVect,
-			   procedureStruct->proargtypes.values,
-			   nargs * sizeof(Oid));
-		/* Resolve any polymorphic argument types */
-		for (argnum = 0; argnum < nargs; argnum++)
-		{
-			Oid			argtype = argOidVect[argnum];
-
-			if (IsPolymorphicType(argtype))
-			{
-				argtype = get_fn_expr_argtype(finfo, argnum);
-				if (argtype == InvalidOid)
-					ereport(ERROR,
-							(errcode(ERRCODE_DATATYPE_MISMATCH),
-							 errmsg("could not determine actual type of argument declared %s",
-									format_type_be(argOidVect[argnum]))));
-				argOidVect[argnum] = argtype;
-			}
-		}
-	}
-	else
-		argOidVect = NULL;
-	fcache->argtypes = argOidVect;
+	fcache->pinfo = prepare_sql_fn_parse_info(procedureTuple,
+											  finfo->fn_expr,
+											  collation);
 
 	/*
 	 * And of course we need the function body text.
@@ -346,7 +442,7 @@ init_sql_fcache(FmgrInfo *finfo, bool lazyEvalOK)
 	fcache->src = TextDatumGetCString(tmp);
 
 	/*
-	 * Parse and rewrite the queries in the function text.  Use sublists to
+	 * Parse and rewrite the queries in the function text.	Use sublists to
 	 * keep track of the original query boundaries.  But we also build a
 	 * "flat" list of the rewritten queries to pass to check_sql_fn_retval.
 	 * This is because the last canSetTag query determines the result type
@@ -364,10 +460,10 @@ init_sql_fcache(FmgrInfo *finfo, bool lazyEvalOK)
 		Node	   *parsetree = (Node *) lfirst(lc);
 		List	   *queryTree_sublist;
 
-		queryTree_sublist = pg_analyze_and_rewrite(parsetree,
-												   fcache->src,
-												   argOidVect,
-												   nargs);
+		queryTree_sublist = pg_analyze_and_rewrite_params(parsetree,
+														  fcache->src,
+									   (ParserSetupHook) sql_fn_parser_setup,
+														  fcache->pinfo);
 		queryTree_list = lappend(queryTree_list, queryTree_sublist);
 		flat_query_list = list_concat(flat_query_list,
 									  list_copy(queryTree_sublist));
@@ -561,7 +657,7 @@ postquel_sub_params(SQLFunctionCachePtr fcache,
 		{
 			/* sizeof(ParamListInfoData) includes the first array element */
 			paramLI = (ParamListInfo) palloc(sizeof(ParamListInfoData) +
-									   (nargs - 1) *sizeof(ParamExternData));
+									  (nargs - 1) * sizeof(ParamExternData));
 			/* we have static list of params, so no hooks needed */
 			paramLI->paramFetch = NULL;
 			paramLI->paramFetchArg = NULL;
@@ -583,7 +679,7 @@ postquel_sub_params(SQLFunctionCachePtr fcache,
 			prm->value = fcinfo->arg[i];
 			prm->isnull = fcinfo->argnull[i];
 			prm->pflags = 0;
-			prm->ptype = fcache->argtypes[i];
+			prm->ptype = fcache->pinfo->argtypes[i];
 		}
 	}
 	else
@@ -652,8 +748,8 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	execution_state *es;
 	TupleTableSlot *slot;
 	Datum		result;
-	List		*eslist;
-	ListCell    *eslc;
+	List	   *eslist;
+	ListCell   *eslc;
 
 	/*
 	 * Switch to context in which the fcache lives.  This ensures that
@@ -702,7 +798,7 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
 	if (fcache == NULL)
 	{
-		init_sql_fcache(fcinfo->flinfo, lazyEvalOK);
+		init_sql_fcache(fcinfo->flinfo, PG_GET_COLLATION(), lazyEvalOK);
 		fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
 	}
 	eslist = fcache->func_state;
@@ -751,10 +847,10 @@ fmgr_sql(PG_FUNCTION_ARGS)
 	 *
 	 * In a non-read-only function, we rely on the fact that we'll never
 	 * suspend execution between queries of the function: the only reason to
-	 * suspend execution before completion is if we are returning a row from
-	 * a lazily-evaluated SELECT.  So, when first entering this loop, we'll
+	 * suspend execution before completion is if we are returning a row from a
+	 * lazily-evaluated SELECT.  So, when first entering this loop, we'll
 	 * either start a new query (and push a fresh snapshot) or re-establish
-	 * the active snapshot from the existing query descriptor.  If we need to
+	 * the active snapshot from the existing query descriptor.	If we need to
 	 * start a new query in a subsequent execution of the loop, either we need
 	 * a fresh snapshot (and pushed_snapshot is false) or the existing
 	 * snapshot is on the active stack and we can just bump its command ID.
@@ -831,10 +927,10 @@ fmgr_sql(PG_FUNCTION_ARGS)
 			es = (execution_state *) lfirst(eslc);
 
 			/*
-			 * Flush the current snapshot so that we will take a new one
-			 * for the new query list.  This ensures that new snaps are
-			 * taken at original-query boundaries, matching the behavior
-			 * of interactive execution.
+			 * Flush the current snapshot so that we will take a new one for
+			 * the new query list.	This ensures that new snaps are taken at
+			 * original-query boundaries, matching the behavior of interactive
+			 * execution.
 			 */
 			if (pushed_snapshot)
 			{
@@ -1087,7 +1183,7 @@ ShutdownSQLFunction(Datum arg)
 {
 	SQLFunctionCachePtr fcache = (SQLFunctionCachePtr) DatumGetPointer(arg);
 	execution_state *es;
-	ListCell		*lc;
+	ListCell   *lc;
 
 	foreach(lc, fcache->func_state)
 	{
@@ -1290,6 +1386,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 			tle->expr = (Expr *) makeRelabelType(tle->expr,
 												 rettype,
 												 -1,
+												 get_typcollation(rettype),
 												 COERCE_DONTCARE);
 			/* Relabel is dangerous if TLE is a sort/group or setop column */
 			if (tle->ressortgroupref != 0 || parse->setOperations)
@@ -1318,7 +1415,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 		 * the function that's calling it.
 		 *
 		 * XXX Note that if rettype is RECORD, the IsBinaryCoercible check
-		 * will succeed for any composite restype.  For the moment we rely on
+		 * will succeed for any composite restype.	For the moment we rely on
 		 * runtime type checking to catch any discrepancy, but it'd be nice to
 		 * do better at parse time.
 		 */
@@ -1335,6 +1432,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 					tle->expr = (Expr *) makeRelabelType(tle->expr,
 														 rettype,
 														 -1,
+												   get_typcollation(rettype),
 														 COERCE_DONTCARE);
 					/* Relabel is dangerous if sort/group or setop column */
 					if (tle->ressortgroupref != 0 || parse->setOperations)
@@ -1403,6 +1501,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 					/* The type of the null we insert isn't important */
 					null_expr = (Expr *) makeConst(INT4OID,
 												   -1,
+												   InvalidOid,
 												   sizeof(int32),
 												   (Datum) 0,
 												   true,		/* isnull */
@@ -1437,6 +1536,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 					tle->expr = (Expr *) makeRelabelType(tle->expr,
 														 atttype,
 														 -1,
+												   get_typcollation(atttype),
 														 COERCE_DONTCARE);
 					/* Relabel is dangerous if sort/group or setop column */
 					if (tle->ressortgroupref != 0 || parse->setOperations)
@@ -1463,6 +1563,7 @@ check_sql_fn_retval(Oid func_id, Oid rettype, List *queryTreeList,
 				/* The type of the null we insert isn't important */
 				null_expr = (Expr *) makeConst(INT4OID,
 											   -1,
+											   InvalidOid,
 											   sizeof(int32),
 											   (Datum) 0,
 											   true,	/* isnull */

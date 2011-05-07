@@ -50,8 +50,7 @@ InitSharedLatch(volatile Latch *latch)
 	latch->is_shared = true;
 
 	/*
-	 * Set up security attributes to specify that the events are
-	 * inherited.
+	 * Set up security attributes to specify that the events are inherited.
 	 */
 	ZeroMemory(&sa, sizeof(sa));
 	sa.nLength = sizeof(sa);
@@ -85,16 +84,17 @@ DisownLatch(volatile Latch *latch)
 bool
 WaitLatch(volatile Latch *latch, long timeout)
 {
-	return WaitLatchOrSocket(latch, PGINVALID_SOCKET, timeout) > 0;
+	return WaitLatchOrSocket(latch, PGINVALID_SOCKET, false, false, timeout) > 0;
 }
 
 int
-WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, long timeout)
+WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, bool forRead,
+				  bool forWrite, long timeout)
 {
 	DWORD		rc;
 	HANDLE		events[3];
 	HANDLE		latchevent;
-	HANDLE		sockevent;
+	HANDLE		sockevent = WSA_INVALID_EVENT; /* silence compiler */
 	int			numevents;
 	int			result = 0;
 
@@ -103,10 +103,17 @@ WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, long timeout)
 	events[0] = latchevent;
 	events[1] = pgwin32_signal_event;
 	numevents = 2;
-	if (sock != PGINVALID_SOCKET)
+	if (sock != PGINVALID_SOCKET && (forRead || forWrite))
 	{
+		int			flags = 0;
+
+		if (forRead)
+			flags |= FD_READ;
+		if (forWrite)
+			flags |= FD_WRITE;
+
 		sockevent = WSACreateEvent();
-		WSAEventSelect(sock, sockevent, FD_READ);
+		WSAEventSelect(sock, sockevent, flags);
 		events[numevents++] = sockevent;
 	}
 
@@ -127,7 +134,7 @@ WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, long timeout)
 		}
 
 		rc = WaitForMultipleObjects(numevents, events, FALSE,
-								(timeout >= 0) ? (timeout / 1000) : INFINITE);
+							   (timeout >= 0) ? (timeout / 1000) : INFINITE);
 		if (rc == WAIT_FAILED)
 			elog(ERROR, "WaitForMultipleObjects() failed: error code %d", (int) GetLastError());
 		else if (rc == WAIT_TIMEOUT)
@@ -139,16 +146,26 @@ WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, long timeout)
 			pgwin32_dispatch_queued_signals();
 		else if (rc == WAIT_OBJECT_0 + 2)
 		{
+			WSANETWORKEVENTS resEvents;
+
 			Assert(sock != PGINVALID_SOCKET);
-			result = 2;
+
+			ZeroMemory(&resEvents, sizeof(resEvents));
+			if (WSAEnumNetworkEvents(sock, sockevent, &resEvents) == SOCKET_ERROR)
+				ereport(FATAL,
+						(errmsg_internal("failed to enumerate network events: %i", (int) GetLastError())));
+
+			if ((forRead && resEvents.lNetworkEvents & FD_READ) ||
+				(forWrite && resEvents.lNetworkEvents & FD_WRITE))
+				result = 2;
 			break;
 		}
 		else if (rc != WAIT_OBJECT_0)
-			elog(ERROR, "unexpected return code from WaitForMultipleObjects(): %d", rc);
+			elog(ERROR, "unexpected return code from WaitForMultipleObjects(): %d", (int) rc);
 	}
 
 	/* Clean up the handle we created for the socket */
-		if (sock != PGINVALID_SOCKET)
+	if (sock != PGINVALID_SOCKET && (forRead || forWrite))
 	{
 		WSAEventSelect(sock, sockevent, 0);
 		WSACloseEvent(sockevent);
@@ -160,7 +177,7 @@ WaitLatchOrSocket(volatile Latch *latch, SOCKET sock, long timeout)
 void
 SetLatch(volatile Latch *latch)
 {
-	HANDLE handle;
+	HANDLE		handle;
 
 	/* Quick exit if already set */
 	if (latch->is_set)
@@ -169,21 +186,22 @@ SetLatch(volatile Latch *latch)
 	latch->is_set = true;
 
 	/*
-	 * See if anyone's waiting for the latch. It can be the current process
-	 * if we're in a signal handler. Use a local variable here in case the
-	 * latch is just disowned between the test and the SetEvent call, and
-	 * event field set to NULL.
+	 * See if anyone's waiting for the latch. It can be the current process if
+	 * we're in a signal handler. Use a local variable here in case the latch
+	 * is just disowned between the test and the SetEvent call, and event
+	 * field set to NULL.
 	 *
-	 * Fetch handle field only once, in case the owner simultaneously
-	 * disowns the latch and clears handle. This assumes that HANDLE is
-	 * atomic, which isn't guaranteed to be true! In practice, it should be,
-	 * and in the worst case we end up calling SetEvent with a bogus handle,
-	 * and SetEvent will return an error with no harm done.
+	 * Fetch handle field only once, in case the owner simultaneously disowns
+	 * the latch and clears handle. This assumes that HANDLE is atomic, which
+	 * isn't guaranteed to be true! In practice, it should be, and in the
+	 * worst case we end up calling SetEvent with a bogus handle, and SetEvent
+	 * will return an error with no harm done.
 	 */
 	handle = latch->event;
 	if (handle)
 	{
 		SetEvent(handle);
+
 		/*
 		 * Note that we silently ignore any errors. We might be in a signal
 		 * handler or other critical path where it's not safe to call elog().

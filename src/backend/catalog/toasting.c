@@ -59,11 +59,11 @@ AlterTableCreateToastTable(Oid relOid, Datum reloptions)
 	Relation	rel;
 
 	/*
-	 * Grab an exclusive lock on the target table, which we will NOT release
-	 * until end of transaction.  (This is probably redundant in all present
-	 * uses...)
+	 * Grab a DDL-exclusive lock on the target table, since we'll update the
+	 * pg_class tuple.  This is redundant for all present users.  Tuple toasting
+	 * behaves safely in the face of a concurrent TOAST table add.
 	 */
-	rel = heap_open(relOid, AccessExclusiveLock);
+	rel = heap_open(relOid, ShareUpdateExclusiveLock);
 
 	/* create_toast_table does all the work */
 	(void) create_toast_table(rel, InvalidOid, InvalidOid, reloptions);
@@ -103,7 +103,7 @@ BootstrapToastTable(char *relName, Oid toastOid, Oid toastIndexOid)
 /*
  * create_toast_table --- internal workhorse
  *
- * rel is already opened and exclusive-locked
+ * rel is already opened and locked
  * toastOid and toastIndexOid are normally InvalidOid, but during
  * bootstrap they can be nonzero to specify hand-assigned OIDs
  */
@@ -118,7 +118,6 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptio
 	Relation	toast_rel;
 	Relation	class_rel;
 	Oid			toast_relid;
-	Oid			toast_idxid;
 	Oid			toast_typid = InvalidOid;
 	Oid			namespaceid;
 	char		toast_relname[NAMEDATALEN];
@@ -158,7 +157,8 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptio
 	 * creation even if it seems not to need one.
 	 */
 	if (!needs_toast_table(rel) &&
-		!OidIsValid(binary_upgrade_next_toast_pg_class_oid))
+		(!IsBinaryUpgrade ||
+		 !OidIsValid(binary_upgrade_next_toast_pg_class_oid)))
 		return false;
 
 	/*
@@ -203,7 +203,7 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptio
 		namespaceid = PG_TOAST_NAMESPACE;
 
 	/* Use binary-upgrade override for pg_type.oid, if supplied. */
-	if (OidIsValid(binary_upgrade_next_toast_pg_type_oid))
+	if (IsBinaryUpgrade && OidIsValid(binary_upgrade_next_toast_pg_type_oid))
 	{
 		toast_typid = binary_upgrade_next_toast_pg_type_oid;
 		binary_upgrade_next_toast_pg_type_oid = InvalidOid;
@@ -227,8 +227,7 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptio
 										   ONCOMMIT_NOOP,
 										   reloptions,
 										   false,
-										   true,
-										   false);
+										   true);
 	Assert(toast_relid != InvalidOid);
 
 	/* make the toast relation visible, else heap_open will fail */
@@ -274,12 +273,12 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptio
 	coloptions[0] = 0;
 	coloptions[1] = 0;
 
-	toast_idxid = index_create(toast_rel, toast_idxname, toastIndexOid,
+	index_create(toast_rel, toast_idxname, toastIndexOid,
 							   indexInfo,
 							   list_make2("chunk_id", "chunk_seq"),
 							   BTREE_AM_OID,
 							   rel->rd_rel->reltablespace,
-							   collationObjectId, classObjectId, coloptions, (Datum) 0,
+					 collationObjectId, classObjectId, coloptions, (Datum) 0,
 							   true, false, false, false,
 							   true, false, false);
 

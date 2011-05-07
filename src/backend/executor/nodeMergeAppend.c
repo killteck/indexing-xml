@@ -48,8 +48,8 @@
  * contains integers which index into the slots array. These typedefs try to
  * clear it up, but they're only documentation.
  */
-typedef int		SlotNumber;
-typedef int		HeapPosition;
+typedef int SlotNumber;
+typedef int HeapPosition;
 
 static void heap_insert_slot(MergeAppendState *node, SlotNumber new_slot);
 static void heap_siftup_slot(MergeAppendState *node);
@@ -128,36 +128,38 @@ ExecInitMergeAppend(MergeAppend *node, EState *estate, int eflags)
 	 * initialize sort-key information
 	 */
 	mergestate->ms_nkeys = node->numCols;
-	mergestate->ms_scankeys = palloc0(sizeof(ScanKeyData) *  node->numCols);
+	mergestate->ms_scankeys = palloc0(sizeof(ScanKeyData) * node->numCols);
 
 	for (i = 0; i < node->numCols; i++)
 	{
-		Oid		sortFunction;
-		bool	reverse;
+		Oid			sortFunction;
+		bool		reverse;
+		int			flags;
 
 		if (!get_compare_function_for_ordering_op(node->sortOperators[i],
 												  &sortFunction, &reverse))
 			elog(ERROR, "operator %u is not a valid ordering operator",
 				 node->sortOperators[i]);
 
+		/* We use btree's conventions for encoding directionality */
+		flags = 0;
+		if (reverse)
+			flags |= SK_BT_DESC;
+		if (node->nullsFirst[i])
+			flags |= SK_BT_NULLS_FIRST;
+
 		/*
 		 * We needn't fill in sk_strategy or sk_subtype since these scankeys
 		 * will never be passed to an index.
 		 */
-		ScanKeyInit(&mergestate->ms_scankeys[i],
-					node->sortColIdx[i],
-					InvalidStrategy,
-					sortFunction,
-					(Datum) 0);
-
-		ScanKeyEntryInitializeCollation(&mergestate->ms_scankeys[i],
-										node->collations[i]);
-
-		/* However, we use btree's conventions for encoding directionality */
-		if (reverse)
-			mergestate->ms_scankeys[i].sk_flags |= SK_BT_DESC;
-		if (node->nullsFirst[i])
-			mergestate->ms_scankeys[i].sk_flags |= SK_BT_NULLS_FIRST;
+		ScanKeyEntryInitialize(&mergestate->ms_scankeys[i],
+							   flags,
+							   node->sortColIdx[i],
+							   InvalidStrategy,
+							   InvalidOid,
+							   node->collations[i],
+							   sortFunction,
+							   (Datum) 0);
 	}
 
 	/*
@@ -185,8 +187,8 @@ ExecMergeAppend(MergeAppendState *node)
 	if (!node->ms_initialized)
 	{
 		/*
-		 * First time through: pull the first tuple from each subplan,
-		 * and set up the heap.
+		 * First time through: pull the first tuple from each subplan, and set
+		 * up the heap.
 		 */
 		for (i = 0; i < node->ms_nplans; i++)
 		{
@@ -241,7 +243,7 @@ heap_insert_slot(MergeAppendState *node, SlotNumber new_slot)
 	j = node->ms_heap_size++;	/* j is where the "hole" is */
 	while (j > 0)
 	{
-		int		i = (j-1)/2;
+		int			i = (j - 1) / 2;
 
 		if (heap_compare_slots(node, new_slot, node->ms_heap[i]) >= 0)
 			break;
@@ -267,11 +269,11 @@ heap_siftup_slot(MergeAppendState *node)
 	i = 0;						/* i is where the "hole" is */
 	for (;;)
 	{
-		int		j = 2 * i + 1;
+		int			j = 2 * i + 1;
 
 		if (j >= n)
 			break;
-		if (j+1 < n && heap_compare_slots(node, heap[j], heap[j+1]) > 0)
+		if (j + 1 < n && heap_compare_slots(node, heap[j], heap[j + 1]) > 0)
 			j++;
 		if (heap_compare_slots(node, heap[n], heap[j]) <= 0)
 			break;
@@ -296,13 +298,13 @@ heap_compare_slots(MergeAppendState *node, SlotNumber slot1, SlotNumber slot2)
 
 	for (nkey = 0; nkey < node->ms_nkeys; nkey++)
 	{
-		ScanKey scankey = node->ms_scankeys + nkey;
-		AttrNumber attno = scankey->sk_attno;
-		Datum	datum1,
-				datum2;
-		bool	isNull1,
-				isNull2;
-		int32	compare;
+		ScanKey		scankey = node->ms_scankeys + nkey;
+		AttrNumber	attno = scankey->sk_attno;
+		Datum		datum1,
+					datum2;
+		bool		isNull1,
+					isNull2;
+		int32		compare;
 
 		datum1 = slot_getattr(s1, attno, &isNull1);
 		datum2 = slot_getattr(s2, attno, &isNull2);
@@ -325,8 +327,9 @@ heap_compare_slots(MergeAppendState *node, SlotNumber slot1, SlotNumber slot2)
 		}
 		else
 		{
-			compare = DatumGetInt32(FunctionCall2(&scankey->sk_func,
-												  datum1, datum2));
+			compare = DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
+													  scankey->sk_collation,
+													  datum1, datum2));
 			if (compare != 0)
 			{
 				if (scankey->sk_flags & SK_BT_DESC)

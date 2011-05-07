@@ -14,7 +14,8 @@
 #include "postgres.h"
 
 /*
- * Indicate if pgwin32_recv() should operate in non-blocking mode.
+ * Indicate if pgwin32_recv() and pgwin32_send() should operate
+ * in non-blocking mode.
  *
  * Since the socket emulation layer always sets the actual socket to
  * non-blocking mode in order to be able to deliver signals, we must
@@ -368,8 +369,18 @@ pgwin32_recv(SOCKET s, char *buf, int len, int f)
 	return -1;
 }
 
+/*
+ * The second argument to send() is defined by SUS to be a "const void *"
+ * and so we use the same signature here to keep compilers happy when
+ * handling callers.
+ * 
+ * But the buf member of a WSABUF struct is defined as "char *", so we cast
+ * the second argument to that here when assigning it, also to keep compilers
+ * happy.
+ */
+
 int
-pgwin32_send(SOCKET s, char *buf, int len, int flags)
+pgwin32_send(SOCKET s, const void *buf, int len, int flags)
 {
 	WSABUF		wbuf;
 	int			r;
@@ -379,7 +390,7 @@ pgwin32_send(SOCKET s, char *buf, int len, int flags)
 		return -1;
 
 	wbuf.len = len;
-	wbuf.buf = buf;
+	wbuf.buf = (char *) buf;
 
 	/*
 	 * Readiness of socket to send data to UDP socket may be not true: socket
@@ -396,6 +407,16 @@ pgwin32_send(SOCKET s, char *buf, int len, int flags)
 			WSAGetLastError() != WSAEWOULDBLOCK)
 		{
 			TranslateSocketError();
+			return -1;
+		}
+
+		if (pgwin32_noblock)
+		{
+			/*
+			 * No data sent, and we are in "emulated non-blocking mode", so
+			 * return indicating that we'd block if we were to continue.
+			 */
+			errno = EWOULDBLOCK;
 			return -1;
 		}
 

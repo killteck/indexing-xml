@@ -53,7 +53,7 @@ static Node *get_assignment_input(Node *node);
 static void rewriteValuesRTE(RangeTblEntry *rte, Relation target_relation,
 				 List *attrnos);
 static void rewriteTargetListUD(Query *parsetree, RangeTblEntry *target_rte,
-								Relation target_relation);
+					Relation target_relation);
 static void markQueryForLocking(Query *qry, Node *jtnode,
 					bool forUpdate, bool noWait, bool pushedDown);
 static List *matchLocks(CmdType event, RuleLock *rulelocks,
@@ -208,7 +208,7 @@ AcquireRewriteLocks(Query *parsetree, bool forUpdatePushedDown)
 							 * now-dropped type OID, but it doesn't really
 							 * matter what type the Const claims to be.
 							 */
-							aliasvar = (Var *) makeNullConst(INT4OID, -1);
+							aliasvar = (Var *) makeNullConst(INT4OID, -1, InvalidOid);
 						}
 					}
 					newaliasvars = lappend(newaliasvars, aliasvar);
@@ -719,6 +719,7 @@ rewriteTargetListIU(Query *parsetree, Relation target_relation,
 				{
 					new_expr = (Node *) makeConst(att_tup->atttypid,
 												  -1,
+												  att_tup->attcollation,
 												  att_tup->attlen,
 												  (Datum) 0,
 												  true, /* isnull */
@@ -742,8 +743,8 @@ rewriteTargetListIU(Query *parsetree, Relation target_relation,
 		}
 
 		/*
-		 * For an UPDATE on a view, provide a dummy entry whenever there is
-		 * no explicit assignment.
+		 * For an UPDATE on a view, provide a dummy entry whenever there is no
+		 * explicit assignment.
 		 */
 		if (new_tle == NULL && commandType == CMD_UPDATE &&
 			target_relation->rd_rel->relkind == RELKIND_VIEW)
@@ -1082,6 +1083,7 @@ rewriteValuesRTE(RangeTblEntry *rte, Relation target_relation, List *attrnos)
 				{
 					new_expr = (Node *) makeConst(att_tup->atttypid,
 												  -1,
+												  att_tup->attcollation,
 												  att_tup->attlen,
 												  (Datum) 0,
 												  true, /* isnull */
@@ -1110,7 +1112,7 @@ rewriteValuesRTE(RangeTblEntry *rte, Relation target_relation, List *attrnos)
  * rewriteTargetListUD - rewrite UPDATE/DELETE targetlist as needed
  *
  * This function adds a "junk" TLE that is needed to allow the executor to
- * find the original row for the update or delete.  When the target relation
+ * find the original row for the update or delete.	When the target relation
  * is a regular table, the junk TLE emits the ctid attribute of the original
  * row.  When the target relation is a view, there is no ctid, so we instead
  * emit a whole-row Var that will contain the "old" values of the view row.
@@ -1143,8 +1145,8 @@ rewriteTargetListUD(Query *parsetree, RangeTblEntry *target_rte,
 	else
 	{
 		/*
-		 * Emit whole-row Var so that executor will have the "old" view row
-		 * to pass to the INSTEAD OF trigger.
+		 * Emit whole-row Var so that executor will have the "old" view row to
+		 * pass to the INSTEAD OF trigger.
 		 */
 		var = makeWholeRowVar(target_rte,
 							  parsetree->resultRelation,
@@ -1265,11 +1267,11 @@ ApplyRetrieveRule(Query *parsetree,
 		 * fine as the result relation.
 		 *
 		 * For UPDATE/DELETE, we need to expand the view so as to have source
-		 * data for the operation.  But we also need an unmodified RTE to
+		 * data for the operation.	But we also need an unmodified RTE to
 		 * serve as the target.  So, copy the RTE and add the copy to the
-		 * rangetable.  Note that the copy does not get added to the jointree.
-		 * Also note that there's a hack in fireRIRrules to avoid calling
-		 * this function again when it arrives at the copied RTE.
+		 * rangetable.	Note that the copy does not get added to the jointree.
+		 * Also note that there's a hack in fireRIRrules to avoid calling this
+		 * function again when it arrives at the copied RTE.
 		 */
 		if (parsetree->commandType == CMD_INSERT)
 			return parsetree;
@@ -1284,9 +1286,9 @@ ApplyRetrieveRule(Query *parsetree,
 			parsetree->resultRelation = list_length(parsetree->rtable);
 
 			/*
-			 * There's no need to do permissions checks twice, so wipe out
-			 * the permissions info for the original RTE (we prefer to keep
-			 * the bits set on the result RTE).
+			 * There's no need to do permissions checks twice, so wipe out the
+			 * permissions info for the original RTE (we prefer to keep the
+			 * bits set on the result RTE).
 			 */
 			rte->requiredPerms = 0;
 			rte->checkAsUser = InvalidOid;
@@ -1986,9 +1988,9 @@ RewriteQuery(Query *parsetree, List *rewrite_events)
 	 */
 	foreach(lc1, parsetree->cteList)
 	{
-		CommonTableExpr	*cte = (CommonTableExpr *) lfirst(lc1);
-		Query		*ctequery = (Query *) cte->ctequery;
-		List		*newstuff;
+		CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc1);
+		Query	   *ctequery = (Query *) cte->ctequery;
+		List	   *newstuff;
 
 		Assert(IsA(ctequery, Query));
 
@@ -2019,12 +2021,12 @@ RewriteQuery(Query *parsetree, List *rewrite_events)
 		}
 		else
 		{
-			ListCell *lc2;
+			ListCell   *lc2;
 
 			/* examine queries to determine which error message to issue */
 			foreach(lc2, newstuff)
 			{
-				Query	*q = (Query *) lfirst(lc2);
+				Query	   *q = (Query *) lfirst(lc2);
 
 				if (q->querySource == QSRC_QUAL_INSTEAD_RULE)
 					ereport(ERROR,

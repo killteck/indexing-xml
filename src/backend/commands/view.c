@@ -120,7 +120,7 @@ DefineVirtualRelation(const RangeVar *relation, List *tlist, bool replace)
 
 			def->colname = pstrdup(tle->resname);
 			def->typeName = makeTypeNameFromOid(exprType((Node *) tle->expr),
-												exprTypmod((Node *) tle->expr));
+											 exprTypmod((Node *) tle->expr));
 			def->inhcount = 0;
 			def->is_local = true;
 			def->is_not_null = false;
@@ -129,14 +129,23 @@ DefineVirtualRelation(const RangeVar *relation, List *tlist, bool replace)
 			def->raw_default = NULL;
 			def->cooked_default = NULL;
 			def->collClause = NULL;
+			def->collOid = exprCollation((Node *) tle->expr);
+
 			/*
-			 * XXX Temporary kluge to make regression tests pass.  We should
-			 * be able to trust the result of exprCollation more than this.
+			 * It's possible that the column is of a collatable type but the
+			 * collation could not be resolved, so double-check.
 			 */
 			if (type_is_collatable(exprType((Node *) tle->expr)))
-				def->collOid = exprCollation((Node *) tle->expr);
+			{
+				if (!OidIsValid(def->collOid))
+					ereport(ERROR,
+							(errcode(ERRCODE_INDETERMINATE_COLLATION),
+							 errmsg("could not determine which collation to use for view column \"%s\"",
+									def->colname),
+							 errhint("Use the COLLATE clause to set the collation explicitly.")));
+			}
 			else
-				def->collOid = InvalidOid;
+				Assert(!OidIsValid(def->collOid));
 			def->constraints = NIL;
 
 			attrList = lappend(attrList, def);
@@ -232,7 +241,7 @@ DefineVirtualRelation(const RangeVar *relation, List *tlist, bool replace)
 	}
 	else
 	{
-		Oid		relid;
+		Oid			relid;
 
 		/*
 		 * now set the parameters for keys/inheritance etc. All of these are
@@ -429,8 +438,8 @@ DefineView(ViewStmt *stmt, const char *queryString)
 
 	/*
 	 * Check for unsupported cases.  These tests are redundant with ones in
-	 * DefineQueryRewrite(), but that function will complain about a bogus
-	 * ON SELECT rule, and we'd rather the message complain about a view.
+	 * DefineQueryRewrite(), but that function will complain about a bogus ON
+	 * SELECT rule, and we'd rather the message complain about a view.
 	 */
 	if (viewParse->intoClause != NULL)
 		ereport(ERROR,
@@ -439,7 +448,7 @@ DefineView(ViewStmt *stmt, const char *queryString)
 	if (viewParse->hasModifyingCTE)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("views must not contain data-modifying statements in WITH")));
+		errmsg("views must not contain data-modifying statements in WITH")));
 
 	/*
 	 * If a list of column names was given, run through and insert these into
@@ -492,7 +501,7 @@ DefineView(ViewStmt *stmt, const char *queryString)
 	if (view->relpersistence == RELPERSISTENCE_UNLOGGED)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("views cannot be unlogged because they do not have storage")));
+		errmsg("views cannot be unlogged because they do not have storage")));
 
 	/*
 	 * Create the view relation

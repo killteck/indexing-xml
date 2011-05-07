@@ -321,7 +321,7 @@ static bool
 range_gist_consistent_int(StrategyNumber strategy, RangeType *key,
 						  RangeType *query)
 {
-	Datum (*proc)(PG_FUNCTION_ARGS);
+	Datum (*proc)(PG_FUNCTION_ARGS) = NULL;
 
 	RangeBound	lower1, lower2;
 	RangeBound	upper1, upper2;
@@ -401,7 +401,7 @@ static bool
 range_gist_consistent_leaf(StrategyNumber strategy, RangeType *key,
 						   RangeType *query)
 {
-	Datum (*proc)(PG_FUNCTION_ARGS);
+	Datum (*proc)(PG_FUNCTION_ARGS) = NULL;
 
 	RangeBound	lower1, lower2;
 	RangeBound	upper1, upper2;

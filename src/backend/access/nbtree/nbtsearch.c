@@ -65,7 +65,7 @@ _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 	/* If index is empty and access = BT_READ, no root page is created. */
 	if (!BufferIsValid(*bufP))
 	{
-		PredicateLockRelation(rel);  /* Nothing finer to lock exists. */
+		PredicateLockRelation(rel);		/* Nothing finer to lock exists. */
 		return (BTStack) NULL;
 	}
 
@@ -410,9 +410,10 @@ _bt_compare(Relation rel,
 			 * to flip the sign of the comparison result.  (Unless it's a DESC
 			 * column, in which case we *don't* flip the sign.)
 			 */
-			result = DatumGetInt32(FunctionCall2(&scankey->sk_func,
-												 datum,
-												 scankey->sk_argument));
+			result = DatumGetInt32(FunctionCall2Coll(&scankey->sk_func,
+													 scankey->sk_collation,
+													 datum,
+													 scankey->sk_argument));
 
 			if (!(scankey->sk_flags & SK_BT_DESC))
 				result = -result;
@@ -721,10 +722,9 @@ _bt_first(IndexScanDesc scan, ScanDirection dir)
 											   cur->sk_attno,
 											   InvalidStrategy,
 											   cur->sk_subtype,
+											   cur->sk_collation,
 											   procinfo,
 											   cur->sk_argument);
-				ScanKeyEntryInitializeCollation(scankeys + i,
-												cur->sk_func.fn_collation);
 			}
 			else
 			{
@@ -743,10 +743,9 @@ _bt_first(IndexScanDesc scan, ScanDirection dir)
 									   cur->sk_attno,
 									   InvalidStrategy,
 									   cur->sk_subtype,
+									   cur->sk_collation,
 									   cmp_proc,
 									   cur->sk_argument);
-				ScanKeyEntryInitializeCollation(scankeys + i,
-												cur->sk_func.fn_collation);
 			}
 		}
 	}
@@ -1366,7 +1365,7 @@ _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
 	if (!BufferIsValid(buf))
 	{
 		/* empty index... */
-		PredicateLockRelation(rel);  /* Nothing finer to lock exists. */
+		PredicateLockRelation(rel);		/* Nothing finer to lock exists. */
 		return InvalidBuffer;
 	}
 
@@ -1446,7 +1445,7 @@ _bt_endpoint(IndexScanDesc scan, ScanDirection dir)
 	if (!BufferIsValid(buf))
 	{
 		/* empty index... */
-		PredicateLockRelation(rel);  /* Nothing finer to lock exists. */
+		PredicateLockRelation(rel);		/* Nothing finer to lock exists. */
 		so->currPos.buf = InvalidBuffer;
 		return false;
 	}

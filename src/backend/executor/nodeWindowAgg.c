@@ -81,6 +81,8 @@ typedef struct WindowStatePerFuncData
 
 	FmgrInfo	flinfo;			/* fmgr lookup data for window function */
 
+	Oid			winCollation;	/* collation derived for window function */
+
 	/*
 	 * We need the len and byval info for the result of each function in order
 	 * to know how to copy/delete values.
@@ -92,7 +94,7 @@ typedef struct WindowStatePerFuncData
 	int			aggno;			/* if so, index of its PerAggData */
 
 	WindowObject winobj;		/* object used in window function API */
-} WindowStatePerFuncData;
+}	WindowStatePerFuncData;
 
 /*
  * For plain aggregate window functions, we also have one of these.
@@ -289,6 +291,7 @@ advance_windowaggregate(WindowAggState *winstate,
 	 */
 	InitFunctionCallInfoData(*fcinfo, &(peraggstate->transfn),
 							 numArguments + 1,
+							 perfuncstate->winCollation,
 							 (void *) winstate, NULL);
 	fcinfo->arg[0] = peraggstate->transValue;
 	fcinfo->argnull[0] = peraggstate->transValueIsNull;
@@ -340,6 +343,7 @@ finalize_windowaggregate(WindowAggState *winstate,
 		FunctionCallInfoData fcinfo;
 
 		InitFunctionCallInfoData(fcinfo, &(peraggstate->finalfn), 1,
+								 perfuncstate->winCollation,
 								 (void *) winstate, NULL);
 		fcinfo.arg[0] = peraggstate->transValue;
 		fcinfo.argnull[0] = peraggstate->transValueIsNull;
@@ -627,6 +631,7 @@ eval_windowfunction(WindowAggState *winstate, WindowStatePerFunc perfuncstate,
 	 */
 	InitFunctionCallInfoData(fcinfo, &(perfuncstate->flinfo),
 							 perfuncstate->numArguments,
+							 perfuncstate->winCollation,
 							 (void *) perfuncstate->winobj, NULL);
 	/* Just in case, make all the regular argument slots be null */
 	memset(fcinfo.argnull, true, perfuncstate->numArguments);
@@ -1561,7 +1566,10 @@ ExecInitWindowAgg(WindowAgg *node, EState *estate, int eflags)
 
 		fmgr_info_cxt(wfunc->winfnoid, &perfuncstate->flinfo,
 					  econtext->ecxt_per_query_memory);
-		fmgr_info_expr((Node *) wfunc, &perfuncstate->flinfo);
+		fmgr_info_set_expr((Node *) wfunc, &perfuncstate->flinfo);
+
+		perfuncstate->winCollation = wfunc->inputcollid;
+
 		get_typlenbyval(wfunc->wintype,
 						&perfuncstate->resulttypeLen,
 						&perfuncstate->resulttypeByVal);
@@ -1792,19 +1800,19 @@ initialize_peragg(WindowAggState *winstate, WindowFunc *wfunc,
 							numArguments,
 							aggtranstype,
 							wfunc->wintype,
+							wfunc->inputcollid,
 							transfn_oid,
 							finalfn_oid,
-							wfunc->collid,
 							&transfnexpr,
 							&finalfnexpr);
 
 	fmgr_info(transfn_oid, &peraggstate->transfn);
-	fmgr_info_expr((Node *) transfnexpr, &peraggstate->transfn);
+	fmgr_info_set_expr((Node *) transfnexpr, &peraggstate->transfn);
 
 	if (OidIsValid(finalfn_oid))
 	{
 		fmgr_info(finalfn_oid, &peraggstate->finalfn);
-		fmgr_info_expr((Node *) finalfnexpr, &peraggstate->finalfn);
+		fmgr_info_set_expr((Node *) finalfnexpr, &peraggstate->finalfn);
 	}
 
 	get_typlenbyval(wfunc->wintype,

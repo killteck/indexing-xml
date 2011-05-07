@@ -32,7 +32,7 @@
  *
  * On success return for a heap tuple, *recheck_p is set to indicate
  * whether recheck is needed.  We recheck if any of the consistent() functions
- * request it.  recheck is not interesting when examining a non-leaf entry,
+ * request it.	recheck is not interesting when examining a non-leaf entry,
  * since we must visit the lower index page if there's any doubt.
  *
  * If we are doing an ordered scan, so->distances[] is filled with distance
@@ -62,15 +62,15 @@ gistindex_keytest(IndexScanDesc scan,
 	*recheck_p = false;
 
 	/*
-	 * If it's a leftover invalid tuple from pre-9.1, treat it as a match
-	 * with minimum possible distances.  This means we'll always follow it
-	 * to the referenced page.
+	 * If it's a leftover invalid tuple from pre-9.1, treat it as a match with
+	 * minimum possible distances.	This means we'll always follow it to the
+	 * referenced page.
 	 */
 	if (GistTupleIsInvalid(tuple))
 	{
-		int		i;
+		int			i;
 
-		if (GistPageIsLeaf(page))			/* shouldn't happen */
+		if (GistPageIsLeaf(page))		/* shouldn't happen */
 			elog(ERROR, "invalid GIST tuple found on leaf page");
 		for (i = 0; i < scan->numberOfOrderBys; i++)
 			so->distances[i] = -get_float8_infinity();
@@ -137,12 +137,13 @@ gistindex_keytest(IndexScanDesc scan,
 			 */
 			recheck = true;
 
-			test = FunctionCall5(&key->sk_func,
-								 PointerGetDatum(&de),
-								 key->sk_argument,
-								 Int32GetDatum(key->sk_strategy),
-								 ObjectIdGetDatum(key->sk_subtype),
-								 PointerGetDatum(&recheck));
+			test = FunctionCall5Coll(&key->sk_func,
+									 key->sk_collation,
+									 PointerGetDatum(&de),
+									 key->sk_argument,
+									 Int32GetDatum(key->sk_strategy),
+									 ObjectIdGetDatum(key->sk_subtype),
+									 PointerGetDatum(&recheck));
 
 			if (!DatumGetBool(test))
 				return false;
@@ -191,15 +192,16 @@ gistindex_keytest(IndexScanDesc scan,
 			 * always be zero, but might as well pass it for possible future
 			 * use.)
 			 *
-			 * Note that Distance functions don't get a recheck argument.
-			 * We can't tolerate lossy distance calculations on leaf tuples;
+			 * Note that Distance functions don't get a recheck argument. We
+			 * can't tolerate lossy distance calculations on leaf tuples;
 			 * there is no opportunity to re-sort the tuples afterwards.
 			 */
-			dist = FunctionCall4(&key->sk_func,
-								 PointerGetDatum(&de),
-								 key->sk_argument,
-								 Int32GetDatum(key->sk_strategy),
-								 ObjectIdGetDatum(key->sk_subtype));
+			dist = FunctionCall4Coll(&key->sk_func,
+									 key->sk_collation,
+									 PointerGetDatum(&de),
+									 key->sk_argument,
+									 Int32GetDatum(key->sk_strategy),
+									 ObjectIdGetDatum(key->sk_subtype));
 
 			*distance_p = DatumGetFloat8(dist);
 		}
@@ -223,7 +225,7 @@ gistindex_keytest(IndexScanDesc scan,
  * ntids: if not NULL, gistgetbitmap's output tuple counter
  *
  * If tbm/ntids aren't NULL, we are doing an amgetbitmap scan, and heap
- * tuples should be reported directly into the bitmap.  If they are NULL,
+ * tuples should be reported directly into the bitmap.	If they are NULL,
  * we're doing a plain or ordered indexscan.  For a plain indexscan, heap
  * tuple TIDs are returned into so->pageData[].  For an ordered indexscan,
  * heap tuple TIDs are pushed into individual search queue items.
@@ -525,8 +527,8 @@ gistgettuple(PG_FUNCTION_ARGS)
 				/*
 				 * While scanning a leaf page, ItemPointers of matching heap
 				 * tuples are stored in so->pageData.  If there are any on
-				 * this page, we fall out of the inner "do" and loop around
-				 * to return them.
+				 * this page, we fall out of the inner "do" and loop around to
+				 * return them.
 				 */
 				gistScanPage(scan, item, so->curTreeItem->distances, NULL, NULL);
 

@@ -34,7 +34,7 @@ typedef enum
 	CONSTRAINT_EXCLUSION_OFF,	/* do not use c_e */
 	CONSTRAINT_EXCLUSION_ON,	/* apply c_e to all rels */
 	CONSTRAINT_EXCLUSION_PARTITION		/* apply c_e to otherrels only */
-} ConstraintExclusionType;
+}	ConstraintExclusionType;
 
 
 /*
@@ -94,12 +94,12 @@ extern void cost_material(Path *path,
 			  Cost input_startup_cost, Cost input_total_cost,
 			  double tuples, int width);
 extern void cost_agg(Path *path, PlannerInfo *root,
-		 AggStrategy aggstrategy, int numAggs,
+		 AggStrategy aggstrategy, const AggClauseCosts *aggcosts,
 		 int numGroupCols, double numGroups,
 		 Cost input_startup_cost, Cost input_total_cost,
 		 double input_tuples);
 extern void cost_windowagg(Path *path, PlannerInfo *root,
-			   int numWindowFuncs, int numPartCols, int numOrderCols,
+			   List *windowFuncs, int numPartCols, int numOrderCols,
 			   Cost input_startup_cost, Cost input_total_cost,
 			   double input_tuples);
 extern void cost_group(Path *path, PlannerInfo *root,

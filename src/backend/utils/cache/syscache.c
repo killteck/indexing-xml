@@ -278,7 +278,7 @@ static const struct cachedesc cacheinfo[] = {
 			Anum_pg_collation_collnamespace,
 			0
 		},
-		256
+		64
 	},
 	{CollationRelationId,		/* COLLOID */
 		CollationOidIndexId,
@@ -289,7 +289,7 @@ static const struct cachedesc cacheinfo[] = {
 			0,
 			0
 		},
-		256
+		64
 	},
 	{ConversionRelationId,		/* CONDEFAULT */
 		ConversionDefaultIndexId,
@@ -423,7 +423,7 @@ static const struct cachedesc cacheinfo[] = {
 		},
 		32
 	},
-	{ForeignTableRelationId,		/* FOREIGNTABLEREL */
+	{ForeignTableRelationId,	/* FOREIGNTABLEREL */
 		ForeignTableRelidIndexId,
 		1,
 		{

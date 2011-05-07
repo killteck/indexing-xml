@@ -14,6 +14,7 @@
 
 #include "postgres.h"
 
+#include "catalog/pg_collation.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
 #include "utils/memutils.h"
@@ -74,7 +75,7 @@ NIFinishBuild(IspellDict *Conf)
  * doesn't need that.  The cpalloc and cpalloc0 macros are just documentation
  * to indicate which allocations actually require zeroing.
  */
-#define COMPACT_ALLOC_CHUNK	8192	/* must be > aset.c's allocChunkLimit */
+#define COMPACT_ALLOC_CHUNK 8192	/* amount to get from palloc at once */
 #define COMPACT_MAX_REQ		1024	/* must be < COMPACT_ALLOC_CHUNK */
 
 static void *
@@ -425,7 +426,9 @@ NIAddAffix(IspellDict *Conf, int flag, char flagflags, const char *mask, const c
 		wmask = (pg_wchar *) tmpalloc((masklen + 1) * sizeof(pg_wchar));
 		wmasklen = pg_mb2wchar_with_len(tmask, wmask, masklen);
 
-		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen, REG_ADVANCED | REG_NOSUB);
+		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen,
+						 REG_ADVANCED | REG_NOSUB,
+						 DEFAULT_COLLATION_OID);
 		if (err)
 		{
 			char		errstr[100];

@@ -1,6 +1,6 @@
 <!-- doc/src/sgml/recovery-config.sgml -->
 
-<chapter Id="recovery-config">
+<chapter id="recovery-config">
   <title>Recovery Configuration</title>
 
   <indexterm>
@@ -95,7 +95,7 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         The <xref linkend="pgarchivecleanup"> module
         is often used in <varname>archive_cleanup_command</> for
         single-standby configurations, for example:
-<programlisting> archive_cleanup_command = 'pg_archivecleanup /mnt/server/archivedir %r' </programlisting>
+<programlisting>archive_cleanup_command = 'pg_archivecleanup /mnt/server/archivedir %r'</programlisting>
         Note however that if multiple standby servers are restoring from the
         same archive directory, you will need to ensure that you do not delete
         WAL files until they are no longer needed by any of the servers.
@@ -261,7 +261,7 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
       <listitem>
        <para>
         Specifies whether recovery should pause when the recovery target
-        is reached. The default is true, if a recovery target is set.
+        is reached. The default is true.
         This is intended to allow queries to be executed against the
         database to check if this recovery target is the most desirable
         point for recovery. The paused state can be resumed by using
@@ -271,6 +271,10 @@ restore_command = 'copy "C:\\server\\archivedir\\%f" "%p"'  # Windows
         desired stopping point, then shutdown the server, change the
         recovery target settings to a later target and restart to
         continue recovery.
+       </para>
+       <para>
+        This setting has no effect if <xref linkend="guc-hot-standby"> is not
+        enabled, or if no recovery target is set.
        </para>
       </listitem>
      </varlistentry>

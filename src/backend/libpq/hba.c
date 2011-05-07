@@ -25,8 +25,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#include "catalog/pg_collation.h"
 #include "libpq/ip.h"
 #include "libpq/libpq.h"
+#include "postmaster/postmaster.h"
 #include "regex/regex.h"
 #include "replication/walsender.h"
 #include "storage/fd.h"
@@ -492,6 +494,8 @@ check_role(const char *role, Oid roleid, char *param_str)
 				return true;
 		}
 		else if (strcmp(tok, role) == 0 ||
+				 (strcmp(tok, "replication\n") == 0 && 
+				  strcmp(role,"replication") ==0) ||
 				 strcmp(tok, "all\n") == 0)
 			return true;
 	}
@@ -543,7 +547,7 @@ check_db(const char *dbname, const char *role, Oid roleid, char *param_str)
 }
 
 static bool
-ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
+ipv4eq(struct sockaddr_in * a, struct sockaddr_in * b)
 {
 	return (a->sin_addr.s_addr == b->sin_addr.s_addr);
 }
@@ -551,9 +555,9 @@ ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
 #ifdef HAVE_IPV6
 
 static bool
-ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
+ipv6eq(struct sockaddr_in6 * a, struct sockaddr_in6 * b)
 {
-	int i;
+	int			i;
 
 	for (i = 0; i < 16; i++)
 		if (a->sin6_addr.s6_addr[i] != b->sin6_addr.s6_addr[i])
@@ -561,8 +565,7 @@ ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 
 	return true;
 }
-
-#endif /* HAVE_IPV6 */
+#endif   /* HAVE_IPV6 */
 
 /*
  * Check whether host name matches pattern.
@@ -572,8 +575,8 @@ hostname_match(const char *pattern, const char *actual_hostname)
 {
 	if (pattern[0] == '.')		/* suffix match */
 	{
-		size_t plen = strlen(pattern);
-		size_t hlen = strlen(actual_hostname);
+		size_t		plen = strlen(pattern);
+		size_t		hlen = strlen(actual_hostname);
 
 		if (hlen < plen)
 			return false;
@@ -590,7 +593,8 @@ hostname_match(const char *pattern, const char *actual_hostname)
 static bool
 check_hostname(hbaPort *port, const char *hostname)
 {
-	struct addrinfo *gai_result, *gai;
+	struct addrinfo *gai_result,
+			   *gai;
 	int			ret;
 	bool		found;
 
@@ -632,7 +636,7 @@ check_hostname(hbaPort *port, const char *hostname)
 			if (gai->ai_addr->sa_family == AF_INET)
 			{
 				if (ipv4eq((struct sockaddr_in *) gai->ai_addr,
-						   (struct sockaddr_in *) &port->raddr.addr))
+						   (struct sockaddr_in *) & port->raddr.addr))
 				{
 					found = true;
 					break;
@@ -642,7 +646,7 @@ check_hostname(hbaPort *port, const char *hostname)
 			else if (gai->ai_addr->sa_family == AF_INET6)
 			{
 				if (ipv6eq((struct sockaddr_in6 *) gai->ai_addr,
-						   (struct sockaddr_in6 *) &port->raddr.addr))
+						   (struct sockaddr_in6 *) & port->raddr.addr))
 				{
 					found = true;
 					break;
@@ -829,12 +833,24 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 
 		if (token[4] == 's')	/* "hostssl" */
 		{
+			/* SSL support must be actually active, else complain */
 #ifdef USE_SSL
-			parsedline->conntype = ctHostSSL;
+			if (EnableSSL)
+				parsedline->conntype = ctHostSSL;
+			else
+			{
+				ereport(LOG,
+						(errcode(ERRCODE_CONFIG_FILE_ERROR),
+						 errmsg("hostssl requires SSL to be turned on"),
+						 errhint("Set ssl = on in postgresql.conf."),
+						 errcontext("line %d of configuration file \"%s\"",
+									line_num, HbaFileName)));
+				return false;
+			}
 #else
 			ereport(LOG,
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
-					 errmsg("hostssl not supported on this platform"),
+					 errmsg("hostssl is not supported by this build"),
 			  errhint("Compile with --with-openssl to use SSL connections."),
 					 errcontext("line %d of configuration file \"%s\"",
 								line_num, HbaFileName)));
@@ -974,8 +990,8 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 							(errcode(ERRCODE_CONFIG_FILE_ERROR),
 							 errmsg("specifying both host name and CIDR mask is invalid: \"%s\"",
 									token),
-							 errcontext("line %d of configuration file \"%s\"",
-										line_num, HbaFileName)));
+						   errcontext("line %d of configuration file \"%s\"",
+									  line_num, HbaFileName)));
 					pfree(token);
 					return false;
 				}
@@ -1060,6 +1076,8 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 		parsedline->auth_method = uaTrust;
 	else if (strcmp(token, "ident") == 0)
 		parsedline->auth_method = uaIdent;
+	else if (strcmp(token, "peer") == 0)
+		parsedline->auth_method = uaPeer;
 	else if (strcmp(token, "password") == 0)
 		parsedline->auth_method = uaPassword;
 	else if (strcmp(token, "krb5") == 0)
@@ -1130,12 +1148,20 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 	{
 		ereport(LOG,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("invalid authentication method \"%s\": not supported on this platform",
+				 errmsg("invalid authentication method \"%s\": not supported by this build",
 						token),
 				 errcontext("line %d of configuration file \"%s\"",
 							line_num, HbaFileName)));
 		return false;
 	}
+
+	/*
+	 * XXX: When using ident on local connections, change it to peer, for
+	 * backwards compatibility.
+	 */
+	if (parsedline->conntype == ctLocal &&
+		parsedline->auth_method == uaIdent)
+		parsedline->auth_method = uaPeer;
 
 	/* Invalid authentication combinations */
 	if (parsedline->conntype == ctLocal &&
@@ -1155,6 +1181,17 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 		ereport(LOG,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 		   errmsg("gssapi authentication is not supported on local sockets"),
+				 errcontext("line %d of configuration file \"%s\"",
+							line_num, HbaFileName)));
+		return false;
+	}
+
+	if (parsedline->conntype != ctLocal &&
+		parsedline->auth_method == uaPeer)
+	{
+		ereport(LOG,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+			errmsg("peer authentication is only supported on local sockets"),
 				 errcontext("line %d of configuration file \"%s\"",
 							line_num, HbaFileName)));
 		return false;
@@ -1203,11 +1240,12 @@ parse_hba_line(List *line, int line_num, HbaLine *parsedline)
 			if (strcmp(token, "map") == 0)
 			{
 				if (parsedline->auth_method != uaIdent &&
+					parsedline->auth_method != uaPeer &&
 					parsedline->auth_method != uaKrb5 &&
 					parsedline->auth_method != uaGSS &&
 					parsedline->auth_method != uaSSPI &&
 					parsedline->auth_method != uaCert)
-					INVALID_AUTH_OPTION("map", gettext_noop("ident, krb5, gssapi, sspi and cert"));
+					INVALID_AUTH_OPTION("map", gettext_noop("ident, peer, krb5, gssapi, sspi and cert"));
 				parsedline->usermap = pstrdup(c);
 			}
 			else if (strcmp(token, "clientcert") == 0)
@@ -1757,7 +1795,7 @@ parse_ident_usermap(List *line, int line_number, const char *usermap_name,
 		 * XXX: Major room for optimization: regexps could be compiled when
 		 * the file is loaded and then re-used in every connection.
 		 */
-		r = pg_regcomp(&re, wstr, wlen, REG_ADVANCED);
+		r = pg_regcomp(&re, wstr, wlen, REG_ADVANCED, C_COLLATION_OID);
 		if (r)
 		{
 			char		errstr[100];

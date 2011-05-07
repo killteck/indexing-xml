@@ -38,6 +38,7 @@
 #include "miscadmin.h"
 #include "optimizer/planner.h"
 #include "storage/bufmgr.h"
+#include "storage/lmgr.h"
 #include "storage/procarray.h"
 #include "storage/smgr.h"
 #include "utils/acl.h"
@@ -646,8 +647,7 @@ make_new_heap(Oid OIDOldHeap, Oid NewTableSpace)
 										  ONCOMMIT_NOOP,
 										  reloptions,
 										  false,
-										  true,
-										  false);
+										  true);
 	Assert(OIDNewHeap != InvalidOid);
 
 	ReleaseSysCache(tuple);
@@ -718,7 +718,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	TransactionId OldestXmin;
 	TransactionId FreezeXid;
 	RewriteState rwstate;
-	bool 		 use_sort;
+	bool		use_sort;
 	Tuplesortstate *tuplesort;
 	double		num_tuples = 0,
 				tups_vacuumed = 0,
@@ -750,6 +750,22 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	natts = newTupDesc->natts;
 	values = (Datum *) palloc(natts * sizeof(Datum));
 	isnull = (bool *) palloc(natts * sizeof(bool));
+
+	/*
+	 * If the OldHeap has a toast table, get lock on the toast table to keep
+	 * it from being vacuumed.  This is needed because autovacuum processes
+	 * toast tables independently of their main tables, with no lock on the
+	 * latter.  If an autovacuum were to start on the toast table after we
+	 * compute our OldestXmin below, it would use a later OldestXmin, and then
+	 * possibly remove as DEAD toast tuples belonging to main tuples we think
+	 * are only RECENTLY_DEAD.  Then we'd fail while trying to copy those
+	 * tuples.
+	 *
+	 * We don't need to open the toast relation here, just lock it.  The lock
+	 * will be held till end of transaction.
+	 */
+	if (OldHeap->rd_rel->reltoastrelid)
+		LockRelationOid(OldHeap->rd_rel->reltoastrelid, AccessExclusiveLock);
 
 	/*
 	 * We need to log the copied data in WAL iff WAL archiving/streaming is
@@ -813,11 +829,11 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	rwstate = begin_heap_rewrite(NewHeap, OldestXmin, FreezeXid, use_wal);
 
 	/*
-	 * Decide whether to use an indexscan or seqscan-and-optional-sort to
-	 * scan the OldHeap.  We know how to use a sort to duplicate the ordering
-	 * of a btree index, and will use seqscan-and-sort for that case if the
-	 * planner tells us it's cheaper.  Otherwise, always indexscan if an
-	 * index is provided, else plain seqscan.
+	 * Decide whether to use an indexscan or seqscan-and-optional-sort to scan
+	 * the OldHeap.  We know how to use a sort to duplicate the ordering of a
+	 * btree index, and will use seqscan-and-sort for that case if the planner
+	 * tells us it's cheaper.  Otherwise, always indexscan if an index is
+	 * provided, else plain seqscan.
 	 */
 	if (OldIndex != NULL && OldIndex->rd_rel->relam == BTREE_AM_OID)
 		use_sort = plan_cluster_use_sort(OIDOldHeap, OIDOldIndex);
@@ -869,8 +885,8 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 	/*
 	 * Scan through the OldHeap, either in OldIndex order or sequentially;
 	 * copy each tuple into the NewHeap, or transiently to the tuplesort
-	 * module.  Note that we don't bother sorting dead tuples (they won't
-	 * get to the new table anyway).
+	 * module.	Note that we don't bother sorting dead tuples (they won't get
+	 * to the new table anyway).
 	 */
 	for (;;)
 	{
@@ -984,8 +1000,8 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 		heap_endscan(heapScan);
 
 	/*
-	 * In scan-and-sort mode, complete the sort, then read out all live
-	 * tuples from the tuplestore and write them to the new relation.
+	 * In scan-and-sort mode, complete the sort, then read out all live tuples
+	 * from the tuplestore and write them to the new relation.
 	 */
 	if (tuplesort != NULL)
 	{
@@ -1398,11 +1414,17 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 	 * advantage to the other order anyway because this is all transactional,
 	 * so no chance to reclaim disk space before commit.  We do not need a
 	 * final CommandCounterIncrement() because reindex_relation does it.
+	 *
+	 * Note: because index_build is called via reindex_relation, it will never
+	 * set indcheckxmin true for the indexes.  This is OK even though in some
+	 * sense we are building new indexes rather than rebuilding existing ones,
+	 * because the new heap won't contain any HOT chains at all, let alone
+	 * broken ones, so it can't be necessary to set indcheckxmin.
 	 */
-	reindex_flags = REINDEX_SUPPRESS_INDEX_USE;
+	reindex_flags = REINDEX_REL_SUPPRESS_INDEX_USE;
 	if (check_constraints)
-		reindex_flags |= REINDEX_CHECK_CONSTRAINTS;
-	reindex_relation(OIDOldHeap, false, reindex_flags);
+		reindex_flags |= REINDEX_REL_CHECK_CONSTRAINTS;
+	reindex_relation(OIDOldHeap, reindex_flags);
 
 	/* Destroy new heap with old filenode */
 	object.classId = RelationRelationId;
@@ -1554,7 +1576,7 @@ reform_and_rewrite_tuple(HeapTuple tuple,
 						 bool newRelHasOids, RewriteState rwstate)
 {
 	HeapTuple	copiedTuple;
-	int 		i;
+	int			i;
 
 	heap_deform_tuple(tuple, oldTupDesc, values, isnull);
 

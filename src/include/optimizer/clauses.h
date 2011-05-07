@@ -22,13 +22,6 @@
 
 typedef struct
 {
-	int			numAggs;		/* total number of aggregate calls */
-	int			numOrderedAggs; /* number that use DISTINCT or ORDER BY */
-	Size		transitionSpace;	/* for pass-by-ref transition data */
-} AggClauseCounts;
-
-typedef struct
-{
 	int			numWindowFuncs; /* total number of WindowFuncs found */
 	Index		maxWinRef;		/* windowFuncs[] is indexed 0 .. maxWinRef */
 	List	  **windowFuncs;	/* lists of WindowFuncs for each winref */
@@ -36,7 +29,8 @@ typedef struct
 
 
 extern Expr *make_opclause(Oid opno, Oid opresulttype, bool opretset,
-			  Expr *leftop, Expr *rightop);
+			  Expr *leftop, Expr *rightop,
+			  Oid opcollid, Oid inputcollid);
 extern Node *get_leftop(Expr *clause);
 extern Node *get_rightop(Expr *clause);
 
@@ -55,7 +49,8 @@ extern List *make_ands_implicit(Expr *clause);
 
 extern bool contain_agg_clause(Node *clause);
 extern List *pull_agg_clause(Node *clause);
-extern void count_agg_clauses(Node *clause, AggClauseCounts *counts);
+extern void count_agg_clauses(PlannerInfo *root, Node *clause,
+							  AggClauseCosts *costs);
 
 extern bool contain_window_function(Node *clause);
 extern WindowFuncLists *find_window_functions(Node *clause, Index maxWinRef);

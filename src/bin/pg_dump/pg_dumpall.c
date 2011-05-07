@@ -91,7 +91,6 @@ main(int argc, char *argv[])
 	bool		output_clean = false;
 	bool		roles_only = false;
 	bool		tablespaces_only = false;
-	bool		schema_only = false;
 	PGconn	   *conn;
 	int			encoding;
 	const char *std_strings;
@@ -185,7 +184,7 @@ main(int argc, char *argv[])
 
 	pgdumpopts = createPQExpBuffer();
 
-	while ((c = getopt_long(argc, argv, "acf:gh:il:oOp:rsS:tU:vwWxX:", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "acf:gh:il:oOp:rsS:tU:vwWx", long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
@@ -241,7 +240,6 @@ main(int argc, char *argv[])
 				break;
 
 			case 's':
-				schema_only = true;
 				appendPQExpBuffer(pgdumpopts, " -s");
 				break;
 
@@ -278,30 +276,6 @@ main(int argc, char *argv[])
 			case 'x':
 				skip_acls = true;
 				appendPQExpBuffer(pgdumpopts, " -x");
-				break;
-
-			case 'X':
-				/* -X is a deprecated alternative to long options */
-				if (strcmp(optarg, "disable-dollar-quoting") == 0)
-					disable_dollar_quoting = 1;
-				else if (strcmp(optarg, "disable-triggers") == 0)
-					disable_triggers = 1;
-				else if (strcmp(optarg, "no-tablespaces") == 0)
-					no_tablespaces = 1;
-				else if (strcmp(optarg, "use-set-session-authorization") == 0)
-					use_setsessauth = 1;
-				else if (strcmp(optarg, "no-security-label") == 0)
-					no_security_label = 1;
-				else if (strcmp(optarg, "no-unlogged-table-data") == 0)
-					no_unlogged_table_data = 1;
-				else
-				{
-					fprintf(stderr,
-							_("%s: invalid -X option -- %s\n"),
-							progname, optarg);
-					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-					exit(1);
-				}
 				break;
 
 			case 0:
@@ -580,7 +554,7 @@ help(void)
 	printf(_("  --quote-all-identifiers     quote all identifiers, even if not keywords\n"));
 	printf(_("  --role=ROLENAME             do SET ROLE before dump\n"));
 	printf(_("  --no-security-label         do not dump security label assignments\n"));
-	printf(_("  --no-unlogged-table-data	do not dump unlogged table data\n"));
+	printf(_("  --no-unlogged-table-data    do not dump unlogged table data\n"));
 	printf(_("  --use-set-session-authorization\n"
 			 "                              use SET SESSION AUTHORIZATION commands instead of\n"
 	"                              ALTER OWNER commands to set ownership\n"));
@@ -656,7 +630,6 @@ dumpRoles(PGconn *conn)
 				i_rolinherit,
 				i_rolcreaterole,
 				i_rolcreatedb,
-				i_rolcatupdate,
 				i_rolcanlogin,
 				i_rolconnlimit,
 				i_rolpassword,
@@ -669,7 +642,7 @@ dumpRoles(PGconn *conn)
 	if (server_version >= 90100)
 		printfPQExpBuffer(buf,
 						  "SELECT oid, rolname, rolsuper, rolinherit, "
-						  "rolcreaterole, rolcreatedb, rolcatupdate, "
+						  "rolcreaterole, rolcreatedb, "
 						  "rolcanlogin, rolconnlimit, rolpassword, "
 						  "rolvaliduntil, rolreplication, "
 			  "pg_catalog.shobj_description(oid, 'pg_authid') as rolcomment "
@@ -678,7 +651,7 @@ dumpRoles(PGconn *conn)
 	else if (server_version >= 80200)
 		printfPQExpBuffer(buf,
 						  "SELECT oid, rolname, rolsuper, rolinherit, "
-						  "rolcreaterole, rolcreatedb, rolcatupdate, "
+						  "rolcreaterole, rolcreatedb, "
 						  "rolcanlogin, rolconnlimit, rolpassword, "
 						  "rolvaliduntil, false as rolreplication, "
 			  "pg_catalog.shobj_description(oid, 'pg_authid') as rolcomment "
@@ -687,7 +660,7 @@ dumpRoles(PGconn *conn)
 	else if (server_version >= 80100)
 		printfPQExpBuffer(buf,
 						  "SELECT oid, rolname, rolsuper, rolinherit, "
-						  "rolcreaterole, rolcreatedb, rolcatupdate, "
+						  "rolcreaterole, rolcreatedb, "
 						  "rolcanlogin, rolconnlimit, rolpassword, "
 						  "rolvaliduntil, false as rolreplication, "
 						  "null as rolcomment "
@@ -700,7 +673,6 @@ dumpRoles(PGconn *conn)
 						  "true as rolinherit, "
 						  "usesuper as rolcreaterole, "
 						  "usecreatedb as rolcreatedb, "
-						  "usecatupd as rolcatupdate, "
 						  "true as rolcanlogin, "
 						  "-1 as rolconnlimit, "
 						  "passwd as rolpassword, "
@@ -714,7 +686,6 @@ dumpRoles(PGconn *conn)
 						  "true as rolinherit, "
 						  "false as rolcreaterole, "
 						  "false as rolcreatedb, "
-						  "false as rolcatupdate, "
 						  "false as rolcanlogin, "
 						  "-1 as rolconnlimit, "
 						  "null::text as rolpassword, "
@@ -734,7 +705,6 @@ dumpRoles(PGconn *conn)
 	i_rolinherit = PQfnumber(res, "rolinherit");
 	i_rolcreaterole = PQfnumber(res, "rolcreaterole");
 	i_rolcreatedb = PQfnumber(res, "rolcreatedb");
-	i_rolcatupdate = PQfnumber(res, "rolcatupdate");
 	i_rolcanlogin = PQfnumber(res, "rolcanlogin");
 	i_rolconnlimit = PQfnumber(res, "rolconnlimit");
 	i_rolpassword = PQfnumber(res, "rolpassword");
@@ -759,7 +729,7 @@ dumpRoles(PGconn *conn)
 
 			appendPQExpBuffer(buf, "\n-- For binary upgrade, must preserve pg_authid.oid\n");
 			appendPQExpBuffer(buf,
-			 "SELECT binary_upgrade.set_next_pg_authid_oid('%u'::pg_catalog.oid);\n\n",
+							  "SELECT binary_upgrade.set_next_pg_authid_oid('%u'::pg_catalog.oid);\n\n",
 							  auth_oid);
 		}
 

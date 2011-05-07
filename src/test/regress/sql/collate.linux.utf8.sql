@@ -1,6 +1,7 @@
 /*
  * This test is for Linux/glibc systems and assumes that a full set of
- * locales is installed.  It must be run in a UTF-8 locale.
+ * locales is installed.  It must be run in a database with UTF-8 encoding,
+ * because other encodings don't support all the characters used.
  */
 
 SET client_encoding TO UTF8;
@@ -8,7 +9,7 @@ SET client_encoding TO UTF8;
 
 CREATE TABLE collate_test1 (
     a int,
-    b text COLLATE "en_US.utf8" NOT NULL
+    b text COLLATE "en_US" NOT NULL
 );
 
 \d collate_test1
@@ -24,7 +25,7 @@ CREATE TABLE collate_test_fail (
 );
 
 CREATE TABLE collate_test_fail (
-    a int COLLATE "en_US.utf8",
+    a int COLLATE "en_US",
     b text
 );
 
@@ -36,7 +37,7 @@ CREATE TABLE collate_test_like (
 
 CREATE TABLE collate_test2 (
     a int,
-    b text COLLATE "sv_SE.utf8"
+    b text COLLATE "sv_SE"
 );
 
 CREATE TABLE collate_test3 (
@@ -56,12 +57,11 @@ SELECT * FROM collate_test3 WHERE b >= 'BBC';
 SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc';
 SELECT * FROM collate_test1 WHERE b >= 'bbc' COLLATE "C";
 SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc' COLLATE "C";
-SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc' COLLATE "en_US.utf8";
 SELECT * FROM collate_test1 WHERE b COLLATE "C" >= 'bbc' COLLATE "en_US";
 
 
-CREATE DOMAIN testdomain_sv AS text COLLATE "sv_SE.utf8";
-CREATE DOMAIN testdomain_i AS int COLLATE "sv_SE.utf8"; -- fails
+CREATE DOMAIN testdomain_sv AS text COLLATE "sv_SE";
+CREATE DOMAIN testdomain_i AS int COLLATE "sv_SE"; -- fails
 CREATE TABLE collate_test4 (
     a int,
     b testdomain_sv
@@ -71,7 +71,7 @@ SELECT a, b FROM collate_test4 ORDER BY b;
 
 CREATE TABLE collate_test5 (
     a int,
-    b testdomain_sv COLLATE "en_US.utf8"
+    b testdomain_sv COLLATE "en_US"
 );
 INSERT INTO collate_test5 SELECT * FROM collate_test1;
 SELECT a, b FROM collate_test5 ORDER BY b;
@@ -89,15 +89,15 @@ SELECT * FROM collate_test2 ORDER BY b;
 SELECT * FROM collate_test3 ORDER BY b;
 
 -- constant expression folding
-SELECT 'bbc' COLLATE "en_US.utf8" > 'äbc' COLLATE "en_US.utf8" AS "true";
-SELECT 'bbc' COLLATE "sv_SE.utf8" > 'äbc' COLLATE "sv_SE.utf8" AS "false";
+SELECT 'bbc' COLLATE "en_US" > 'äbc' COLLATE "en_US" AS "true";
+SELECT 'bbc' COLLATE "sv_SE" > 'äbc' COLLATE "sv_SE" AS "false";
 
 -- upper/lower
 
 CREATE TABLE collate_test10 (
     a int,
-    x text COLLATE "en_US.utf8",
-    y text COLLATE "tr_TR.utf8"
+    x text COLLATE "en_US",
+    y text COLLATE "tr_TR"
 );
 
 INSERT INTO collate_test10 VALUES (1, 'hij', 'hij'), (2, 'HIJ', 'HIJ');
@@ -116,18 +116,39 @@ SELECT * FROM collate_test1 WHERE b ILIKE 'abc';
 SELECT * FROM collate_test1 WHERE b ILIKE 'abc%';
 SELECT * FROM collate_test1 WHERE b ILIKE '%bc%';
 
-SELECT 'Türkiye' COLLATE "en_US.utf8" ILIKE '%KI%' AS "true";
-SELECT 'Türkiye' COLLATE "tr_TR.utf8" ILIKE '%KI%' AS "false";
+SELECT 'Türkiye' COLLATE "en_US" ILIKE '%KI%' AS "true";
+SELECT 'Türkiye' COLLATE "tr_TR" ILIKE '%KI%' AS "false";
+
+SELECT 'bıt' ILIKE 'BIT' COLLATE "en_US" AS "false";
+SELECT 'bıt' ILIKE 'BIT' COLLATE "tr_TR" AS "true";
 
 -- The following actually exercises the selectivity estimation for ILIKE.
 SELECT relname FROM pg_class WHERE relname ILIKE 'abc%';
 
+-- regular expressions
+
+SELECT * FROM collate_test1 WHERE b ~ '^abc$';
+SELECT * FROM collate_test1 WHERE b ~ '^abc';
+SELECT * FROM collate_test1 WHERE b ~ 'bc';
+SELECT * FROM collate_test1 WHERE b ~* '^abc$';
+SELECT * FROM collate_test1 WHERE b ~* '^abc';
+SELECT * FROM collate_test1 WHERE b ~* 'bc';
+
+SELECT 'Türkiye' COLLATE "en_US" ~* 'KI' AS "true";
+SELECT 'Türkiye' COLLATE "tr_TR" ~* 'KI' AS "false";
+
+SELECT 'bıt' ~* 'BIT' COLLATE "en_US" AS "false";
+SELECT 'bıt' ~* 'BIT' COLLATE "tr_TR" AS "true";
+
+-- The following actually exercises the selectivity estimation for ~*.
+SELECT relname FROM pg_class WHERE relname ~* '^abc';
+
 
 -- to_char
 
-SET lc_time TO 'tr_TR.utf8';
+SET lc_time TO 'tr_TR';
 SELECT to_char(date '2010-04-01', 'DD TMMON YYYY');
-SELECT to_char(date '2010-04-01', 'DD TMMON YYYY' COLLATE "tr_TR.utf8");
+SELECT to_char(date '2010-04-01', 'DD TMMON YYYY' COLLATE "tr_TR");
 
 
 -- backwards parsing
@@ -190,6 +211,11 @@ SELECT a, b FROM collate_test1 EXCEPT SELECT a, b FROM collate_test3 ORDER BY 2;
 
 CREATE TABLE test_u AS SELECT a, b FROM collate_test1 UNION ALL SELECT a, b FROM collate_test3; -- fail
 
+-- ideally this would be a parse-time error, but for now it must be run-time:
+select x < y from collate_test10; -- fail
+select x || y from collate_test10; -- ok, because || is not collation aware
+select x, y from collate_test10 order by x || y; -- not so ok
+
 -- collation mismatch between recursive and non-recursive term
 WITH RECURSIVE foo(x) AS
    (SELECT x FROM (VALUES('a' COLLATE "en_US"),('b')) t(x)
@@ -207,18 +233,70 @@ SELECT a, CAST(b AS varchar) FROM collate_test2 ORDER BY 2;
 SELECT a, CAST(b AS varchar) FROM collate_test3 ORDER BY 2;
 
 
+-- propagation of collation in SQL functions (inlined and non-inlined cases)
+-- and plpgsql functions too
+
+CREATE FUNCTION mylt (text, text) RETURNS boolean LANGUAGE sql
+    AS $$ select $1 < $2 $$;
+
+CREATE FUNCTION mylt_noninline (text, text) RETURNS boolean LANGUAGE sql
+    AS $$ select $1 < $2 limit 1 $$;
+
+CREATE FUNCTION mylt_plpgsql (text, text) RETURNS boolean LANGUAGE plpgsql
+    AS $$ begin return $1 < $2; end $$;
+
+SELECT a.b AS a, b.b AS b, a.b < b.b AS lt,
+       mylt(a.b, b.b), mylt_noninline(a.b, b.b), mylt_plpgsql(a.b, b.b)
+FROM collate_test1 a, collate_test1 b
+ORDER BY a.b, b.b;
+
+SELECT a.b AS a, b.b AS b, a.b < b.b COLLATE "C" AS lt,
+       mylt(a.b, b.b COLLATE "C"), mylt_noninline(a.b, b.b COLLATE "C"),
+       mylt_plpgsql(a.b, b.b COLLATE "C")
+FROM collate_test1 a, collate_test1 b
+ORDER BY a.b, b.b;
+
+
+-- collation override in plpgsql
+
+CREATE FUNCTION mylt2 (x text, y text) RETURNS boolean LANGUAGE plpgsql AS $$
+declare
+  xx text := x;
+  yy text := y;
+begin
+  return xx < yy;
+end
+$$;
+
+SELECT mylt2('a', 'B' collate "en_US") as t, mylt2('a', 'B' collate "C") as f;
+
+CREATE OR REPLACE FUNCTION
+  mylt2 (x text, y text) RETURNS boolean LANGUAGE plpgsql AS $$
+declare
+  xx text COLLATE "POSIX" := x;
+  yy text := y;
+begin
+  return xx < yy;
+end
+$$;
+
+SELECT mylt2('a', 'B') as f;
+SELECT mylt2('a', 'B' collate "C") as fail; -- conflicting collations
+SELECT mylt2('a', 'B' collate "POSIX") as f;
+
+
 -- polymorphism
 
 SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test1)) ORDER BY 1;
 SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test2)) ORDER BY 1;
 SELECT * FROM unnest((SELECT array_agg(b ORDER BY b) FROM collate_test3)) ORDER BY 1;
 
-CREATE FUNCTION dup (f1 anyelement, f2 out anyelement, f3 out anyarray)
-    AS 'select $1, array[$1,$1]' LANGUAGE sql;
+CREATE FUNCTION dup (anyelement) RETURNS anyelement
+    AS 'select $1' LANGUAGE sql;
 
-SELECT a, (dup(b)).* FROM collate_test1 ORDER BY 2;
-SELECT a, (dup(b)).* FROM collate_test2 ORDER BY 2;
-SELECT a, (dup(b)).* FROM collate_test3 ORDER BY 2;
+SELECT a, dup(b) FROM collate_test1 ORDER BY 2;
+SELECT a, dup(b) FROM collate_test2 ORDER BY 2;
+SELECT a, dup(b) FROM collate_test3 ORDER BY 2;
 
 
 -- indexes
@@ -226,11 +304,12 @@ SELECT a, (dup(b)).* FROM collate_test3 ORDER BY 2;
 CREATE INDEX collate_test1_idx1 ON collate_test1 (b);
 CREATE INDEX collate_test1_idx2 ON collate_test1 (b COLLATE "C");
 CREATE INDEX collate_test1_idx3 ON collate_test1 ((b COLLATE "C")); -- this is different grammatically
+CREATE INDEX collate_test1_idx4 ON collate_test1 (((b||'foo') COLLATE "POSIX"));
 
-CREATE INDEX collate_test1_idx4 ON collate_test1 (a COLLATE "C"); -- fail
-CREATE INDEX collate_test1_idx5 ON collate_test1 ((a COLLATE "C")); -- fail
+CREATE INDEX collate_test1_idx5 ON collate_test1 (a COLLATE "C"); -- fail
+CREATE INDEX collate_test1_idx6 ON collate_test1 ((a COLLATE "C")); -- fail
 
-SELECT relname, pg_get_indexdef(oid) FROM pg_class WHERE relname LIKE 'collate_test%_idx%';
+SELECT relname, pg_get_indexdef(oid) FROM pg_class WHERE relname LIKE 'collate_test%_idx%' ORDER BY 1;
 
 
 -- schema manipulation commands
@@ -238,17 +317,29 @@ SELECT relname, pg_get_indexdef(oid) FROM pg_class WHERE relname LIKE 'collate_t
 CREATE ROLE regress_test_role;
 CREATE SCHEMA test_schema;
 
-CREATE COLLATION test0 (locale = 'en_US.utf8');
-CREATE COLLATION test0 (locale = 'en_US.utf8'); -- fail
-CREATE COLLATION test1 (lc_collate = 'en_US.utf8', lc_ctype = 'de_DE.utf8');
-CREATE COLLATION test2 (locale = 'en_US'); -- fail
-CREATE COLLATION test3 (lc_collate = 'en_US.utf8'); -- fail
+-- We need to do this this way to cope with varying names for encodings:
+do $$
+BEGIN
+  EXECUTE 'CREATE COLLATION test0 (locale = ' ||
+          quote_literal(current_setting('lc_collate')) || ');';
+END
+$$;
+CREATE COLLATION test0 FROM "C"; -- fail, duplicate name
+do $$
+BEGIN
+  EXECUTE 'CREATE COLLATION test1 (lc_collate = ' ||
+          quote_literal(current_setting('lc_collate')) ||
+          ', lc_ctype = ' ||
+          quote_literal(current_setting('lc_ctype')) || ');';
+END
+$$;
+CREATE COLLATION test3 (lc_collate = 'en_US.utf8'); -- fail, need lc_ctype
 CREATE COLLATION testx (locale = 'nonsense'); -- fail
 
 CREATE COLLATION test4 FROM nonsense;
 CREATE COLLATION test5 FROM test0;
 
-SELECT collname, collencoding, collcollate, collctype FROM pg_collation WHERE collname LIKE 'test%' ORDER BY 1;
+SELECT collname FROM pg_collation WHERE collname LIKE 'test%' ORDER BY 1;
 
 ALTER COLLATION test1 RENAME TO test11;
 ALTER COLLATION test0 RENAME TO test11; -- fail
@@ -277,7 +368,7 @@ DROP ROLE regress_test_role;
 
 -- dependencies
 
-CREATE COLLATION test0 (locale = 'en_US.utf8');
+CREATE COLLATION test0 FROM "C";
 
 CREATE TABLE collate_dep_test1 (a int, b text COLLATE test0);
 CREATE DOMAIN collate_dep_dom1 AS text COLLATE test0;

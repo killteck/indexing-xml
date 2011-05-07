@@ -245,7 +245,7 @@ analyzeCTE(ParseState *pstate, CommonTableExpr *cte)
 	cte->ctequery = (Node *) query;
 
 	/*
-	 * Check that we got something reasonable.  These first two cases should
+	 * Check that we got something reasonable.	These first two cases should
 	 * be prevented by the grammar.
 	 */
 	if (!IsA(query, Query))
@@ -286,10 +286,10 @@ analyzeCTE(ParseState *pstate, CommonTableExpr *cte)
 	else
 	{
 		/*
-		 * Verify that the previously determined output column types match
-		 * what the query really produced.	We have to check this because the
-		 * recursive term could have overridden the non-recursive term, and we
-		 * don't have any easy way to fix that.
+		 * Verify that the previously determined output column types and
+		 * collations match what the query really produced.  We have to check
+		 * this because the recursive term could have overridden the
+		 * non-recursive term, and we don't have any easy way to fix that.
 		 */
 		ListCell   *lctlist,
 				   *lctyp,
@@ -310,7 +310,7 @@ analyzeCTE(ParseState *pstate, CommonTableExpr *cte)
 				continue;
 			varattno++;
 			Assert(varattno == te->resno);
-			if (lctyp == NULL || lctypmod == NULL || lccoll == NULL)		/* shouldn't happen */
+			if (lctyp == NULL || lctypmod == NULL || lccoll == NULL)	/* shouldn't happen */
 				elog(ERROR, "wrong number of output columns in WITH");
 			texpr = (Node *) te->expr;
 			if (exprType(texpr) != lfirst_oid(lctyp) ||
@@ -338,7 +338,7 @@ analyzeCTE(ParseState *pstate, CommonTableExpr *cte)
 			lctypmod = lnext(lctypmod);
 			lccoll = lnext(lccoll);
 		}
-		if (lctyp != NULL || lctypmod != NULL || lccoll != NULL)	/* shouldn't happen */
+		if (lctyp != NULL || lctypmod != NULL || lccoll != NULL)		/* shouldn't happen */
 			elog(ERROR, "wrong number of output columns in WITH");
 	}
 }
@@ -366,11 +366,11 @@ analyzeCTETargetList(ParseState *pstate, CommonTableExpr *cte, List *tlist)
 	Assert(cte->ctecolnames == NIL);
 
 	/*
-	 * We need to determine column names and types.  The alias column names
-	 * override anything coming from the query itself.	(Note: the SQL spec
-	 * says that the alias list must be empty or exactly as long as the output
-	 * column set; but we allow it to be shorter for consistency with Alias
-	 * handling.)
+	 * We need to determine column names, types, and collations.  The alias
+	 * column names override anything coming from the query itself.  (Note:
+	 * the SQL spec says that the alias list must be empty or exactly as long
+	 * as the output column set; but we allow it to be shorter for consistency
+	 * with Alias handling.)
 	 */
 	cte->ctecolnames = copyObject(cte->aliascolnames);
 	cte->ctecoltypes = cte->ctecoltypmods = cte->ctecolcollations = NIL;
@@ -405,12 +405,16 @@ analyzeCTETargetList(ParseState *pstate, CommonTableExpr *cte, List *tlist)
 		 * might see "unknown" as a result of an untyped literal in the
 		 * non-recursive term's select list, and if we don't convert to text
 		 * then we'll have a mismatch against the UNION result.
+		 *
+		 * The column might contain 'foo' COLLATE "bar", so don't override
+		 * collation if it's already set.
 		 */
 		if (cte->cterecursive && coltype == UNKNOWNOID)
 		{
 			coltype = TEXTOID;
 			coltypmod = -1;		/* should be -1 already, but be sure */
-			colcoll = DEFAULT_COLLATION_OID;
+			if (!OidIsValid(colcoll))
+				colcoll = DEFAULT_COLLATION_OID;
 		}
 		cte->ctecoltypes = lappend_oid(cte->ctecoltypes, coltype);
 		cte->ctecoltypmods = lappend_int(cte->ctecoltypmods, coltypmod);
@@ -641,7 +645,7 @@ checkWellFormedRecursion(CteState *cstate)
 		CommonTableExpr *cte = cstate->items[i].cte;
 		SelectStmt *stmt = (SelectStmt *) cte->ctequery;
 
-		Assert(!IsA(stmt, Query));	/* not analyzed yet */
+		Assert(!IsA(stmt, Query));		/* not analyzed yet */
 
 		/* Ignore items that weren't found to be recursive */
 		if (!cte->cterecursive)

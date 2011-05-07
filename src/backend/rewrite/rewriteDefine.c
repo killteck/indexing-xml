@@ -232,7 +232,6 @@ DefineQueryRewrite(char *rulename,
 				   List *action)
 {
 	Relation	event_relation;
-	Oid			ruleId;
 	int			event_attno;
 	ListCell   *l;
 	Query	   *query;
@@ -241,9 +240,9 @@ DefineQueryRewrite(char *rulename,
 	/*
 	 * If we are installing an ON SELECT rule, we had better grab
 	 * AccessExclusiveLock to ensure no SELECTs are currently running on the
-	 * event relation.	For other types of rules, it is sufficient to
-	 * grab ShareRowExclusiveLock to lock out insert/update/delete actions
-	 * and to ensure that we lock out current CREATE RULE statements.
+	 * event relation.	For other types of rules, it is sufficient to grab
+	 * ShareRowExclusiveLock to lock out insert/update/delete actions and to
+	 * ensure that we lock out current CREATE RULE statements.
 	 */
 	if (event_type == CMD_SELECT)
 		event_relation = heap_open(event_relid, AccessExclusiveLock);
@@ -488,7 +487,7 @@ DefineQueryRewrite(char *rulename,
 	/* discard rule if it's null action and not INSTEAD; it's a no-op */
 	if (action != NIL || is_instead)
 	{
-		ruleId = InsertRule(rulename,
+		InsertRule(rulename,
 							event_type,
 							event_relid,
 							event_attno,

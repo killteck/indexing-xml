@@ -1048,10 +1048,11 @@ hash_range(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * apply the hash function to each array element.
+	 * Apply the hash function to each array element (the hash
+	 * function shouldn't care about the collation).
 	 */
 	InitFunctionCallInfoData(locfcinfo, &typentry->hash_proc_finfo, 1,
-							 NULL, NULL);
+							 InvalidOid, NULL, NULL);
 
 	if (RANGE_HAS_LBOUND(flags))
 	{

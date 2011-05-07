@@ -271,6 +271,7 @@ makeFromExpr(List *fromlist, Node *quals)
 Const *
 makeConst(Oid consttype,
 		  int32 consttypmod,
+		  Oid constcollid,
 		  int constlen,
 		  Datum constvalue,
 		  bool constisnull,
@@ -280,7 +281,7 @@ makeConst(Oid consttype,
 
 	cnst->consttype = consttype;
 	cnst->consttypmod = consttypmod;
-	cnst->constcollid = get_typcollation(consttype);
+	cnst->constcollid = constcollid;
 	cnst->constlen = constlen;
 	cnst->constvalue = constvalue;
 	cnst->constisnull = constisnull;
@@ -298,7 +299,7 @@ makeConst(Oid consttype,
  * storage properties.
  */
 Const *
-makeNullConst(Oid consttype, int32 consttypmod)
+makeNullConst(Oid consttype, int32 consttypmod, Oid constcollid)
 {
 	int16		typLen;
 	bool		typByVal;
@@ -306,6 +307,7 @@ makeNullConst(Oid consttype, int32 consttypmod)
 	get_typlenbyval(consttype, &typLen, &typByVal);
 	return makeConst(consttype,
 					 consttypmod,
+					 constcollid,
 					 (int) typLen,
 					 (Datum) 0,
 					 true,
@@ -320,7 +322,7 @@ Node *
 makeBoolConst(bool value, bool isnull)
 {
 	/* note that pg_type.h hardwires size of bool as 1 ... duplicate it */
-	return (Node *) makeConst(BOOLOID, -1, 1,
+	return (Node *) makeConst(BOOLOID, -1, InvalidOid, 1,
 							  BoolGetDatum(value), isnull, true);
 }
 
@@ -362,13 +364,15 @@ makeAlias(const char *aliasname, List *colnames)
  *	  creates a RelabelType node
  */
 RelabelType *
-makeRelabelType(Expr *arg, Oid rtype, int32 rtypmod, CoercionForm rformat)
+makeRelabelType(Expr *arg, Oid rtype, int32 rtypmod, Oid rcollid,
+				CoercionForm rformat)
 {
 	RelabelType *r = makeNode(RelabelType);
 
 	r->arg = arg;
 	r->resulttype = rtype;
 	r->resulttypmod = rtypmod;
+	r->resultcollid = rcollid;
 	r->relabelformat = rformat;
 	r->location = -1;
 
@@ -447,7 +451,8 @@ makeTypeNameFromOid(Oid typeOid, int32 typmod)
  * The argument expressions must have been transformed already.
  */
 FuncExpr *
-makeFuncExpr(Oid funcid, Oid rettype, List *args, Oid collid, CoercionForm fformat)
+makeFuncExpr(Oid funcid, Oid rettype, List *args,
+			 Oid funccollid, Oid inputcollid, CoercionForm fformat)
 {
 	FuncExpr   *funcexpr;
 
@@ -456,8 +461,9 @@ makeFuncExpr(Oid funcid, Oid rettype, List *args, Oid collid, CoercionForm fform
 	funcexpr->funcresulttype = rettype;
 	funcexpr->funcretset = false;		/* only allowed case here */
 	funcexpr->funcformat = fformat;
+	funcexpr->funccollid = funccollid;
+	funcexpr->inputcollid = inputcollid;
 	funcexpr->args = args;
-	funcexpr->collid = collid;
 	funcexpr->location = -1;
 
 	return funcexpr;

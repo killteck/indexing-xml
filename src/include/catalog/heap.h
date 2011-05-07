@@ -63,8 +63,7 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 OnCommitAction oncommit,
 						 Datum reloptions,
 						 bool use_user_acl,
-						 bool allow_system_table_mods,
-						 bool if_not_exists);
+						 bool allow_system_table_mods);
 
 extern void heap_drop_with_catalog(Oid relid);
 
@@ -117,7 +116,9 @@ extern Form_pg_attribute SystemAttributeByName(const char *attname,
 extern void CheckAttributeNamesTypes(TupleDesc tupdesc, char relkind,
 						 bool allow_system_table_mods);
 
-extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollation,
+extern void CheckAttributeType(const char *attname,
+				   Oid atttypid, Oid attcollation,
+				   List *containing_rowtypes,
 				   bool allow_system_table_mods);
 
 #endif   /* HEAP_H */

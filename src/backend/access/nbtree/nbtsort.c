@@ -736,9 +736,11 @@ _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 					}
 					else
 					{
-						compare = DatumGetInt32(FunctionCall2(&entry->sk_func,
-															  attrDatum1,
-															  attrDatum2));
+						compare =
+							DatumGetInt32(FunctionCall2Coll(&entry->sk_func,
+															entry->sk_collation,
+															attrDatum1,
+															attrDatum2));
 
 						if (entry->sk_flags & SK_BT_DESC)
 							compare = -compare;
@@ -799,7 +801,7 @@ _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 
 	/*
 	 * If the index is WAL-logged, we must fsync it down to disk before it's
-	 * safe to commit the transaction.  (For a non-WAL-logged index we don't
+	 * safe to commit the transaction.	(For a non-WAL-logged index we don't
 	 * care since the index will be uninteresting after a crash anyway.)
 	 *
 	 * It's obvious that we must do this when not WAL-logging the build. It's

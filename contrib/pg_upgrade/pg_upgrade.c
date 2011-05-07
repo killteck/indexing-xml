@@ -18,7 +18,7 @@
  *	FYI, while pg_class.oid and pg_class.relfilenode are intially the same
  *	in a cluster, but they can diverge due to CLUSTER, REINDEX, or VACUUM
  *	FULL.  The new cluster will have matching pg_class.oid and
- *	pg_class.relfilenode values and be based on the old oid value.  This can
+ *	pg_class.relfilenode values and be based on the old oid value.	This can
  *	cause the old and new pg_class.relfilenode values to differ.  In summary,
  *	old and new pg_class.oid and new pg_class.relfilenode will have the
  *	same value, and old pg_class.relfilenode might differ.
@@ -34,7 +34,7 @@
  */
 
 
- 
+
 #include "pg_upgrade.h"
 
 #ifdef HAVE_LANGINFO_H
@@ -53,7 +53,8 @@ static void cleanup(void);
 /* This is the database used by pg_dumpall to restore global tables */
 #define GLOBAL_DUMP_DB	"postgres"
 
-ClusterInfo old_cluster, new_cluster;
+ClusterInfo old_cluster,
+			new_cluster;
 OSInfo		os_info;
 
 int
@@ -76,7 +77,7 @@ main(int argc, char **argv)
 
 
 	/* -- NEW -- */
-	start_postmaster(&new_cluster, false);
+	start_postmaster(&new_cluster);
 
 	check_new_cluster();
 	report_clusters_compatible();
@@ -87,7 +88,7 @@ main(int argc, char **argv)
 	disable_old_cluster();
 	prepare_new_cluster();
 
-	stop_postmaster(false, false);
+	stop_postmaster(false);
 
 	/*
 	 * Destructive Changes to New Cluster
@@ -97,9 +98,14 @@ main(int argc, char **argv)
 
 	/* New now using xids of the old system */
 
+	/* -- NEW -- */
+	start_postmaster(&new_cluster);
+
 	prepare_new_databases();
 
 	create_new_objects();
+
+	stop_postmaster(false);
 
 	transfer_all_new_dbs(&old_cluster.dbarr, &new_cluster.dbarr,
 						 old_cluster.pgdata, new_cluster.pgdata);
@@ -192,7 +198,7 @@ prepare_new_cluster(void)
 	exec_prog(true,
 			  SYSTEMQUOTE "\"%s/vacuumdb\" --port %d --username \"%s\" "
 			  "--all --analyze >> %s 2>&1" SYSTEMQUOTE,
-		   new_cluster.bindir, new_cluster.port, os_info.user, log_opts.filename);
+	  new_cluster.bindir, new_cluster.port, os_info.user, log_opts.filename);
 	check_ok();
 
 	/*
@@ -205,7 +211,7 @@ prepare_new_cluster(void)
 	exec_prog(true,
 			  SYSTEMQUOTE "\"%s/vacuumdb\" --port %d --username \"%s\" "
 			  "--all --freeze >> %s 2>&1" SYSTEMQUOTE,
-		   new_cluster.bindir, new_cluster.port, os_info.user, log_opts.filename);
+	  new_cluster.bindir, new_cluster.port, os_info.user, log_opts.filename);
 	check_ok();
 
 	get_pg_database_relfilenode(&new_cluster);
@@ -215,9 +221,6 @@ prepare_new_cluster(void)
 static void
 prepare_new_databases(void)
 {
-	/* -- NEW -- */
-	start_postmaster(&new_cluster, false);
-
 	/*
 	 * We set autovacuum_freeze_max_age to its maximum value so autovacuum
 	 * does not launch here and delete clog files, before the frozen xids are
@@ -229,16 +232,16 @@ prepare_new_databases(void)
 	prep_status("Creating databases in the new cluster");
 
 	/*
-	 *	Install support functions in the global-restore database
-	 *	to preserve pg_authid.oid.
+	 * Install support functions in the global-restore database to preserve
+	 * pg_authid.oid.
 	 */
 	install_support_functions_in_new_db(GLOBAL_DUMP_DB);
 
 	/*
 	 * We have to create the databases first so we can install support
-	 * functions in all the other databases.  Ideally we could create
-	 * the support functions in template1 but pg_dumpall creates database
-	 * using the template0 template.
+	 * functions in all the other databases.  Ideally we could create the
+	 * support functions in template1 but pg_dumpall creates database using
+	 * the template0 template.
 	 */
 	exec_prog(true,
 			  SYSTEMQUOTE "\"%s/psql\" --set ON_ERROR_STOP=on "
@@ -251,8 +254,6 @@ prepare_new_databases(void)
 
 	/* we load this to get a current list of databases */
 	get_db_and_rel_infos(&new_cluster);
-
-	stop_postmaster(false, false);
 }
 
 
@@ -260,9 +261,6 @@ static void
 create_new_objects(void)
 {
 	int			dbnum;
-
-	/* -- NEW -- */
-	start_postmaster(&new_cluster, false);
 
 	prep_status("Adding support functions to new cluster");
 
@@ -289,8 +287,6 @@ create_new_objects(void)
 	get_db_and_rel_infos(&new_cluster);
 
 	uninstall_support_functions_from_new_cluster();
-
-	stop_postmaster(false, false);
 }
 
 
@@ -306,7 +302,7 @@ copy_clog_xlog_xid(void)
 	snprintf(old_clog_path, sizeof(old_clog_path), "%s/pg_clog", old_cluster.pgdata);
 	snprintf(new_clog_path, sizeof(new_clog_path), "%s/pg_clog", new_cluster.pgdata);
 	if (!rmtree(new_clog_path, true))
-		pg_log(PG_FATAL, "Unable to delete directory %s\n", new_clog_path);
+		pg_log(PG_FATAL, "unable to delete directory %s\n", new_clog_path);
 	check_ok();
 
 	prep_status("Copying old commit clogs to new server");

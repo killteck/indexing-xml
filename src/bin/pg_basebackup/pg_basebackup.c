@@ -64,7 +64,7 @@ static PGconn *GetConnection(void);
 
 static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum);
 static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum);
-static void BaseBackup();
+static void BaseBackup(void);
 
 #ifdef HAVE_LIBZ
 static const char *
@@ -118,23 +118,23 @@ xmalloc0(int size)
 static void
 usage(void)
 {
-	printf(_("%s takes base backups of running PostgreSQL servers\n\n"),
+	printf(_("%s takes a base backup of a running PostgreSQL server.\n\n"),
 		   progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nOptions controlling the output:\n"));
-	printf(_("  -D, --pgdata=directory    receive base backup into directory\n"));
-	printf(_("  -F, --format=p|t          output format (plain, tar)\n"));
-	printf(_("  -x, --xlog                include required WAL files in backup\n"));
-	printf(_("  -Z, --compress=0-9        compress tar output\n"));
+	printf(_("  -D, --pgdata=DIRECTORY   receive base backup into directory\n"));
+	printf(_("  -F, --format=p|t         output format (plain, tar)\n"));
+	printf(_("  -x, --xlog               include required WAL files in backup\n"));
+	printf(_("  -Z, --compress=0-9       compress tar output\n"));
 	printf(_("\nGeneral options:\n"));
 	printf(_("  -c, --checkpoint=fast|spread\n"
-			 "                            set fast or spread checkpointing\n"));
-	printf(_("  -l, --label=label         set backup label\n"));
-	printf(_("  -P, --progress            show progress information\n"));
-	printf(_("  -v, --verbose             output verbose messages\n"));
-	printf(_("  -?, --help                show this help, then exit\n"));
-	printf(_("  -V, --version             output version information, then exit\n"));
+			 "                           set fast or spread checkpointing\n"));
+	printf(_("  -l, --label=LABEL        set backup label\n"));
+	printf(_("  -P, --progress           show progress information\n"));
+	printf(_("  -v, --verbose            output verbose messages\n"));
+	printf(_("  --help                   show this help, then exit\n"));
+	printf(_("  --version                output version information, then exit\n"));
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME      database server host or socket directory\n"));
 	printf(_("  -p, --port=PORT          database server port number\n"));
@@ -202,16 +202,30 @@ verify_dir_is_empty_or_create(char *dirname)
 static void
 progress_report(int tablespacenum, char *fn)
 {
-	int percent = (int) ((totaldone / 1024) * 100 / totalsize);
+	int			percent = (int) ((totaldone / 1024) * 100 / totalsize);
+
 	if (percent > 100)
 		percent = 100;
 
 	if (verbose)
-		fprintf(stderr,
-				INT64_FORMAT "/" INT64_FORMAT " kB (%i%%) %i/%i tablespaces (%-30s)\r",
-				totaldone / 1024, totalsize,
-				percent,
-				tablespacenum, tablespacecount, fn);
+	{
+		if (!fn)
+
+			/*
+			 * No filename given, so clear the status line (used for last
+			 * call)
+			 */
+			fprintf(stderr,
+					INT64_FORMAT "/" INT64_FORMAT " kB (100%%) %i/%i tablespaces %35s\r",
+					totaldone / 1024, totalsize,
+					tablespacenum, tablespacecount, "");
+		else
+			fprintf(stderr,
+					INT64_FORMAT "/" INT64_FORMAT " kB (%i%%) %i/%i tablespaces (%-30.30s)\r",
+					totaldone / 1024, totalsize,
+					percent,
+					tablespacenum, tablespacecount, fn);
+	}
 	else
 		fprintf(stderr, INT64_FORMAT "/" INT64_FORMAT " kB (%i%%) %i/%i tablespaces\r",
 				totaldone / 1024, totalsize,
@@ -323,7 +337,7 @@ ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_COPY_OUT)
 	{
-		fprintf(stderr, _("%s: could not get COPY data stream: %s\n"),
+		fprintf(stderr, _("%s: could not get COPY data stream: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
@@ -384,7 +398,7 @@ ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 		}
 		else if (r == -2)
 		{
-			fprintf(stderr, _("%s: could not read COPY data: %s\n"),
+			fprintf(stderr, _("%s: could not read COPY data: %s"),
 					progname, PQerrorMessage(conn));
 			disconnect_and_exit(1);
 		}
@@ -453,7 +467,7 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_COPY_OUT)
 	{
-		fprintf(stderr, _("%s: could not get COPY data stream: %s\n"),
+		fprintf(stderr, _("%s: could not get COPY data stream: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
@@ -482,21 +496,21 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 		}
 		else if (r == -2)
 		{
-			fprintf(stderr, _("%s: could not read COPY data: %s\n"),
+			fprintf(stderr, _("%s: could not read COPY data: %s"),
 					progname, PQerrorMessage(conn));
 			disconnect_and_exit(1);
 		}
 
 		if (file == NULL)
 		{
-			int		filemode;
+			int			filemode;
 
 			/*
 			 * No current file, so this must be the header for a new file
 			 */
 			if (r != 512)
 			{
-				fprintf(stderr, _("%s: Invalid tar block header size: %i\n"),
+				fprintf(stderr, _("%s: invalid tar block header size: %i\n"),
 						progname, r);
 				disconnect_and_exit(1);
 			}
@@ -504,7 +518,7 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 
 			if (sscanf(copybuf + 124, "%11o", &current_len_left) != 1)
 			{
-				fprintf(stderr, _("%s: could not parse file size!\n"),
+				fprintf(stderr, _("%s: could not parse file size\n"),
 						progname);
 				disconnect_and_exit(1);
 			}
@@ -512,7 +526,7 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 			/* Set permissions on the file */
 			if (sscanf(&copybuf[100], "%07o ", &filemode) != 1)
 			{
-				fprintf(stderr, _("%s: could not parse file mode!\n"),
+				fprintf(stderr, _("%s: could not parse file mode\n"),
 						progname);
 				disconnect_and_exit(1);
 			}
@@ -567,7 +581,7 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 				}
 				else
 				{
-					fprintf(stderr, _("%s: unknown link indicator \"%c\"\n"),
+					fprintf(stderr, _("%s: unrecognized link indicator \"%c\"\n"),
 							progname, copybuf[156]);
 					disconnect_and_exit(1);
 				}
@@ -645,7 +659,7 @@ ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 
 	if (file != NULL)
 	{
-		fprintf(stderr, _("%s: last file was never finished!\n"), progname);
+		fprintf(stderr, _("%s: last file was never finished\n"), progname);
 		disconnect_and_exit(1);
 	}
 
@@ -726,7 +740,7 @@ GetConnection(void)
 
 		if (PQstatus(tmpconn) != CONNECTION_OK)
 		{
-			fprintf(stderr, _("%s: could not connect to server: %s\n"),
+			fprintf(stderr, _("%s: could not connect to server: %s"),
 					progname, PQerrorMessage(tmpconn));
 			exit(1);
 		}
@@ -739,10 +753,9 @@ GetConnection(void)
 }
 
 static void
-BaseBackup()
+BaseBackup(void)
 {
 	PGresult   *res;
-	uint32		timeline;
 	char		current_path[MAXPGPATH];
 	char		escaped_label[MAXPGPATH];
 	int			i;
@@ -755,25 +768,6 @@ BaseBackup()
 	conn = GetConnection();
 
 	/*
-	 * Run IDENFITY_SYSTEM so we can get the timeline
-	 */
-	res = PQexec(conn, "IDENTIFY_SYSTEM");
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-	{
-		fprintf(stderr, _("%s: could not identify system: %s\n"),
-				progname, PQerrorMessage(conn));
-		disconnect_and_exit(1);
-	}
-	if (PQntuples(res) != 1)
-	{
-		fprintf(stderr, _("%s: could not identify system, got %i rows\n"),
-				progname, PQntuples(res));
-		disconnect_and_exit(1);
-	}
-	timeline = atoi(PQgetvalue(res, 0, 1));
-	PQclear(res);
-
-	/*
 	 * Start the actual backup
 	 */
 	PQescapeStringConn(conn, escaped_label, label, sizeof(escaped_label), &i);
@@ -782,11 +776,11 @@ BaseBackup()
 			 showprogress ? "PROGRESS" : "",
 			 includewal ? "WAL" : "",
 			 fastcheckpoint ? "FAST" : "",
-	         includewal ? "NOWAIT" : "");
+			 includewal ? "NOWAIT" : "");
 
 	if (PQsendQuery(conn, current_path) == 0)
 	{
-		fprintf(stderr, _("%s: could not start base backup: %s\n"),
+		fprintf(stderr, _("%s: could not start base backup: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
@@ -797,13 +791,13 @@ BaseBackup()
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		fprintf(stderr, _("%s: could not initiate base backup: %s\n"),
+		fprintf(stderr, _("%s: could not initiate base backup: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
 	if (PQntuples(res) != 1)
 	{
-		fprintf(stderr, _("%s: no start point returned from server.\n"),
+		fprintf(stderr, _("%s: no start point returned from server\n"),
 				progname);
 		disconnect_and_exit(1);
 	}
@@ -819,13 +813,13 @@ BaseBackup()
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		fprintf(stderr, _("%s: could not get backup header: %s\n"),
+		fprintf(stderr, _("%s: could not get backup header: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
 	if (PQntuples(res) < 1)
 	{
-		fprintf(stderr, _("%s: no data returned from server.\n"), progname);
+		fprintf(stderr, _("%s: no data returned from server\n"), progname);
 		disconnect_and_exit(1);
 	}
 
@@ -853,7 +847,7 @@ BaseBackup()
 	 */
 	if (format == 't' && strcmp(basedir, "-") == 0 && PQntuples(res) > 1)
 	{
-		fprintf(stderr, _("%s: can only write single tablespace to stdout, database has %i.\n"),
+		fprintf(stderr, _("%s: can only write single tablespace to stdout, database has %i\n"),
 				progname, PQntuples(res));
 		disconnect_and_exit(1);
 	}
@@ -871,7 +865,7 @@ BaseBackup()
 
 	if (showprogress)
 	{
-		progress_report(PQntuples(res), "");
+		progress_report(PQntuples(res), NULL);
 		fprintf(stderr, "\n");	/* Need to move to next line */
 	}
 	PQclear(res);
@@ -882,13 +876,13 @@ BaseBackup()
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		fprintf(stderr, _("%s: could not get end xlog position from server.\n"),
-						  progname);
+		fprintf(stderr, _("%s: could not get end xlog position from server\n"),
+				progname);
 		disconnect_and_exit(1);
 	}
 	if (PQntuples(res) != 1)
 	{
-		fprintf(stderr, _("%s: no end point returned from server.\n"),
+		fprintf(stderr, _("%s: no end point returned from server\n"),
 				progname);
 		disconnect_and_exit(1);
 	}
@@ -900,7 +894,7 @@ BaseBackup()
 	res = PQgetResult(conn);
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		fprintf(stderr, _("%s: final receive failed: %s\n"),
+		fprintf(stderr, _("%s: final receive failed: %s"),
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
@@ -911,7 +905,7 @@ BaseBackup()
 	PQfinish(conn);
 
 	if (verbose)
-		fprintf(stderr, "%s: base backup completed.\n", progname);
+		fprintf(stderr, "%s: base backup completed\n", progname);
 }
 
 
@@ -1009,12 +1003,6 @@ main(int argc, char **argv)
 				dbhost = xstrdup(optarg);
 				break;
 			case 'p':
-				if (atoi(optarg) <= 0)
-				{
-					fprintf(stderr, _("%s: invalid port number \"%s\"\n"),
-							progname, optarg);
-					exit(1);
-				}
 				dbport = xstrdup(optarg);
 				break;
 			case 'U':

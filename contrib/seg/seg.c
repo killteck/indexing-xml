@@ -356,7 +356,7 @@ gseg_picksplit(GistEntryVector *entryvec,
 	{
 		seg = (SEG *) DatumGetPointer(entryvec->vector[i].key);
 		/* center calculation is done this way to avoid possible overflow */
-		sort_items[i - 1].center = seg->lower*0.5f + seg->upper*0.5f;
+		sort_items[i - 1].center = seg->lower * 0.5f + seg->upper * 0.5f;
 		sort_items[i - 1].index = i;
 		sort_items[i - 1].data = seg;
 	}
@@ -867,7 +867,6 @@ restore(char *result, float val, int n)
 		'0', '0', '0', '0', '\0'
 	};
 	char	   *p;
-	char	   *mant;
 	int			exp;
 	int			i,
 				dp,
@@ -893,7 +892,7 @@ restore(char *result, float val, int n)
 	*p = '\0';
 
 	/* get the exponent */
-	mant = (char *) strtok(strdup(result), "e");
+	strtok(strdup(result), "e");
 	exp = atoi(strtok(NULL, "e"));
 
 	if (exp == 0)

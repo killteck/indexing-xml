@@ -33,14 +33,14 @@ extern char *localized_abbrev_months[];
 extern char *localized_full_months[];
 
 
-extern const char *locale_messages_assign(const char *value,
-					   bool doit, GucSource source);
-extern const char *locale_monetary_assign(const char *value,
-					   bool doit, GucSource source);
-extern const char *locale_numeric_assign(const char *value,
-					  bool doit, GucSource source);
-extern const char *locale_time_assign(const char *value,
-				   bool doit, GucSource source);
+extern bool check_locale_messages(char **newval, void **extra, GucSource source);
+extern void assign_locale_messages(const char *newval, void *extra);
+extern bool check_locale_monetary(char **newval, void **extra, GucSource source);
+extern void assign_locale_monetary(const char *newval, void *extra);
+extern bool check_locale_numeric(char **newval, void **extra, GucSource source);
+extern void assign_locale_numeric(const char *newval, void *extra);
+extern bool check_locale_time(char **newval, void **extra, GucSource source);
+extern void assign_locale_time(const char *newval, void *extra);
 
 extern bool check_locale(int category, const char *locale);
 extern char *pg_perm_setlocale(int category, const char *locale);
@@ -71,5 +71,13 @@ typedef int pg_locale_t;
 #endif
 
 extern pg_locale_t pg_newlocale_from_collation(Oid collid);
+
+/* These functions convert from/to libc's wchar_t, *not* pg_wchar_t */
+#ifdef USE_WIDE_UPPER_LOWER
+extern size_t wchar2char(char *to, const wchar_t *from, size_t tolen,
+		   pg_locale_t locale);
+extern size_t char2wchar(wchar_t *to, size_t tolen,
+		   const char *from, size_t fromlen, pg_locale_t locale);
+#endif
 
 #endif   /* _PG_LOCALE_ */

@@ -21,7 +21,6 @@
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
 #include "storage/pmsignal.h"
-#include "storage/predicate.h"
 #include "storage/proc.h"
 #include "utils/builtins.h"
 #include "utils/syscache.h"
@@ -161,10 +160,6 @@ GetNewTransactionId(bool isSubXact)
 	 */
 	ExtendCLOG(xid);
 	ExtendSUBTRANS(xid);
-
-	/* If it's top level, the predicate locking system also needs to know. */
-	if (!isSubXact)
-		RegisterPredicateLockingXid(xid);
 
 	/*
 	 * Now advance the nextXid counter.  This must not happen until after we
@@ -355,9 +350,9 @@ SetTransactionIdLimit(TransactionId oldest_datfrozenxid, Oid oldest_datoid)
 		char	   *oldest_datname;
 
 		/*
-		 * We can be called when not inside a transaction, for example
-		 * during StartupXLOG().  In such a case we cannot do database
-		 * access, so we must just report the oldest DB's OID.
+		 * We can be called when not inside a transaction, for example during
+		 * StartupXLOG().  In such a case we cannot do database access, so we
+		 * must just report the oldest DB's OID.
 		 *
 		 * Note: it's also possible that get_database_name fails and returns
 		 * NULL, for example because the database just got dropped.  We'll

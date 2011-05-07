@@ -188,9 +188,10 @@ protocol to make nodes agree on a serializable transactional order.
     <para>
      With statement-based replication middleware, a program intercepts
      every SQL query and sends it to one or all servers.  Each server
-     operates independently.  Read-write queries are sent to all servers,
-     while read-only queries can be sent to just one server, allowing
-     the read workload to be distributed.
+     operates independently.  Read-write queries must be sent to all servers,
+     so that every server receives any changes.  But read-only queries can be
+     sent to just one server, allowing the read workload to be distributed
+     among them.
     </para>
 
     <para>
@@ -209,8 +210,8 @@ protocol to make nodes agree on a serializable transactional order.
      transactions either commit or abort on all servers, perhaps
      using two-phase commit (<xref linkend="sql-prepare-transaction">
      and <xref linkend="sql-commit-prepared">.
-     <productname>Pgpool-II</> and <productname>Sequoia</> are examples of
-     this type of replication.
+     <productname>Pgpool-II</> and <productname>Continuent Tungsten</>
+     are examples of this type of replication.
     </para>
    </listitem>
   </varlistentry>
@@ -486,7 +487,7 @@ protocol to make nodes agree on a serializable transactional order.
   <para>
    Directly moving WAL records from one database server to another
    is typically described as log shipping. <productname>PostgreSQL</>
-   implements file-based log shipping by transfering WAL records
+   implements file-based log shipping by transferring WAL records
    one file (WAL segment) at a time. WAL files (16MB) can be
    shipped easily and cheaply over any distance, whether it be to an
    adjacent system, another system at the same site, or another system on
@@ -873,7 +874,7 @@ primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
      might indicate that the master server is under heavy load, while
      differences between <literal>sent_location</> and 
      <function>pg_last_xlog_receive_location</> on the standby might indicate
-     network delay, or that the the standby is under heavy load.
+     network delay, or that the standby is under heavy load.
     </para>
    </sect3>
 
@@ -929,47 +930,39 @@ primary_conninfo = 'host=192.168.1.50 port=5432 user=foo password=foopass'
     <title>Basic Configuration</title>
 
    <para>
-    All parameters have useful default values, so we can enable
-    synchronous replication easily just by setting this on the primary:
-
-<programlisting>
-synchronous_replication = on
-</programlisting>
-
-    When <varname>synchronous_replication</> is set, a commit will wait
-    for confirmation that the standby has received the commit record,
-    even if that takes a very long time.
-    <varname>synchronous_replication</> can be set by individual
+    Once streaming replication has been configured, configuring synchronous
+    replication requires only one additional configuration step:
+    <xref linkend="guc-synchronous-standby-names"> must be set to
+    a non-empty value.  <varname>synchronous_commit</> must also be set to
+    <literal>on</>, but since this is the default value, typically no change is
+    required.  This configuration will cause each commit to wait for
+    confirmation that the standby has written the commit record to durable
+    storage, even if that takes a very long time.
+    <varname>synchronous_commit</> can be set by individual
     users, so can be configured in the configuration file, for particular
-    users or databases, or dynamically by applications.
+    users or databases, or dynamically by applications, in order to control
+    the durability guarantee on a per-transaction basis.
    </para>
 
    <para>
-    After a commit record has been written to disk on the primary the
+    After a commit record has been written to disk on the primary, the
     WAL record is then sent to the standby. The standby sends reply
-    messages each time a new batch of WAL data is received, unless
+    messages each time a new batch of WAL data is written to disk, unless
     <varname>wal_receiver_status_interval</> is set to zero on the standby.
     If the standby is the first matching standby, as specified in
     <varname>synchronous_standby_names</> on the primary, the reply
     messages from that standby will be used to wake users waiting for
-    confirmation the commit record has been received. These parameters
+    confirmation that the commit record has been received. These parameters
     allow the administrator to specify which standby servers should be
     synchronous standbys. Note that the configuration of synchronous
     replication is mainly on the master.
    </para>
 
    <para>
-    Users will stop waiting if a fast shutdown is requested, though the
-    server does not fully shutdown until all outstanding WAL records are
-    transferred to standby servers.
-   </para>
-
-   <para>
-    Note also that <varname>synchronous_commit</> is used when the user
-    specifies <varname>synchronous_replication</>, overriding even an
-    explicit setting of <varname>synchronous_commit</> to <literal>off</>.
-    This is because we must write WAL to disk on primary before we replicate
-    to ensure the standby never gets ahead of the primary.
+    Users will stop waiting if a fast shutdown is requested.  However, as
+    when using asynchronous replication, the server will does not fully
+    shutdown until all outstanding WAL records are transferred to the currently
+    connected standby servers.
    </para>
 
    </sect3>
@@ -1002,10 +995,10 @@ synchronous_replication = on
 
    <para>
     With synchronous replication options specified at the application level
-    (on the primary) we can offer sync rep for the most important changes,
-    without slowing down the bulk of the total workload. Application level
-    options are an important and practical tool for allowing the benefits of
-    synchronous replication for high performance applications.
+    (on the primary) we can offer synchronous replication for the most
+    important changes, without slowing down the bulk of the total workload.
+    Application level options are an important and practical tool for allowing
+    the benefits of synchronous replication for high performance applications.
    </para>
 
    <para>
@@ -1019,9 +1012,9 @@ synchronous_replication = on
     <title>Planning for High Availability</title>
 
    <para>
-    Commits made when synchronous_replication is set will wait until
-    the sync standby responds. The response may never occur if the last,
-    or only, standby should crash.
+    Commits made when <varname>synchronous_commit</> is set to <literal>on</>
+    will wait until the sync standby responds. The response may never occur
+    if the last, or only, standby should crash.
    </para>
 
    <para>
@@ -1029,7 +1022,7 @@ synchronous_replication = on
     your last remaining sync standby. This can be achieved by naming multiple
     potential synchronous standbys using <varname>synchronous_standby_names</>.
     The first named standby will be used as the synchronous standby. Standbys
-    listed after this will takeover the role of synchronous standby if the
+    listed after this will take over the role of synchronous standby if the
     first one should fail.
    </para>
 
@@ -1039,7 +1032,7 @@ synchronous_replication = on
     the lag between standby and primary reaches zero for the first time
     we move to real-time <literal>STREAMING</> state.
     The catch-up duration may be long immediately after the standby has
-    been created. If the standby is shutdown, then the catch-up period
+    been created. If the standby is shut down, then the catch-up period
     will increase according to the length of time the standby has been down.
     The standby is only able to become a synchronous standby
     once it has reached <literal>STREAMING</> state.
@@ -1060,20 +1053,21 @@ synchronous_replication = on
 
    <para>
     If you really do lose your last standby server then you should disable
-    <varname>synchronous_standby_names</> and restart the primary server.
+    <varname>synchronous_standby_names</> and reload the configuration file
+    on the primary server.
    </para>
 
    <para>
-    If the primary is isolated from remaining standby severs you should
-    failover to the best candidate of those other remaining standby servers.
+    If the primary is isolated from remaining standby servers you should
+    fail over to the best candidate of those other remaining standby servers.
    </para>
 
    <para>
     If you need to re-create a standby server while transactions are
     waiting, make sure that the commands to run pg_start_backup() and
     pg_stop_backup() are run in a session with
-    synchronous_replication = off, otherwise those requests will wait
-    forever for the standby to appear.
+    <varname>synchronous_commit</> = <literal>off</>, otherwise those
+    requests will wait forever for the standby to appear.
    </para>
 
    </sect3>
@@ -1130,7 +1124,7 @@ synchronous_replication = on
     and might stay down.  To return to normal operation, a standby server
     must be recreated,
     either on the former primary system when it comes up, or on a third,
-    possibly new, system. Once complete the primary and standby can be
+    possibly new, system. Once complete, the primary and standby can be
     considered to have switched roles. Some people choose to use a third
     server to provide backup for the new primary until the new standby
     server is recreated,
@@ -1155,8 +1149,7 @@ synchronous_replication = on
     <command>pg_ctl promote</> to fail over, <varname>trigger_file</> is
     not required. If you're setting up the reporting servers that are
     only used to offload read-only queries from the primary, not for high
-    availability purposes, you don't need to exit recovery in the standby
-    and promote it to a master.
+    availability purposes, you don't need to promote it.
    </para>
   </sect1>
 

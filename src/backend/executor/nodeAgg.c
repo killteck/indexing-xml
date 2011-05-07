@@ -130,6 +130,9 @@ typedef struct AggStatePerAggData
 	FmgrInfo	transfn;
 	FmgrInfo	finalfn;
 
+	/* Input collation derived for aggregate */
+	Oid			aggCollation;
+
 	/* number of sorting columns */
 	int			numSortCols;
 
@@ -199,7 +202,7 @@ typedef struct AggStatePerAggData
 	 */
 
 	Tuplesortstate *sortstate;	/* sort object, if DISTINCT or ORDER BY */
-} AggStatePerAggData;
+}	AggStatePerAggData;
 
 /*
  * AggStatePerGroupData - per-aggregate-per-group working state
@@ -246,7 +249,7 @@ typedef struct AggHashEntryData
 	TupleHashEntryData shared;	/* common header for hash table entries */
 	/* per-aggregate transition status array - must be last! */
 	AggStatePerGroupData pergroup[1];	/* VARIABLE LENGTH ARRAY */
-} AggHashEntryData;				/* VARIABLE LENGTH STRUCT */
+}	AggHashEntryData;	/* VARIABLE LENGTH STRUCT */
 
 
 static void initialize_aggregates(AggState *aggstate,
@@ -430,6 +433,7 @@ advance_transition_function(AggState *aggstate,
 	 */
 	InitFunctionCallInfoData(*fcinfo, &(peraggstate->transfn),
 							 numArguments + 1,
+							 peraggstate->aggCollation,
 							 (void *) aggstate, NULL);
 	fcinfo->arg[0] = pergroupstate->transValue;
 	fcinfo->argnull[0] = pergroupstate->transValueIsNull;
@@ -597,6 +601,8 @@ process_ordered_aggregate_single(AggState *aggstate,
 
 		/*
 		 * If DISTINCT mode, and not distinct from prior, skip it.
+		 *
+		 * Note: we assume equality functions don't care about collation.
 		 */
 		if (isDistinct &&
 			haveOldVal &&
@@ -737,6 +743,7 @@ finalize_aggregate(AggState *aggstate,
 		FunctionCallInfoData fcinfo;
 
 		InitFunctionCallInfoData(fcinfo, &(peraggstate->finalfn), 1,
+								 peraggstate->aggCollation,
 								 (void *) aggstate, NULL);
 		fcinfo.arg[0] = pergroupstate->transValue;
 		fcinfo.argnull[0] = pergroupstate->transValueIsNull;
@@ -827,7 +834,7 @@ build_hash_table(AggState *aggstate)
 	Assert(node->numGroups > 0);
 
 	entrysize = sizeof(AggHashEntryData) +
-		(aggstate->numaggs - 1) *sizeof(AggStatePerGroupData);
+		(aggstate->numaggs - 1) * sizeof(AggStatePerGroupData);
 
 	aggstate->hashtable = BuildTupleHashTable(node->numCols,
 											  node->grpColIdx,
@@ -899,7 +906,7 @@ hash_agg_entry_size(int numAggs)
 
 	/* This must match build_hash_table */
 	entrysize = sizeof(AggHashEntryData) +
-		(numAggs - 1) *sizeof(AggStatePerGroupData);
+		(numAggs - 1) * sizeof(AggStatePerGroupData);
 	entrysize = MAXALIGN(entrysize);
 	/* Account for hashtable overhead (assuming fill factor = 1) */
 	entrysize += 3 * sizeof(void *);
@@ -1669,20 +1676,22 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 								numArguments,
 								aggtranstype,
 								aggref->aggtype,
+								aggref->inputcollid,
 								transfn_oid,
 								finalfn_oid,
-								aggref->collid,
 								&transfnexpr,
 								&finalfnexpr);
 
 		fmgr_info(transfn_oid, &peraggstate->transfn);
-		fmgr_info_expr((Node *) transfnexpr, &peraggstate->transfn);
+		fmgr_info_set_expr((Node *) transfnexpr, &peraggstate->transfn);
 
 		if (OidIsValid(finalfn_oid))
 		{
 			fmgr_info(finalfn_oid, &peraggstate->finalfn);
-			fmgr_info_expr((Node *) finalfnexpr, &peraggstate->finalfn);
+			fmgr_info_set_expr((Node *) finalfnexpr, &peraggstate->finalfn);
 		}
+
+		peraggstate->aggCollation = aggref->inputcollid;
 
 		get_typlenbyval(aggref->aggtype,
 						&peraggstate->resulttypeLen,

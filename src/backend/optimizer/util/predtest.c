@@ -906,6 +906,8 @@ arrayconst_startup_fn(Node *clause, PredIterInfo info)
 	state->opexpr.opfuncid = saop->opfuncid;
 	state->opexpr.opresulttype = BOOLOID;
 	state->opexpr.opretset = false;
+	state->opexpr.opcollid = InvalidOid;
+	state->opexpr.inputcollid = saop->inputcollid;
 	state->opexpr.args = list_copy(saop->args);
 
 	/* Set up a dummy Const node to hold the per-element values */
@@ -972,6 +974,8 @@ arrayexpr_startup_fn(Node *clause, PredIterInfo info)
 	state->opexpr.opfuncid = saop->opfuncid;
 	state->opexpr.opresulttype = BOOLOID;
 	state->opexpr.opretset = false;
+	state->opexpr.opcollid = InvalidOid;
+	state->opexpr.inputcollid = saop->inputcollid;
 	state->opexpr.args = list_copy(saop->args);
 
 	/* Initialize iteration variable to first member of ArrayExpr */
@@ -1345,6 +1349,8 @@ btree_predicate_proof(Expr *predicate, Node *clause, bool refute_it)
 			   *clause_const;
 	bool		pred_var_on_left,
 				clause_var_on_left;
+	Oid			pred_collation,
+				clause_collation;
 	Oid			pred_op,
 				clause_op,
 				test_op;
@@ -1421,6 +1427,14 @@ btree_predicate_proof(Expr *predicate, Node *clause, bool refute_it)
 		return false;
 
 	/*
+	 * They'd better have the same collation, too.
+	 */
+	pred_collation = ((OpExpr *) predicate)->inputcollid;
+	clause_collation = ((OpExpr *) clause)->inputcollid;
+	if (pred_collation != clause_collation)
+		return false;
+
+	/*
 	 * Okay, get the operators in the two clauses we're comparing. Commute
 	 * them if needed so that we can assume the variables are on the left.
 	 */
@@ -1465,7 +1479,9 @@ btree_predicate_proof(Expr *predicate, Node *clause, bool refute_it)
 							  BOOLOID,
 							  false,
 							  (Expr *) pred_const,
-							  (Expr *) clause_const);
+							  (Expr *) clause_const,
+							  InvalidOid,
+							  pred_collation);
 
 	/* Fill in opfuncids */
 	fix_opfuncids((Node *) test_expr);
@@ -1680,7 +1696,7 @@ get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it)
 		else if (OidIsValid(clause_op_negator))
 		{
 			clause_tuple = SearchSysCache3(AMOPOPID,
-										   ObjectIdGetDatum(clause_op_negator),
+										 ObjectIdGetDatum(clause_op_negator),
 										   CharGetDatum(AMOP_SEARCH),
 										   ObjectIdGetDatum(opfamily_id));
 			if (HeapTupleIsValid(clause_tuple))

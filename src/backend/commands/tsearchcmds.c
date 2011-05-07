@@ -96,6 +96,11 @@ get_ts_parser_func(DefElem *defel, int attnum)
 			break;
 		case Anum_pg_ts_parser_prslextype:
 			nargs = 1;
+			/*
+			 * Note: because the lextype method returns type internal, it must
+			 * have an internal-type argument for security reasons.  The
+			 * argument is not actually used, but is just passed as a zero.
+			 */
 			break;
 		default:
 			/* should not be here */
@@ -407,7 +412,8 @@ RenameTSParser(List *oldname, const char *newname)
 void
 AlterTSParserNamespace(List *name, const char *newschema)
 {
-	Oid			prsId, nspOid;
+	Oid			prsId,
+				nspOid;
 	Relation	rel;
 
 	rel = heap_open(TSParserRelationId, RowExclusiveLock);
@@ -429,7 +435,7 @@ AlterTSParserNamespace(List *name, const char *newschema)
 Oid
 AlterTSParserNamespace_oid(Oid prsId, Oid newNspOid)
 {
-	Oid         oldNspOid;
+	Oid			oldNspOid;
 	Relation	rel;
 
 	rel = heap_open(TSParserRelationId, RowExclusiveLock);
@@ -685,7 +691,8 @@ RenameTSDictionary(List *oldname, const char *newname)
 void
 AlterTSDictionaryNamespace(List *name, const char *newschema)
 {
-	Oid			dictId, nspOid;
+	Oid			dictId,
+				nspOid;
 	Relation	rel;
 
 	rel = heap_open(TSDictionaryRelationId, RowExclusiveLock);
@@ -708,7 +715,7 @@ AlterTSDictionaryNamespace(List *name, const char *newschema)
 Oid
 AlterTSDictionaryNamespace_oid(Oid dictId, Oid newNspOid)
 {
-	Oid         oldNspOid;
+	Oid			oldNspOid;
 	Relation	rel;
 
 	rel = heap_open(TSDictionaryRelationId, RowExclusiveLock);
@@ -1218,7 +1225,8 @@ RenameTSTemplate(List *oldname, const char *newname)
 void
 AlterTSTemplateNamespace(List *name, const char *newschema)
 {
-	Oid			tmplId, nspOid;
+	Oid			tmplId,
+				nspOid;
 	Relation	rel;
 
 	rel = heap_open(TSTemplateRelationId, RowExclusiveLock);
@@ -1240,7 +1248,7 @@ AlterTSTemplateNamespace(List *name, const char *newschema)
 Oid
 AlterTSTemplateNamespace_oid(Oid tmplId, Oid newNspOid)
 {
-	Oid         oldNspOid;
+	Oid			oldNspOid;
 	Relation	rel;
 
 	rel = heap_open(TSTemplateRelationId, RowExclusiveLock);
@@ -1668,7 +1676,8 @@ RenameTSConfiguration(List *oldname, const char *newname)
 void
 AlterTSConfigurationNamespace(List *name, const char *newschema)
 {
-	Oid			cfgId, nspOid;
+	Oid			cfgId,
+				nspOid;
 	Relation	rel;
 
 	rel = heap_open(TSConfigRelationId, RowExclusiveLock);
@@ -1691,7 +1700,7 @@ AlterTSConfigurationNamespace(List *name, const char *newschema)
 Oid
 AlterTSConfigurationNamespace_oid(Oid cfgId, Oid newNspOid)
 {
-	Oid         oldNspOid;
+	Oid			oldNspOid;
 	Relation	rel;
 
 	rel = heap_open(TSConfigRelationId, RowExclusiveLock);
@@ -1943,7 +1952,7 @@ getTokenTypes(Oid prsId, List *tokennames)
 		elog(ERROR, "method lextype isn't defined for text search parser %u",
 			 prsId);
 
-	/* OidFunctionCall0 is absent */
+	/* lextype takes one dummy argument */
 	list = (LexDescr *) DatumGetPointer(OidFunctionCall1(prs->lextypeOid,
 														 (Datum) 0));
 
@@ -2152,14 +2161,12 @@ DropConfigurationMapping(AlterTSConfigurationStmt *stmt,
 	HeapTuple	maptup;
 	int			i;
 	Oid			prsId;
-	int		   *tokens,
-				ntoken;
+	int		   *tokens;
 	ListCell   *c;
 
 	prsId = ((Form_pg_ts_config) GETSTRUCT(tup))->cfgparser;
 
 	tokens = getTokenTypes(prsId, stmt->tokentype);
-	ntoken = list_length(stmt->tokentype);
 
 	i = 0;
 	foreach(c, stmt->tokentype)

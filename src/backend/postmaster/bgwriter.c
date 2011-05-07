@@ -55,6 +55,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
+#include "replication/syncrep.h"
 #include "storage/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
@@ -363,6 +364,9 @@ BackgroundWriterMain(void)
 	if (RecoveryInProgress())
 		ThisTimeLineID = GetRecoveryTargetTLI();
 
+	/* Do this once before starting the loop, then just at SIGHUP time. */
+	SyncRepUpdateSyncStandbysDefined();
+
 	/*
 	 * Loop forever
 	 */
@@ -389,6 +393,8 @@ BackgroundWriterMain(void)
 		{
 			got_SIGHUP = false;
 			ProcessConfigFile(PGC_SIGHUP);
+			/* update global shmem state for sync rep */
+			SyncRepUpdateSyncStandbysDefined();
 		}
 		if (checkpoint_requested)
 		{
@@ -704,6 +710,8 @@ CheckpointWriteDelay(int flags, double progress)
 		{
 			got_SIGHUP = false;
 			ProcessConfigFile(PGC_SIGHUP);
+			/* update global shmem state for sync rep */
+			SyncRepUpdateSyncStandbysDefined();
 		}
 
 		AbsorbFsyncRequests();
@@ -1069,7 +1077,7 @@ RequestCheckpoint(int flags)
  * to the requests[] queue without checking for duplicates.  The bgwriter
  * will have to eliminate dups internally anyway.  However, if we discover
  * that the queue is full, we make a pass over the entire queue to compact
- * it.  This is somewhat expensive, but the alternative is for the backend
+ * it.	This is somewhat expensive, but the alternative is for the backend
  * to perform its own fsync, which is far more expensive in practice.  It
  * is theoretically possible a backend fsync might still be necessary, if
  * the queue is full and contains no duplicate entries.  In that case, we
@@ -1094,13 +1102,13 @@ ForwardFsyncRequest(RelFileNodeBackend rnode, ForkNumber forknum,
 
 	/*
 	 * If the background writer isn't running or the request queue is full,
-	 * the backend will have to perform its own fsync request.  But before
+	 * the backend will have to perform its own fsync request.	But before
 	 * forcing that to happen, we can try to compact the background writer
 	 * request queue.
 	 */
 	if (BgWriterShmem->bgwriter_pid == 0 ||
 		(BgWriterShmem->num_requests >= BgWriterShmem->max_requests
-		&& !CompactBgwriterRequestQueue()))
+		 && !CompactBgwriterRequestQueue()))
 	{
 		/*
 		 * Count the subset of writes where backends have to do their own
@@ -1120,12 +1128,12 @@ ForwardFsyncRequest(RelFileNodeBackend rnode, ForkNumber forknum,
 
 /*
  * CompactBgwriterRequestQueue
- * 		Remove duplicates from the request queue to avoid backend fsyncs.
+ *		Remove duplicates from the request queue to avoid backend fsyncs.
  *
  * Although a full fsync request queue is not common, it can lead to severe
  * performance problems when it does happen.  So far, this situation has
  * only been observed to occur when the system is under heavy write load,
- * and especially during the "sync" phase of a checkpoint.  Without this
+ * and especially during the "sync" phase of a checkpoint.	Without this
  * logic, each backend begins doing an fsync for every block written, which
  * gets very expensive and can slow down the whole system.
  *
@@ -1136,9 +1144,10 @@ ForwardFsyncRequest(RelFileNodeBackend rnode, ForkNumber forknum,
 static bool
 CompactBgwriterRequestQueue()
 {
-	struct BgWriterSlotMapping {
-		BgWriterRequest	request;
-		int		slot;
+	struct BgWriterSlotMapping
+	{
+		BgWriterRequest request;
+		int			slot;
 	};
 
 	int			n,
@@ -1164,7 +1173,7 @@ CompactBgwriterRequestQueue()
 	/* Initialize skip_slot array */
 	skip_slot = palloc0(sizeof(bool) * BgWriterShmem->num_requests);
 
-	/* 
+	/*
 	 * The basic idea here is that a request can be skipped if it's followed
 	 * by a later, identical request.  It might seem more sensible to work
 	 * backwards from the end of the queue and check whether a request is
@@ -1181,7 +1190,7 @@ CompactBgwriterRequestQueue()
 	{
 		BgWriterRequest *request;
 		struct BgWriterSlotMapping *slotmap;
-		bool	found;
+		bool		found;
 
 		request = &BgWriterShmem->requests[n];
 		slotmap = hash_search(htab, request, HASH_ENTER, &found);
@@ -1211,8 +1220,8 @@ CompactBgwriterRequestQueue()
 		BgWriterShmem->requests[preserve_count++] = BgWriterShmem->requests[n];
 	}
 	ereport(DEBUG1,
-			(errmsg("compacted fsync request queue from %d entries to %d entries",
-				BgWriterShmem->num_requests, preserve_count)));
+	   (errmsg("compacted fsync request queue from %d entries to %d entries",
+			   BgWriterShmem->num_requests, preserve_count)));
 	BgWriterShmem->num_requests = preserve_count;
 
 	/* Cleanup. */

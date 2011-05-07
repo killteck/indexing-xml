@@ -95,7 +95,7 @@ static void compute_index_stats(Relation onerel, double totalrows,
 					HeapTuple *rows, int numrows,
 					MemoryContext col_context);
 static VacAttrStats *examine_attribute(Relation onerel, int attnum,
-									   Node *index_expr);
+				  Node *index_expr);
 static int acquire_sample_rows(Relation onerel, HeapTuple *rows,
 					int targrows, double *totalrows, double *totaldeadrows);
 static double random_fract(void);
@@ -160,8 +160,8 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt,
 		if (IsAutoVacuumWorkerProcess() && Log_autovacuum_min_duration >= 0)
 			ereport(LOG,
 					(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-					 errmsg("skipping analyze of \"%s\" --- lock not available",
-						vacstmt->relation->relname)));
+				  errmsg("skipping analyze of \"%s\" --- lock not available",
+						 vacstmt->relation->relname)));
 	}
 	if (!onerel)
 		return;
@@ -853,10 +853,10 @@ examine_attribute(Relation onerel, int attnum, Node *index_expr)
 	/*
 	 * When analyzing an expression index, believe the expression tree's type
 	 * not the column datatype --- the latter might be the opckeytype storage
-	 * type of the opclass, which is not interesting for our purposes.  (Note:
+	 * type of the opclass, which is not interesting for our purposes.	(Note:
 	 * if we did anything with non-expression index columns, we'd need to
 	 * figure out where to get the correct type info from, but for now that's
-	 * not a problem.)  It's not clear whether anyone will care about the
+	 * not a problem.)	It's not clear whether anyone will care about the
 	 * typmod, but we store that too just in case.
 	 */
 	if (index_expr)
@@ -1930,8 +1930,6 @@ compute_minimal_stats(VacAttrStatsP stats,
 	track_cnt = 0;
 
 	fmgr_info(mystats->eqfunc, &f_cmpeq);
-	/* We always use the default collation for statistics */
-	fmgr_info_collation(DEFAULT_COLLATION_OID, &f_cmpeq);
 
 	for (i = 0; i < samplerows; i++)
 	{
@@ -1990,7 +1988,10 @@ compute_minimal_stats(VacAttrStatsP stats,
 		firstcount1 = track_cnt;
 		for (j = 0; j < track_cnt; j++)
 		{
-			if (DatumGetBool(FunctionCall2(&f_cmpeq, value, track[j].value)))
+			/* We always use the default collation for statistics */
+			if (DatumGetBool(FunctionCall2Coll(&f_cmpeq,
+											   DEFAULT_COLLATION_OID,
+											   value, track[j].value)))
 			{
 				match = true;
 				break;
@@ -2253,8 +2254,6 @@ compute_scalar_stats(VacAttrStatsP stats,
 
 	SelectSortFunction(mystats->ltopr, false, &cmpFn, &cmpFlags);
 	fmgr_info(cmpFn, &f_cmpfn);
-	/* We always use the default collation for statistics */
-	fmgr_info_collation(DEFAULT_COLLATION_OID, &f_cmpfn);
 
 	/* Initial scan to find sortable values */
 	for (i = 0; i < samplerows; i++)
@@ -2729,7 +2728,9 @@ compare_scalars(const void *a, const void *b, void *arg)
 	CompareScalarsContext *cxt = (CompareScalarsContext *) arg;
 	int32		compare;
 
+	/* We always use the default collation for statistics */
 	compare = ApplySortFunction(cxt->cmpFn, cxt->cmpFlags,
+								DEFAULT_COLLATION_OID,
 								da, false, db, false);
 	if (compare != 0)
 		return compare;

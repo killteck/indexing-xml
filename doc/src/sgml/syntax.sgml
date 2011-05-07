@@ -189,9 +189,13 @@ UPDATE "my_table" SET "a" = 5;
     ampersands.  The length limitation still applies.
    </para>
 
+   <indexterm>
+     <primary>Unicode escape</primary>
+     <secondary>in identifiers</secondary>
+   </indexterm>
+
    <para>
-    <indexterm><primary>Unicode escape</primary><secondary>in
-    identifiers</secondary></indexterm> A variant of quoted
+    A variant of quoted
     identifiers allows including escaped Unicode characters identified
     by their code points.  This variant starts
     with <literal>U&amp;</literal> (upper or lower case U followed by
@@ -968,7 +972,7 @@ CAST ( '<replaceable>string</replaceable>' AS <replaceable>type</replaceable> )
   </sect2>
 
   <sect2 id="sql-precedence">
-   <title>Lexical Precedence</title>
+   <title>Operator Precedence</title>
 
    <indexterm zone="sql-precedence">
     <primary>operator</primary>
@@ -1035,9 +1039,9 @@ SELECT (5 !) - 6;
       </row>
 
       <row>
-       <entry><token>-</token></entry>
+       <entry><token>+</token> <token>-</token></entry>
        <entry>right</entry>
-       <entry>unary minus</entry>
+       <entry>unary plus, unary minus</entry>
       </row>
 
       <row>
@@ -1061,7 +1065,7 @@ SELECT (5 !) - 6;
       <row>
        <entry><token>IS</token></entry>
        <entry></entry>
-       <entry><literal>IS TRUE</>, <literal>IS FALSE</>, <literal>IS UNKNOWN</>, <literal>IS NULL</></entry>
+       <entry><literal>IS TRUE</>, <literal>IS FALSE</>, <literal>IS NULL</>, etc</entry>
       </row>
 
       <row>
@@ -1412,7 +1416,7 @@ $1[10:42]
    </para>
   </sect2>
 
-  <sect2>
+  <sect2 id="field-selection">
    <title>Field Selection</title>
 
    <indexterm>

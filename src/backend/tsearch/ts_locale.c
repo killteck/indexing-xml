@@ -28,12 +28,13 @@ t_isdigit(const char *ptr)
 {
 	int			clen = pg_mblen(ptr);
 	wchar_t		character[2];
-	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
+	Oid			collation = DEFAULT_COLLATION_OID;		/* TODO */
+	pg_locale_t	mylocale = 0;	/* TODO */
 
 	if (clen == 1 || lc_ctype_is_c(collation))
 		return isdigit(TOUCHAR(ptr));
 
-	char2wchar(character, 2, ptr, clen, collation);
+	char2wchar(character, 2, ptr, clen, mylocale);
 
 	return iswdigit((wint_t) character[0]);
 }
@@ -43,12 +44,13 @@ t_isspace(const char *ptr)
 {
 	int			clen = pg_mblen(ptr);
 	wchar_t		character[2];
-	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
+	Oid			collation = DEFAULT_COLLATION_OID;		/* TODO */
+	pg_locale_t	mylocale = 0;	/* TODO */
 
 	if (clen == 1 || lc_ctype_is_c(collation))
 		return isspace(TOUCHAR(ptr));
 
-	char2wchar(character, 2, ptr, clen, collation);
+	char2wchar(character, 2, ptr, clen, mylocale);
 
 	return iswspace((wint_t) character[0]);
 }
@@ -58,12 +60,13 @@ t_isalpha(const char *ptr)
 {
 	int			clen = pg_mblen(ptr);
 	wchar_t		character[2];
-	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
+	Oid			collation = DEFAULT_COLLATION_OID;		/* TODO */
+	pg_locale_t	mylocale = 0;	/* TODO */
 
 	if (clen == 1 || lc_ctype_is_c(collation))
 		return isalpha(TOUCHAR(ptr));
 
-	char2wchar(character, 2, ptr, clen, collation);
+	char2wchar(character, 2, ptr, clen, mylocale);
 
 	return iswalpha((wint_t) character[0]);
 }
@@ -73,12 +76,13 @@ t_isprint(const char *ptr)
 {
 	int			clen = pg_mblen(ptr);
 	wchar_t		character[2];
-	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
+	Oid			collation = DEFAULT_COLLATION_OID;		/* TODO */
+	pg_locale_t	mylocale = 0;	/* TODO */
 
 	if (clen == 1 || lc_ctype_is_c(collation))
 		return isprint(TOUCHAR(ptr));
 
-	char2wchar(character, 2, ptr, clen, collation);
+	char2wchar(character, 2, ptr, clen, mylocale);
 
 	return iswprint((wint_t) character[0]);
 }
@@ -243,8 +247,10 @@ char *
 lowerstr_with_len(const char *str, int len)
 {
 	char	   *out;
+
 #ifdef USE_WIDE_UPPER_LOWER
-	Oid			collation = DEFAULT_COLLATION_OID; /*TODO*/
+	Oid			collation = DEFAULT_COLLATION_OID;		/* TODO */
+	pg_locale_t	mylocale = 0;	/* TODO */
 #endif
 
 	if (len == 0)
@@ -271,7 +277,7 @@ lowerstr_with_len(const char *str, int len)
 		 */
 		wptr = wstr = (wchar_t *) palloc(sizeof(wchar_t) * (len + 1));
 
-		wlen = char2wchar(wstr, len + 1, str, len, collation);
+		wlen = char2wchar(wstr, len + 1, str, len, mylocale);
 		Assert(wlen <= len);
 
 		while (*wptr)
@@ -286,7 +292,7 @@ lowerstr_with_len(const char *str, int len)
 		len = pg_database_encoding_max_length() * wlen + 1;
 		out = (char *) palloc(len);
 
-		wlen = wchar2char(out, wstr, len, collation);
+		wlen = wchar2char(out, wstr, len, mylocale);
 
 		pfree(wstr);
 

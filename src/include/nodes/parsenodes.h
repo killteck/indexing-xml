@@ -148,7 +148,7 @@ typedef struct Query
 	Node	   *setOperations;	/* set-operation tree if this is top level of
 								 * a UNION/INTERSECT/EXCEPT query */
 
-	List	   *constraintDeps;	/* a list of pg_constraint OIDs that the query
+	List	   *constraintDeps; /* a list of pg_constraint OIDs that the query
 								 * depends on to be semantically valid */
 } Query;
 
@@ -724,19 +724,20 @@ typedef struct RangeTblEntry
 	 * Fields valid for a function RTE (else NULL):
 	 *
 	 * If the function returns RECORD, funccoltypes lists the column types
-	 * declared in the RTE's column type specification, funccoltypmods
-	 * lists their declared typmods, funccolcollations their collations.
-	 * Otherwise, those fields are NIL.
+	 * declared in the RTE's column type specification, funccoltypmods lists
+	 * their declared typmods, funccolcollations their collations.  Otherwise,
+	 * those fields are NIL.
 	 */
 	Node	   *funcexpr;		/* expression tree for func call */
 	List	   *funccoltypes;	/* OID list of column type OIDs */
 	List	   *funccoltypmods; /* integer list of column typmods */
-	List	   *funccolcollations; /* OID list of column collation OIDs */
+	List	   *funccolcollations;		/* OID list of column collation OIDs */
 
 	/*
 	 * Fields valid for a values RTE (else NIL):
 	 */
 	List	   *values_lists;	/* list of expression lists */
+	List	   *values_collations;		/* OID list of column collation OIDs */
 
 	/*
 	 * Fields valid for a CTE RTE (else NULL/zero):
@@ -746,7 +747,7 @@ typedef struct RangeTblEntry
 	bool		self_reference; /* is this a recursive self-reference? */
 	List	   *ctecoltypes;	/* OID list of column type OIDs */
 	List	   *ctecoltypmods;	/* integer list of column typmods */
-	List	   *ctecolcollations; /* OID list of column collation OIDs */
+	List	   *ctecolcollations;		/* OID list of column collation OIDs */
 
 	/*
 	 * Fields valid in all RTEs:
@@ -787,7 +788,12 @@ typedef struct RangeTblEntry
  *
  * In an ORDER BY item, all fields must be valid.  (The eqop isn't essential
  * here, but it's cheap to get it along with the sortop, and requiring it
- * to be valid eases comparisons to grouping items.)
+ * to be valid eases comparisons to grouping items.)  Note that this isn't
+ * actually enough information to determine an ordering: if the sortop is
+ * collation-sensitive, a collation OID is needed too.	We don't store the
+ * collation in SortGroupClause because it's not available at the time the
+ * parser builds the SortGroupClause; instead, consult the exposed collation
+ * of the referenced targetlist expression to find out what it is.
  *
  * In a grouping item, eqop must be valid.	If the eqop is a btree equality
  * operator, then sortop should be set to a compatible ordering operator.
@@ -909,7 +915,7 @@ typedef struct CommonTableExpr
 	List	   *ctecolnames;	/* list of output column names */
 	List	   *ctecoltypes;	/* OID list of output column type OIDs */
 	List	   *ctecoltypmods;	/* integer list of output column typmods */
-	List	   *ctecolcollations; /* OID list of column collation OIDs */
+	List	   *ctecolcollations;		/* OID list of column collation OIDs */
 } CommonTableExpr;
 
 /* Convenience macro to get the output tlist of a CTE's query */
@@ -1053,6 +1059,10 @@ typedef struct SelectStmt
  * can be coerced to the output column type.)  Also, if it's not UNION ALL,
  * information about the types' sort/group semantics is provided in the form
  * of a SortGroupClause list (same representation as, eg, DISTINCT).
+ * The resolved common column collations are provided too; but note that if
+ * it's not UNION ALL, it's okay for a column to not have a common collation,
+ * so a member of the colCollations list could be InvalidOid even though the
+ * column has a collatable type.
  * ----------------------
  */
 typedef struct SetOperationStmt
@@ -1093,7 +1103,7 @@ typedef struct SetOperationStmt
 typedef enum ObjectType
 {
 	OBJECT_AGGREGATE,
-	OBJECT_ATTRIBUTE,		/* type's attribute, when distinct from column */
+	OBJECT_ATTRIBUTE,			/* type's attribute, when distinct from column */
 	OBJECT_CAST,
 	OBJECT_COLUMN,
 	OBJECT_CONSTRAINT,
@@ -1164,6 +1174,7 @@ typedef struct AlterTableStmt
 typedef enum AlterTableType
 {
 	AT_AddColumn,				/* add column */
+	AT_AddColumnRecurse,		/* internal to commands/tablecmds.c */
 	AT_AddColumnToView,			/* implicitly via CREATE OR REPLACE VIEW */
 	AT_ColumnDefault,			/* alter column default */
 	AT_DropNotNull,				/* alter column drop not null */
@@ -1189,6 +1200,7 @@ typedef enum AlterTableType
 	AT_ClusterOn,				/* CLUSTER ON */
 	AT_DropCluster,				/* SET WITHOUT CLUSTER */
 	AT_AddOids,					/* SET WITH OIDS */
+	AT_AddOidsRecurse,			/* internal to commands/tablecmds.c */
 	AT_DropOids,				/* SET WITHOUT OIDS */
 	AT_SetTableSpace,			/* SET TABLESPACE */
 	AT_SetRelOptions,			/* SET (...) -- AM specific parameters */
@@ -1207,6 +1219,8 @@ typedef enum AlterTableType
 	AT_DisableRule,				/* DISABLE RULE name */
 	AT_AddInherit,				/* INHERIT parent */
 	AT_DropInherit,				/* NO INHERIT parent */
+	AT_AddOf,					/* OF <type_name> */
+	AT_DropOf,					/* NOT OF */
 	AT_GenericOptions,			/* OPTIONS (...) */
 } AlterTableType;
 
@@ -1268,7 +1282,6 @@ typedef enum GrantObjectType
 	ACL_OBJECT_DATABASE,		/* database */
 	ACL_OBJECT_FDW,				/* foreign-data wrapper */
 	ACL_OBJECT_FOREIGN_SERVER,	/* foreign server */
-	ACL_OBJECT_FOREIGN_TABLE,	/* foreign table */
 	ACL_OBJECT_FUNCTION,		/* function */
 	ACL_OBJECT_LANGUAGE,		/* procedural language */
 	ACL_OBJECT_LARGEOBJECT,		/* largeobject */
@@ -1531,6 +1544,7 @@ typedef struct Constraint
 	char		fk_upd_action;	/* ON UPDATE action */
 	char		fk_del_action;	/* ON DELETE action */
 	bool		skip_validation;	/* skip validation of existing rows? */
+	bool		initially_valid;	/* start the new constraint as valid */
 } Constraint;
 
 /* ----------------------
@@ -2028,7 +2042,7 @@ typedef struct FetchStmt
  *
  * This represents creation of an index and/or an associated constraint.
  * If indexOid isn't InvalidOid, we are not creating an index, just a
- * UNIQUE/PKEY constraint using an existing index.  isconstraint must always
+ * UNIQUE/PKEY constraint using an existing index.	isconstraint must always
  * be true in this case, and the fields describing the index properties are
  * empty.
  * ----------------------
@@ -2307,8 +2321,8 @@ typedef struct AlterEnumStmt
 	NodeTag		type;
 	List	   *typeName;		/* qualified name (list of Value strings) */
 	char	   *newVal;			/* new enum value's name */
-	char	   *newValNeighbor;	/* neighboring enum value, if specified */
-	bool	    newValIsAfter;	/* place new enum value after neighbor? */
+	char	   *newValNeighbor; /* neighboring enum value, if specified */
+	bool		newValIsAfter;	/* place new enum value after neighbor? */
 } AlterEnumStmt;
 
 /* ----------------------

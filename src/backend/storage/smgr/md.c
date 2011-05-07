@@ -901,13 +901,12 @@ void
 mdimmedsync(SMgrRelation reln, ForkNumber forknum)
 {
 	MdfdVec    *v;
-	BlockNumber curnblk;
 
 	/*
 	 * NOTE: mdnblocks makes sure we have opened all active segments, so that
 	 * fsync loop will get them all!
 	 */
-	curnblk = mdnblocks(reln, forknum);
+	mdnblocks(reln, forknum);
 
 	v = mdopen(reln, forknum, EXTENSION_FAIL);
 
@@ -938,7 +937,7 @@ mdsync(void)
 	int			processed = 0;
 	instr_time	sync_start,
 				sync_end,
-				sync_diff; 
+				sync_diff;
 	uint64		elapsed;
 	uint64		longest = 0;
 	uint64		total_elapsed = 0;
@@ -1094,7 +1093,7 @@ mdsync(void)
 				if (seg != NULL &&
 					FileSync(seg->mdfd_vfd) >= 0)
 				{
-					if (log_checkpoints && (! INSTR_TIME_IS_ZERO(sync_start)))
+					if (log_checkpoints && (!INSTR_TIME_IS_ZERO(sync_start)))
 					{
 						INSTR_TIME_SET_CURRENT(sync_end);
 						sync_diff = sync_end;
@@ -1104,8 +1103,8 @@ mdsync(void)
 							longest = elapsed;
 						total_elapsed += elapsed;
 						processed++;
-						elog(DEBUG1, "checkpoint sync: number=%d file=%s time=%.3f msec", 
-							processed, FilePathName(seg->mdfd_vfd), (double) elapsed / 1000);
+						elog(DEBUG1, "checkpoint sync: number=%d file=%s time=%.3f msec",
+							 processed, FilePathName(seg->mdfd_vfd), (double) elapsed / 1000);
 					}
 
 					break;		/* success; break out of retry loop */
@@ -1268,7 +1267,7 @@ register_dirty_segment(SMgrRelation reln, ForkNumber forknum, MdfdVec *seg)
 			return;				/* passed it off successfully */
 
 		ereport(DEBUG1,
-			(errmsg("could not forward fsync request because request queue is full")));
+				(errmsg("could not forward fsync request because request queue is full")));
 
 		if (FileSync(seg->mdfd_vfd) < 0)
 			ereport(ERROR,
