@@ -1,3 +1,46 @@
-HATE GIT, HATE GIT and HATE GIT. It can be nice if you never use svn and want to store history from it
+--- Idea ---
 
-just loose 104 history from svn :( maybe later give another try
+Current index approaches in PostgreSQL doesn't conforms XML specification. This GSoC project creates new index (based on GiST) with code name FastX which will follow different way of handling data in XML. The index stucture might be used for Xquery or Xpath 2.0 support without LibXML, because LibXML doesn't have support for that query technics. But this is sound of future, todays implementation use LibXML for XPath, so could be good start with select only subpart of XML document which will be then parsed and query by LibXML. Benefit of this is less CPU and Memory requirements during executing XPath query.
+
+ 
+--- Details ---
+
+As my research shows that lots of XML indexing technique has been invented and comparsion of them is itself quite difficult project. Some comparsion is written in [1]. In 2007 Nikolay Samokhvalov (PostgreSQL hacker) suggested XLABEL index technique based on ORDPATH method (used in SQL Server) which use schredding XML document to relation model [2].
+
+My first approach considered too complicated and didn't fit TOASTed tables with indexing. So I have to implement schedding of XML documents and then apply existing index structure on it and going to implement new functional index for structural predecessor/successor relationship.
+
+Just one notice for future developers, Patricia Trie is nice XML indexing structure but have one big disadvantage and it’s high prize with updating (thanks to Liam R E Quin, from lib-xml). 
+
+I converged to native XML storage and indexing them. Ideas are based on (pre, post) order XML code, which nicely encode predecessor/successor relationship, which is essential of XML structure. Implementation is based on XISS/R XML Indexing and Storage System Using RDBMS by (Philip J. Harding, Quanzhong Li, Bongki Moon from Department of Computer Science, University of Arizona) as proposed on VLDB and implemented with MySQL and PHP backend. I reuse do idea and part of codes, which are under free licence and implement it in PostgreSQL manner. Similar approach is in Microsoft SQL server, as they use multiple indexes for support XPath and XQuery.
+
+The best benefit of this approach I see in future option to support XQuery, as it can be translated to SQL. But this work is out of my project scope, because of my focus to indexes, which can be used during XPath or XQuery. So I must consider this possibilities.
+Just few words about XISS
+
+Below are 2 types of tables used for storing XML data. I choose schema A for easy handling multiple XML documents.
+
+“XISS/R divides nodes into three categories, element, attribute and text. Since the set of information that each type of node requires to be described is different, this separation saves space by storing only necessary fields. Schema A, which is shown in Figure 1, separates nodes along these lines and is defined as follows:
+1. The Document Table consists of the Name of a document and a unique numerical Document ID .
+2. The Element Table stores all element nodes.
+3. The Attribute Table stores attribute nodes. The Value stores the attribute value.
+4. The Text Table stores text nodes (not text values) within the system.
+
+Value stores the actual text. In this schema, a Document Table is a simple way to separate the document name from the element, attribute, and text relations. The element, attribute and text relations store a reference to the numerical ID of the document for each node. In the Element, Attribute, and Text tables, Order and Document ID uniquely identify any node within the system. Since all attribute nodes have a corresponding text value (or empty) string, this value is stored with the attribute node, further reducing query time.” cited from VLDB paper.
+
+ 
+--- Indexing schreded data ---
+
+Real benefit of schreded XML documents is potential of use existing index techniques like B+ tree on all the primary keys of tables, name, value and document text information, Parent ID and Document ID of all text nodes and Order, Size and Document ID for all nodes.
+
+New index which I have to implement is functional index which compute ancestor-descendant relationalships. Benefit of extended preorder described in linked paper is constant time for evaluation.
+
+Nice side effect off schredding is pottentiall of multiple index techniques. I have plan to proposed and implement Multi-dimensional Approach to Indexing XML Data like R(*)-tree which at my point of view nicely fit GiST. This will be my second half GSoC business. Schredding is necessary precondition for all of this stuffs.
+
+--- How compile and use ---
+xml2 is extended contrib module from PostgreSQL source code, so best way is 
+replace it and call make clean; make; sudo make install and after it call
+in psql instalation SQL file, which will load new functions to PostgreSQL.
+
+Will be automaticaly created new tables as was described above and new 
+xml validation functions, which are part of my master thesis.
+
+

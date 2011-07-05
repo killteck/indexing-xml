@@ -38,7 +38,6 @@ xml_index_entry(const char *xml_document, int length)
 {
 	xml_index_globals		globals;
 	int preorder_result;
-	char smaz[] = "<a>ahoj</a>";
 
 	//globals.reader
 	xmlTextReaderPtr reader		= xmlReaderForMemory(xml_document, length,
@@ -206,16 +205,15 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 	if(DEBUG == TRUE && node_type == ELEMENT_END)
 	{
-		printf("Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
+		elog(INFO, "Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
 	}
-/*
+
 	while(node_type != ELEMENT_END)  //While we have unvisited children
 	{
 		if(node_type == TEXT_NODE || node_type == CDATA_SEC) //Visit text nodes
 		{
 //TODO
-
-			err_val = process_text_node(my_order, prev_child);
+			err_val = process_text_node(my_order, prev_child, reader, globals);
 			if(err_val == REAL_TEXT_NODE)
 			{
 				my_size++;
@@ -224,59 +222,57 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 		}
 		else if(node_type == ELEMENT_START) //Recurse on elements
 		{
-			recent_child = global_order + 1; //Next time we have a child it will know this as its nearest sibling
-			size_res = preorder_traverse(my_order,  prev_child);
+			recent_child = (globals->global_order) + 1; //Next time we have a child it will know this as its nearest sibling
+			size_res = preorder_traverse(my_order,  prev_child, reader, globals);
 
 
 			my_size += size_res;
 			prev_child = recent_child;
-			if(my_depth == xmlTextReaderDepth(my_xml_doc) && xmlTextReaderNodeType(my_xml_doc) == ELEMENT_END)
+			if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == ELEMENT_END)
 			{
 				if(DEBUG == TRUE)
 				{
-					printf("Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
+					elog(INFO, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
 				}
 				break;
 			}
 		}
 		else
 		{
-			fprintf(errfile, "Encounted an node of type %d where it should not be\n", node_type);
-			exit(LIBXML_ERR);
+			elog(INFO, "Encounted an node of type %d where it should not be\n", node_type);
+			return(LIBXML_ERR);
 			//Possibly implement error handling code here
 
 		}
-		err_val = read_next_node();
+		err_val = read_next_node(reader, globals);
 		if(err_val == 0)
 		{
-			fprintf(errfile, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
-			exit(LIBXML_ERR);
+			elog(INFO, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
+			return(LIBXML_ERR);
 		}
-		if(my_depth >= xmlTextReaderDepth(my_xml_doc))
+		if(my_depth >= xmlTextReaderDepth(reader))
 		{
 			if(DEBUG == TRUE)
 			{
-				printf("Node %d:%s with %d children at depth %d has no end tag, now returning to %d\n",my_order, my_tag_name, my_size, my_depth, parent_id );
+				elog(INFO,"Node %d:%s with %d children at depth %d has no end tag, now returning to %d\n",my_order, my_tag_name, my_size, my_depth, parent_id );
 			}
 			break;
 		}
 
 
 
-		node_type = xmlTextReaderNodeType(my_xml_doc);
+		node_type = xmlTextReaderNodeType(reader);
 		if(DEBUG == TRUE && node_type == ELEMENT_END)
 		{
-			printf("Found end of %d:%s with %d children at depth %d returning to %d.\n",my_order, my_tag_name, my_size, my_depth, parent_id );
+			elog(INFO,"Found end of %d:%s with %d children at depth %d returning to %d.\n",my_order, my_tag_name, my_size, my_depth, parent_id );
 		}
 
 	}
 	//We have visited each child
 
 	//Create new queue entry for this element, initialized with null or no_value entries
-	my_ind = create_new_element();
-
-
-
+	my_ind = create_new_element(reader, globals);
+/*
 	BUFFER[my_ind].did = global_doc_id;
 	BUFFER[my_ind].order = my_order;
 	BUFFER[my_ind].size = my_size;
@@ -306,10 +302,10 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 		BUFFER[my_ind].prev_id = sibling_id;
 	}
 
-
-
 	return BUFFER[my_ind].size + 1;
-*/
+ */
+	return my_size + 1;
+
 }
 
 // Creates new records and fills records for all attributes that
@@ -392,6 +388,80 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 	return i;
 }
 
+// Clears the next text record in the text buffer and
+// Returns the index to the buffer for the "new" text node
+// May flush the buffer and reset the index if the buffer is full.
+int
+create_new_text_node(xml_index_globals_ptr globals)
+{
+	int my_ind;
 
+/*
+	if(BUFFER_COUNT == BUFFER_SIZE)
+	{
+		//flush buffer reset buffer_count
+		FLUSH;
+		BUFFER_COUNT = 0;
+	}
+	my_ind = BUFFER_COUNT;
+	BUFFER[my_ind].did = NO_VALUE;
+	BUFFER[my_ind].order = NO_VALUE;
+	BUFFER[my_ind].size = NO_VALUE;
+	BUFFER[my_ind].depth = NO_VALUE;
+	BUFFER[my_ind].parent_id = NO_VALUE;
+	BUFFER[my_ind].prev_id = NO_VALUE;
+	if(FREE == TRUE && BUFFER[my_ind].value != NULL && BUFFER_COUNT > BUFFER_SIZE)
+	{
+		free(BUFFER[my_ind].value);
+	}
+	BUFFER[my_ind].value = NULL;
+	BUFFER_COUNT++;
+
+	COUNTER++;
+*/
+	return my_ind;
+}
+
+//Called when parsing an element if it has a text node
+//Current item in XMl doc stream is the element that is the parent of this text node
+int
+process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
+		xml_index_globals_ptr globals)
+{
+	int i,j, my_ind;
+	int num_attributes;
+/*
+	char* value = get_text_from_node();
+
+	// If the text node is nothing but white space, returning a value of FAKE_TEXT_NODE
+	// will cause this text node to be ignored.  Disable this if statement if you want
+	// to include text nodes that are only white space.
+	if(is_all_whitespace(value))
+	{
+		if(FREE == TRUE)
+		{
+			free(value);
+		}
+		return FAKE_TEXT_NODE;
+	}
+
+	my_ind = create_new_text_node();
+	BUFFER[my_ind].did = globals->global_doc_id;
+	BUFFER[my_ind].order = ++(globals->global_order);
+	BUFFER[my_ind].size = 0;
+
+	BUFFER[my_ind].depth = xmlTextReaderDepth(reader);
+	if(BUFFER[my_ind].depth == -1)
+	{
+		//Implement possible error handling code here
+	}
+	BUFFER[my_ind].prev_id = prev_id;
+	BUFFER[my_ind].parent_id = parent_id;
+
+	 //Replace any characters that the DBMS has problems with.
+	BUFFER[my_ind].value = replace_bad_chars(value);
+*/
+	return REAL_TEXT_NODE;
+}
 
 

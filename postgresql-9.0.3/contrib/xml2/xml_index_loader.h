@@ -204,6 +204,11 @@ int create_new_element(xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
 int process_attributes(int parent_id, xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
+int create_new_text_node(xml_index_globals_ptr globals);
+
+int process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
+		xml_index_globals_ptr globals);
+
 #ifdef	__cplusplus
 }
 #endif

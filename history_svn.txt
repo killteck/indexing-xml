@@ -1,3 +1,7 @@
+HATE GIT, HATE GIT and HATE GIT. It can be nice if you never use svn and want to store history from it
+
+just loose 108 history from svn :( maybe later give another try
+
 Stored history with short messages from svn, for internal use
 
 ------------------------------------------------------------------------
