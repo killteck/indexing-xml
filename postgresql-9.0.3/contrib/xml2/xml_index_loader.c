@@ -3,7 +3,6 @@
 #include "postgres.h"
 #include "xml_index_loader.h"
 
-
 #include <stdio.h>
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
@@ -101,34 +100,38 @@ read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
 int 
 create_new_element(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
 {
-/*
+
 	int my_ind;
 
-	if(BUFFER_COUNT == BUFFER_SIZE)
+	if(globals->element_node_buffer_count >= BUFFER_SIZE)
 	{
 		//flush BUFFER reset buffer_count
-		FLUSH;
-		BUFFER_COUNT = 0;
+		flush_element_node_buffer(globals);
+		globals->element_node_buffer_count = 0;
 	}
-	my_ind = BUFFER_COUNT;
-	BUFFER[my_ind].did = NO_VALUE;
-	BUFFER[my_ind].order = NO_VALUE;
-	BUFFER[my_ind].size = NO_VALUE;
-	if(FREE == TRUE && BUFFER[my_ind].tag_name != NULL && BUFFER_COUNT > BUFFER_SIZE)
+
+	my_ind = globals->element_node_buffer_count;
+	element_node_buffer[my_ind].did = NO_VALUE;
+	element_node_buffer[my_ind].order = NO_VALUE;
+	element_node_buffer[my_ind].size = NO_VALUE;
+	
+	if((FREE == TRUE) && (element_node_buffer[my_ind].tag_name != NULL) &&
+			(globals->element_node_buffer_count > BUFFER_SIZE))
 	{
-		free(BUFFER[my_ind].tag_name);
+		free(element_node_buffer[my_ind].tag_name);
 	}
-	BUFFER[my_ind].tag_name = NULL;
-	BUFFER[my_ind].depth = NO_VALUE;
-	BUFFER[my_ind].child_id = NO_VALUE;
-	BUFFER[my_ind].prev_id = NO_VALUE;
-	BUFFER[my_ind].first_attr_id = NO_VALUE;
-	BUFFER_COUNT++;
+
+	element_node_buffer[my_ind].tag_name = NULL;
+	element_node_buffer[my_ind].depth = NO_VALUE;
+	element_node_buffer[my_ind].child_id = NO_VALUE;
+	element_node_buffer[my_ind].prev_id = NO_VALUE;
+	element_node_buffer[my_ind].first_attr_id = NO_VALUE;
+	globals->element_node_buffer_count++;
 
 
-	COUNTER++;
+	globals->element_node_buffer_count++;
 	return my_ind;
-*/
+
 }
 
 // Executes a preorder traversal of the document tree.
@@ -430,8 +433,8 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 {
 	int i,j, my_ind;
 	int num_attributes;
-/*
-	char* value = get_text_from_node();
+
+	char* value = get_text_from_node(reader);
 
 	// If the text node is nothing but white space, returning a value of FAKE_TEXT_NODE
 	// will cause this text node to be ignored.  Disable this if statement if you want
@@ -445,7 +448,8 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 		return FAKE_TEXT_NODE;
 	}
 
-	my_ind = create_new_text_node();
+	my_ind = create_new_text_node(reader);
+/*
 	BUFFER[my_ind].did = globals->global_doc_id;
 	BUFFER[my_ind].order = ++(globals->global_order);
 	BUFFER[my_ind].size = 0;
@@ -462,6 +466,269 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 	BUFFER[my_ind].value = replace_bad_chars(value);
 */
 	return REAL_TEXT_NODE;
+}
+
+//Retrieves the proper text from a text node
+char* get_text_from_node(xmlTextReaderPtr reader)
+{
+	int node_type;
+	char * text;
+	char * text2;
+
+	// called when we want to check and make sure we have text for an element.
+	// returns NULL if an error is encountered or the value otherwise.
+	if(xmlTextReaderIsEmptyElement(reader))
+	{
+		return NULL;
+	}
+
+	node_type = xmlTextReaderNodeType(reader);
+	if(node_type !=  TEXT_NODE)
+	{
+		if(node_type == CDATA_SEC)  //If we have CDATA
+		{
+			if(xmlTextReaderIsEmptyElement(reader))
+			{
+				return NULL;
+			}
+			text = xmlTextReaderValue(reader);
+			text2 = (char*) malloc(strlen(text) + 1 + 10);
+			//One plus the length of the string + the length of ![[CDATA]]
+			sprintf(text2, "![CDATA[%s]]", text);
+			if(FREE == TRUE)
+			{
+				free(text);
+			}
+			return text2;
+		}
+		return NULL;
+	}
+	else
+	{
+		text = xmlTextReaderValue(reader);
+//TODO could be safer with strndup
+		text2 = (char*)strdup(text);
+		if(FREE == TRUE)
+		{
+			free(text);
+		}
+		return text2;
+	}
+
+	return NULL;
+}
+
+//Returns TRUE if a text is all white space, FALSE otherwise
+int is_all_whitespace(char * text)
+{
+	int len, i;
+
+	len = strlen(text);
+	for(i = 0; i < len; i++)
+	{
+		if(!isspace(text[i]))
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+//Replaces ' with \'
+char* replace_bad_chars(char* value)
+{
+	char *temp;
+	if(REPLACE_BAD_CHARS != TRUE)
+	{
+		return "";
+	}
+	if(value == NULL)
+	{
+		return "";
+	}
+
+
+	while( (temp = strchr(value, (int)'\'')) != NULL)
+	{
+		*temp = '\\\'';
+
+	}
+	return value;
+}
+
+//Flush the element buffer
+void flush_element_node_buffer(xml_index_globals_ptr globals)
+{
+	int i, name_length;
+
+	StringInfoData query;
+
+	elog(INFO, "flushing element_nodes");
+
+	initStringInfo(&query);
+	appendStringInfo(&query,
+						"INSERT INTO element_table(did, nid, size, name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
+
+	if(DO_FLUSH == TRUE)
+	{
+		for(i = 0; i < globals->element_node_buffer_count; i++)
+		{
+			if(element_node_buffer[i].tag_name != NULL)
+			{
+				name_length = strlen(element_node_buffer[i].tag_name);
+			}
+			else
+			{
+				name_length = 7;
+			}
+
+			appendStringInfo(&query,
+							" (%d, %d, %d, '%s', %d, %d, %d, %d, %d)",
+							element_node_buffer[i].did,
+							element_node_buffer[i].order,
+							element_node_buffer[i].size,
+							element_node_buffer[i].tag_name,
+							element_node_buffer[i].depth,
+							element_node_buffer[i].child_id,
+							element_node_buffer[i].prev_id,
+							element_node_buffer[i].first_attr_id,
+							element_node_buffer[i].parent_id
+				);
+
+			if ((i+1) < globals->element_node_buffer_count)
+			{
+				appendStringInfo(&query, ",");
+			} else
+			{
+				appendStringInfo(&query, ";");
+			}
+		}
+
+		SPI_connect();
+
+		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("invalid query")));
+
+		SPI_finish();
+
+	}
+}
+
+
+//Flush the attribute buffer
+void flush_attribute_node_buffer(xml_index_globals_ptr globals)
+{
+	int i, val_len;
+	StringInfoData query;
+
+	elog(INFO, "flushing attribute_nodes");
+
+	initStringInfo(&query);
+	appendStringInfo(&query,
+						"INSERT INTO attribute_table(did, nid, size, name, depth, parent_id, prev_id, value) VALUES ");
+
+	if(DO_FLUSH == TRUE)
+	{		
+		for(i = 0; i < globals->attribute_node_buffer_count; i++)
+		{
+			if(attribute_node_buffer[i].value != NULL)
+			{
+				val_len = strlen(attribute_node_buffer[i].value);
+			}
+			else
+			{
+				val_len = 7;
+			}
+
+			appendStringInfo(&query,
+							" (%d, %d, %d, '%s', %d, %d, %d, '%s')",
+							attribute_node_buffer[i].did,
+							attribute_node_buffer[i].order,
+							attribute_node_buffer[i].size,
+							attribute_node_buffer[i].tag_name,
+							attribute_node_buffer[i].depth,
+							attribute_node_buffer[i].parent_id,
+							attribute_node_buffer[i].prev_id,
+							attribute_node_buffer[i].value
+				);
+
+			if ((i+1) < globals->attribute_node_buffer_count)
+			{
+				appendStringInfo(&query, ",");
+			} else
+			{
+				appendStringInfo(&query, ";");
+			}
+		}
+
+		SPI_connect();
+
+		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("invalid query")));
+
+		SPI_finish();
+	}
+
+	elog(INFO, "flushed attribute_nodes");
+}
+
+//Flush the text buffer
+void flush_text_node_buffer(xml_index_globals_ptr globals)
+{
+	int i, val_len;
+	StringInfoData query;
+
+	elog(INFO, "flushing text_nodes");
+
+	initStringInfo(&query);
+	appendStringInfo(&query,
+						"INSERT INTO text_table(did, nid, depth, parent_id, prev_id, value) VALUES ");
+
+	if(DO_FLUSH == TRUE)
+	{
+		for(i = 0; i < globals->text_node_buffer_count; i++)
+		{
+				appendStringInfo(&query,
+							" (%d, %d, %d, %d, %d, '%s')",
+						text_node_buffer[i].did,
+						text_node_buffer[i].order,
+						text_node_buffer[i].depth,
+						text_node_buffer[i].parent_id,
+						text_node_buffer[i].prev_id,
+						text_node_buffer[i].value
+				);
+
+				if ((i+1) < globals->text_node_buffer_count)
+				{
+					appendStringInfo(&query, ",");
+				} else
+				{
+					appendStringInfo(&query, ";");
+				}
+
+			if(text_node_buffer[i].value != NULL)
+			{
+				val_len = strlen(text_node_buffer[i].value);
+			} else
+			{ // TODO figure out what is mean
+				val_len = 7;
+			}
+		}
+
+		SPI_connect();
+
+		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("invalid query")));
+
+		SPI_finish();
+	}
+	elog(INFO, "flushed text_nodes");
 }
 
 

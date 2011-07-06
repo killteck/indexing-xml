@@ -11,16 +11,16 @@
 
 //#define USE_LIBXML
 #ifdef USE_LIBXML
-#include <libxml/chvalid.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
-#include <libxml/uri.h>
-#include <libxml/xmlerror.h>
-#include <libxml/xmlwriter.h>
-#include <libxml/xpath.h>
-#include <libxml/xpathInternals.h>
-#include <libxml/xmlerror.h>
-#include <libxml/xmlreader.h>
+	#include <libxml/chvalid.h>
+	#include <libxml/parser.h>
+	#include <libxml/tree.h>
+	#include <libxml/uri.h>
+	#include <libxml/xmlerror.h>
+	#include <libxml/xmlwriter.h>
+	#include <libxml/xpath.h>
+	#include <libxml/xpathInternals.h>
+	#include <libxml/xmlerror.h>
+	#include <libxml/xmlreader.h>
 #endif   /* USE_LIBXML */
 
 #include "catalog/namespace.h"
