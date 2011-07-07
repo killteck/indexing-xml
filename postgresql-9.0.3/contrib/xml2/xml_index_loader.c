@@ -155,8 +155,8 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	int my_order = -1,
 		 my_size = -1,
 		 my_depth = -1,
-		 my_first_attr_id = -1,
-		 my_child_id = -1;
+		 my_first_attr_id = -1;
+		 //my_child_id = -1;
 
 	//Get Order, and Size
 	my_order = ++(globals->global_order);
@@ -262,8 +262,6 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 			break;
 		}
 
-
-
 		node_type = xmlTextReaderNodeType(reader);
 		if(DEBUG == TRUE && node_type == ELEMENT_END)
 		{
@@ -275,23 +273,23 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 	//Create new queue entry for this element, initialized with null or no_value entries
 	my_ind = create_new_element(reader, globals);
-/*
-	BUFFER[my_ind].did = global_doc_id;
-	BUFFER[my_ind].order = my_order;
-	BUFFER[my_ind].size = my_size;
-	BUFFER[my_ind].depth = my_depth;
-	BUFFER[my_ind].first_attr_id = my_first_attr_id;
-	BUFFER[my_ind].child_id = recent_child;
-	BUFFER[my_ind].parent_id = parent_id;
+
+	element_node_buffer[my_ind].did = globals->global_doc_id;
+	element_node_buffer[my_ind].order = my_order;
+	element_node_buffer[my_ind].size = my_size;
+	element_node_buffer[my_ind].depth = my_depth;
+	element_node_buffer[my_ind].first_attr_id = my_first_attr_id;
+	element_node_buffer[my_ind].child_id = recent_child;
+	element_node_buffer[my_ind].parent_id = parent_id;
 	//Tag name
 	if(my_tag_name == NULL && my_order == 1  && parent_id == NO_VALUE)
 	{
-		BUFFER[my_ind].tag_name = (char*) strdup(DOCUMENT_ROOT);
+		element_node_buffer[my_ind].tag_name = (char*) strdup(DOCUMENT_ROOT);
 		//error
 	}
 	else
 	{
-		BUFFER[my_ind].tag_name = my_tag_name;//(char*)strdup(my_tag_name);
+		element_node_buffer[my_ind].tag_name = (char *)my_tag_name;//(char*)strdup(my_tag_name);
 	//	if(FREE == TRUE)
 	//	{
 	//		free(my_tag_name);
@@ -302,12 +300,10 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	//Get Previous Sibling
 	if(sibling_id != NO_VALUE)
 	{
-		BUFFER[my_ind].prev_id = sibling_id;
+		element_node_buffer[my_ind].prev_id = sibling_id;
 	}
 
-	return BUFFER[my_ind].size + 1;
- */
-	return my_size + 1;
+	return element_node_buffer[my_ind].size + 1;
 
 }
 
@@ -322,7 +318,7 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 {
 
 
-	int i,j, my_ind, err;
+	int i, my_ind, err;
 	int num_attributes;
 	xmlChar * text;
 	int last_attr = NO_VALUE;
@@ -346,47 +342,45 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 			i--;
 			break;
 		}
-
-		/*
-		my_ind = create_new_attribute();
-		BUFFER[my_ind].did = global_doc_id;
-		BUFFER[my_ind].order = ++global_order;
-		BUFFER[my_ind].size = 0;
-		text = xmlTextReaderName(my_xml_doc);
-		BUFFER[my_ind].tag_name = text;
+		
+		my_ind = create_new_attribute(globals);
+		attribute_node_buffer[my_ind].did = globals->global_doc_id;
+		attribute_node_buffer[my_ind].order = ++(globals->global_order);
+		attribute_node_buffer[my_ind].size = 0;
+		text = xmlTextReaderName(reader);
+		attribute_node_buffer[my_ind].tag_name = (char *)text;
 		//if(FREE == TRUE)
 		//{
 		//	xmlFree(text);
 		//}
-		BUFFER[my_ind].depth = xmlTextReaderDepth(my_xml_doc);
-		if(BUFFER[my_ind].depth == -1)
+		attribute_node_buffer[my_ind].depth = xmlTextReaderDepth(reader);
+		if(attribute_node_buffer[my_ind].depth == -1)
 		{
 			//Possible place to implement error handling code
 			exit(LIBXML_ATTRIBUTE_ERROR);
 		}
-		BUFFER[my_ind].parent_id = parent_id;
-		BUFFER[my_ind].prev_id = last_attr;
+		attribute_node_buffer[my_ind].parent_id = parent_id;
+		attribute_node_buffer[my_ind].prev_id = last_attr;
 
-		err = xmlTextReaderReadAttributeValue(my_xml_doc);
+		err = xmlTextReaderReadAttributeValue(reader);
 		if(err == LIBXML_SUCCESS)
 		{
-			BUFFER[my_ind].value = xmlTextReaderValue(my_xml_doc);
+			attribute_node_buffer[my_ind].value = (char *)xmlTextReaderValue(reader);
 		}
 
-		last_attr = BUFFER[my_ind].order;
-		err = xmlTextReaderMoveToElement(my_xml_doc);
+		last_attr = attribute_node_buffer[my_ind].order;
+		err = xmlTextReaderMoveToElement(reader);
 		if(err == LIBXML_ERR || err == LIBXML_NO_EFFECT)
 		{
 			//Possible place to implement error handling code
 			exit(LIBXML_ATTRIBUTE_ERROR);
 		}
-		err = xmlTextReaderMoveToNextAttribute(my_xml_doc);
+		err = xmlTextReaderMoveToNextAttribute(reader);
 		if(err == LIBXML_ERR)
 		{
 			//Possible place to implement error handling code
 			exit(LIBXML_ATTRIBUTE_ERROR);
-		}
-		 * */
+		}		 
 	}
 	return i;
 }
@@ -399,29 +393,70 @@ create_new_text_node(xml_index_globals_ptr globals)
 {
 	int my_ind;
 
-/*
-	if(BUFFER_COUNT == BUFFER_SIZE)
+	if(globals->text_node_buffer_count >= BUFFER_SIZE)
 	{
 		//flush buffer reset buffer_count
-		FLUSH;
-		BUFFER_COUNT = 0;
+		flush_text_node_buffer(globals);
+		globals->text_node_buffer_count = 0;
 	}
-	my_ind = BUFFER_COUNT;
-	BUFFER[my_ind].did = NO_VALUE;
-	BUFFER[my_ind].order = NO_VALUE;
-	BUFFER[my_ind].size = NO_VALUE;
-	BUFFER[my_ind].depth = NO_VALUE;
-	BUFFER[my_ind].parent_id = NO_VALUE;
-	BUFFER[my_ind].prev_id = NO_VALUE;
-	if(FREE == TRUE && BUFFER[my_ind].value != NULL && BUFFER_COUNT > BUFFER_SIZE)
+	my_ind = globals->text_node_buffer_count;
+	text_node_buffer[my_ind].did = NO_VALUE;
+	text_node_buffer[my_ind].order = NO_VALUE;
+	text_node_buffer[my_ind].size = NO_VALUE;
+	text_node_buffer[my_ind].depth = NO_VALUE;
+	text_node_buffer[my_ind].parent_id = NO_VALUE;
+	text_node_buffer[my_ind].prev_id = NO_VALUE;
+	if((FREE == TRUE) && (text_node_buffer[my_ind].value != NULL) &&
+			(globals->text_node_buffer_count > BUFFER_SIZE))
 	{
-		free(BUFFER[my_ind].value);
+		free(text_node_buffer[my_ind].value);
 	}
-	BUFFER[my_ind].value = NULL;
-	BUFFER_COUNT++;
 
-	COUNTER++;
-*/
+	text_node_buffer[my_ind].value = NULL;
+	(globals->text_node_buffer_count)++;
+
+	(globals->text_node_count)++;
+
+	return my_ind;
+}
+
+// Clears the next attribute record in the attribute buffer and
+// Returns the index to the buffer for the "new" attribute
+// May Flush the Buffer and reset the index if the buffer is full.
+int
+create_new_attribute(xml_index_globals_ptr globals)
+{
+	int my_ind;						 //
+
+	if(globals->attribute_node_buffer_count >= BUFFER_SIZE)  //If the buffer is full, flush it
+	{
+		//flush buffer; reset buffer_count;
+		flush_attribute_node_buffer(globals);
+		globals->attribute_node_buffer_count = 0;
+	}
+	
+	my_ind = globals->attribute_node_buffer_count;
+	attribute_node_buffer[my_ind].did = NO_VALUE;
+	attribute_node_buffer[my_ind].order = NO_VALUE;
+	attribute_node_buffer[my_ind].size = NO_VALUE;
+	if(FREE == TRUE && attribute_node_buffer[my_ind].tag_name != NULL &&
+			globals->attribute_node_buffer_count > BUFFER_SIZE)
+	{
+		free(attribute_node_buffer[my_ind].tag_name);
+	}
+	attribute_node_buffer[my_ind].tag_name = NULL;
+	attribute_node_buffer[my_ind].depth = NO_VALUE;
+	attribute_node_buffer[my_ind].parent_id = NO_VALUE;
+	attribute_node_buffer[my_ind].prev_id = NO_VALUE;
+	if(FREE == TRUE && attribute_node_buffer[my_ind].value != NULL &&
+			globals->attribute_node_buffer_count > BUFFER_SIZE)
+	{
+		free(attribute_node_buffer[my_ind].value);
+	}
+	attribute_node_buffer[my_ind].value = NULL;
+	globals->attribute_node_buffer_count++;
+
+	globals->attribute_node_count++;
 	return my_ind;
 }
 
@@ -431,8 +466,7 @@ int
 process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
 {
-	int i,j, my_ind;
-	int num_attributes;
+	int my_ind;
 
 	char* value = get_text_from_node(reader);
 
@@ -448,23 +482,23 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 		return FAKE_TEXT_NODE;
 	}
 
-	my_ind = create_new_text_node(reader);
-/*
-	BUFFER[my_ind].did = globals->global_doc_id;
-	BUFFER[my_ind].order = ++(globals->global_order);
-	BUFFER[my_ind].size = 0;
+	my_ind = create_new_text_node(globals);
 
-	BUFFER[my_ind].depth = xmlTextReaderDepth(reader);
-	if(BUFFER[my_ind].depth == -1)
+	text_node_buffer[my_ind].did = globals->global_doc_id;
+	text_node_buffer[my_ind].order = ++(globals->global_order);
+	text_node_buffer[my_ind].size = 0;
+
+	text_node_buffer[my_ind].depth = xmlTextReaderDepth(reader);
+	if(text_node_buffer[my_ind].depth == -1)
 	{
 		//Implement possible error handling code here
 	}
-	BUFFER[my_ind].prev_id = prev_id;
-	BUFFER[my_ind].parent_id = parent_id;
+	text_node_buffer[my_ind].prev_id = prev_id;
+	text_node_buffer[my_ind].parent_id = parent_id;
 
 	 //Replace any characters that the DBMS has problems with.
-	BUFFER[my_ind].value = replace_bad_chars(value);
-*/
+	text_node_buffer[my_ind].value = replace_bad_chars(value);
+
 	return REAL_TEXT_NODE;
 }
 
@@ -491,7 +525,7 @@ char* get_text_from_node(xmlTextReaderPtr reader)
 			{
 				return NULL;
 			}
-			text = xmlTextReaderValue(reader);
+			text = (char *)xmlTextReaderValue(reader);
 			text2 = (char*) malloc(strlen(text) + 1 + 10);
 			//One plus the length of the string + the length of ![[CDATA]]
 			sprintf(text2, "![CDATA[%s]]", text);
@@ -505,7 +539,7 @@ char* get_text_from_node(xmlTextReaderPtr reader)
 	}
 	else
 	{
-		text = xmlTextReaderValue(reader);
+		text = (char *)xmlTextReaderValue(reader);
 //TODO could be safer with strndup
 		text2 = (char*)strdup(text);
 		if(FREE == TRUE)
@@ -550,7 +584,7 @@ char* replace_bad_chars(char* value)
 
 	while( (temp = strchr(value, (int)'\'')) != NULL)
 	{
-		*temp = '\\\'';
+		*temp = ' ';
 
 	}
 	return value;
