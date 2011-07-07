@@ -50,11 +50,15 @@ xml_index_entry(const char *xml_document, int length)
 
 	init_values(&globals);
 
-	xmlTextReaderRead(reader);
+	//xmlTextReaderRead(reader);
 	// parse and compute whole shredding
 	preorder_result = preorder_traverse(NO_VALUE, NO_VALUE, reader, &globals);
 
 	xmlFreeTextReader(reader);    // clean up document in memmory
+
+	flush_element_node_buffer(&globals);
+	flush_attribute_node_buffer(&globals);
+	flush_text_node_buffer(&globals);
 
 	return XML_INDEX_LOADER_SUCCES;
 }
@@ -171,11 +175,10 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 	if(DEBUG == TRUE)
 	{
-		elog(INFO, "Parsing %d:%s at depth %d\n", my_order, my_tag_name, my_depth);
+		elog(INFO, "--PREORDER-- Parsing %d:%s at depth %d\n", my_order, my_tag_name, my_depth);
 	}
 
 	//Process all attributes
-//TODO
 	size_res = process_attributes(my_order, reader, globals);
 
 	my_size += size_res;
@@ -338,6 +341,7 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 		err = xmlTextReaderMoveToAttributeNo(reader, i);
 		if(err != LIBXML_SUCCESS)
 		{
+			elog(INFO,"LIBXML_SUCCESS not found error");
 			//error
 			i--;
 			break;
@@ -357,6 +361,7 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 		if(attribute_node_buffer[my_ind].depth == -1)
 		{
 			//Possible place to implement error handling code
+			elog(INFO,"LIBXML_SUCCESS not found error"); 
 			exit(LIBXML_ATTRIBUTE_ERROR);
 		}
 		attribute_node_buffer[my_ind].parent_id = parent_id;
@@ -366,6 +371,20 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 		if(err == LIBXML_SUCCESS)
 		{
 			attribute_node_buffer[my_ind].value = (char *)xmlTextReaderValue(reader);
+		}
+
+		if (DEBUG)
+		{
+			elog(INFO, "attribute values depth:%d, did:%d, order:%d, parent_id:%d, "
+					"prev_id:%d, size:%d, att_name:%s, value:%s",
+					attribute_node_buffer[my_ind].depth,
+					attribute_node_buffer[my_ind].did,
+					attribute_node_buffer[my_ind].order,
+					attribute_node_buffer[my_ind].parent_id,
+					attribute_node_buffer[my_ind].prev_id,
+					attribute_node_buffer[my_ind].size,
+					attribute_node_buffer[my_ind].tag_name,
+					attribute_node_buffer[my_ind].value);
 		}
 
 		last_attr = attribute_node_buffer[my_ind].order;
@@ -498,7 +517,15 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 
 	 //Replace any characters that the DBMS has problems with.
 	text_node_buffer[my_ind].value = replace_bad_chars(value);
-
+	elog(INFO, "TEXT_NODE depth:%d, did:%d, order:%d, parent_id:%d, "
+			"prev_id:%d, size:%d, value:%s",
+			text_node_buffer[my_ind].depth,
+			text_node_buffer[my_ind].did,
+			text_node_buffer[my_ind].order,
+			text_node_buffer[my_ind].parent_id,
+			text_node_buffer[my_ind].prev_id,
+			text_node_buffer[my_ind].size,
+			text_node_buffer[my_ind].value);
 	return REAL_TEXT_NODE;
 }
 
