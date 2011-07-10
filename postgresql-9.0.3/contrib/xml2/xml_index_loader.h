@@ -146,7 +146,7 @@ void init_values(xml_index_globals_ptr globals);
 
 int read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
-int create_new_element(xmlTextReaderPtr reader, xml_index_globals_ptr globals);
+int create_new_element(xml_index_globals_ptr globals);
 
 int process_attributes(int parent_id, xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
