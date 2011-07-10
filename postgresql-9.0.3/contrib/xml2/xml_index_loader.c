@@ -1,4 +1,14 @@
-
+/**
+ * File:   xml_index_loader.c
+ * Authors: Philip Harding (harding@cs.arizona.edu)
+ * XISS/R project : University of Arizona, Computer Science Department
+ * http://www.xiss.cs.arizona.edu
+ *
+ * Description: Implementation of XISS/R in PostgreSQL by Tomas Pospisil
+ * Ideas are based on Philip Hardings algorithm with PostgreSQL needs
+ * and specific memory menagement
+ * http://www.tomaspospisil.com
+ */
 
 #include "postgres.h"
 #include "xml_index_loader.h"
@@ -64,7 +74,10 @@ xml_index_entry(const char *xml_document, int length)
 }
 
 
-//Initialize global values
+/**
+ * Initialize global values
+ * @param globals variables used for global handling
+ */
 void
 init_values(xml_index_globals_ptr globals)
 {
@@ -79,7 +92,12 @@ init_values(xml_index_globals_ptr globals)
 }
 
 
-// Read the next node (move the stream to the next node) and return an error code if neccesary.
+/**
+ * Read the next node (move the stream to the next node) and return an error code if neccesary.
+ * @param reader LibXML stream reader pointer
+ * @param globals variables used for global handling
+ * @return err value return by xmlTextReaderRead (1 if exist another nodes)
+ */
 int 
 read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
 {
@@ -96,9 +114,12 @@ read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
 	return err_val;
 }
 
-// Clears the next element record in the element buffer and
-// Returns the index to the buffer for the "new" element
-// May flush the buffer and reset the index if the buffer is full.
+/**
+ * Clears the next element record in the element buffer and may flush the buffer
+ * and reset the index if the buffer is full.
+ * @param globals variables used for global handling
+ * @return Returns the index to the buffer for the "new" element
+ */
 int 
 create_new_element(xml_index_globals_ptr globals)
 {
@@ -114,7 +135,8 @@ create_new_element(xml_index_globals_ptr globals)
 
 	my_ind = globals->element_node_buffer_count;
 
-	elog(INFO, "creating new element at index: %d", my_ind);
+	if (DEBUG == TRUE)
+		elog(INFO, "creating new element at index: %d", my_ind);
 
 	element_node_buffer[my_ind].did = NO_VALUE;
 	element_node_buffer[my_ind].order = NO_VALUE;
@@ -139,10 +161,15 @@ create_new_element(xml_index_globals_ptr globals)
 
 }
 
-// Executes a preorder traversal of the document tree.
-// It processes elements(and in turn attributes and text elements)
-// parent_id = parent node's order
-// sibling_id = Order of this node's nearest sibling
+/**
+ * Executes a preorder traversal of the document tree. It processes elements(and
+ * in turn attributes and text elements)
+ * @param parent_id parent node's order
+ * @param sibling_id Order of this node's nearest sibling
+ * @param reader pointer to LibXML stream reader
+ * @param globals variables used for global handling
+ * @return
+ */
 int 
 preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
@@ -161,7 +188,6 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 		 my_size = -1,
 		 my_depth = -1,
 		 my_first_attr_id = -1;
-		 //my_child_id = -1;
 
 	//Get Order, and Size
 	my_order = ++(globals->global_order);
@@ -254,8 +280,6 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 			//Possibly implement error handling code here
 
 		}
-
-
 		
 		err_val = read_next_node(reader, globals);
 
@@ -327,18 +351,6 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 				element_node_buffer[my_ind].first_attr_id,
 				element_node_buffer[my_ind].child_id,
 				element_node_buffer[my_ind].parent_id);
-
-/*
-		elog(INFO, "== CREATE ==  element[%d] values did:%d, order:%d, size:%d, "
-				"depth:%d, first_attr_id:%d, child_id:%s, parent_id:%s", my_ind,
-					element_node_buffer[my_ind].did,
-					element_node_buffer[my_ind].order,
-					element_node_buffer[my_ind].size,
-					element_node_buffer[my_ind].depth,
-					element_node_buffer[my_ind].first_attr_id,
-					element_node_buffer[my_ind].child_id,
-					element_node_buffer[my_ind].parent_id);
-*/
 	}
 	
 	//Get Previous Sibling
@@ -351,11 +363,15 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 }
 
-// Creates new records and fills records for all attributes that
-// are children of the element with <parent_id>.
-// When called, the current item in the XMl doc stream is
-// the element that is parent of these attributes.
-// Returns the number of attributes processed.
+/**
+ * Creates new records and fills records for all attributes that are children of
+ * the element with <parent_id>. When called, the current item in the XMl doc
+ * stream is the element that is parent of these attributes.
+ * @param parent_id element primary key
+ * @param reader pointer to LibXML stream reader
+ * @param globals variables used for global handling
+ * @return  Returns the number of attributes processed.
+ */
 int 
 process_attributes(int parent_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
@@ -445,9 +461,12 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 	return i;
 }
 
-// Clears the next text record in the text buffer and
-// Returns the index to the buffer for the "new" text node
-// May flush the buffer and reset the index if the buffer is full.
+/**
+ * Clears the next text record in the text buffer and may flush the buffer and
+ * reset the index if the buffer is full.
+ * @param globals variables used for global handling
+ * @return the index to the buffer for the "new" text node
+ */
 int
 create_new_text_node(xml_index_globals_ptr globals)
 {
@@ -483,9 +502,12 @@ create_new_text_node(xml_index_globals_ptr globals)
 	return my_ind;
 }
 
-// Clears the next attribute record in the attribute buffer and
-// Returns the index to the buffer for the "new" attribute
-// May Flush the Buffer and reset the index if the buffer is full.
+/**
+ * Clears the next attribute record in the attribute buffer and may Flush the
+ * Buffer and reset the index if the buffer is full.
+ * @param globals variables used for global handling
+ * @return the index to the buffer for the "new" attribute
+ */
 int
 create_new_attribute(xml_index_globals_ptr globals)
 {
@@ -526,8 +548,15 @@ create_new_attribute(xml_index_globals_ptr globals)
 	return my_ind;
 }
 
-//Called when parsing an element if it has a text node
-//Current item in XMl doc stream is the element that is the parent of this text node
+/**
+ * Called when parsing an element if it has a text node. Current item in XMl doc
+ * stream is the element that is the parent of this text node
+ * @param parent_id element primary key
+ * @param prev_id previous text node, sibling
+ * @param reader pointer to LibXML stream reader
+ * @param globals variables used for global handling
+ * @return
+ */
 int
 process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
@@ -576,8 +605,13 @@ process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 	return REAL_TEXT_NODE;
 }
 
-//Retrieves the proper text from a text node
-char* get_text_from_node(xmlTextReaderPtr reader)
+/**
+ * Retrieves the proper text from a text node
+ * @param reader pointer to LibXML stream reader
+ * @return text data between <tag> some text </tag>, with white spaces
+ */
+char*
+get_text_from_node(xmlTextReaderPtr reader)
 {
 	int node_type;
 	char * text;
@@ -626,8 +660,13 @@ char* get_text_from_node(xmlTextReaderPtr reader)
 	return NULL;
 }
 
-//Returns TRUE if a text is all white space, FALSE otherwise
-int is_all_whitespace(char * text)
+/**
+ * Cheking for white spaces
+ * @param text 
+ * @return Returns TRUE if a text is all white space, FALSE otherwise
+ */
+int
+is_all_whitespace(char* text)
 {
 	int len, i;
 
@@ -642,8 +681,12 @@ int is_all_whitespace(char * text)
 	return TRUE;
 }
 
-//Replaces ' with \'
-char* replace_bad_chars(char* value)
+/**
+ * Replaces ' with \' if macro REPLACE_BAD_CHARS is set to TRUE
+ * @param globals variables used for global handling
+ */
+char*
+replace_bad_chars(char* value)
 {
 	char *temp;
 	if(REPLACE_BAD_CHARS != TRUE)
@@ -664,8 +707,12 @@ char* replace_bad_chars(char* value)
 	return value;
 }
 
-//Flush the element buffer
-void flush_element_node_buffer(xml_index_globals_ptr globals)
+/**
+ * Flush the element buffer to element_table
+ * @param globals variables used for global handling
+ */
+void
+flush_element_node_buffer(xml_index_globals_ptr globals)
 {
 	int i, name_length;
 
@@ -727,8 +774,12 @@ void flush_element_node_buffer(xml_index_globals_ptr globals)
 }
 
 
-//Flush the attribute buffer
-void flush_attribute_node_buffer(xml_index_globals_ptr globals)
+/**
+ * Flush the attribute buffer to attribute_table
+ * @param globals variables used for global handling
+ */
+void
+flush_attribute_node_buffer(xml_index_globals_ptr globals)
 {
 	int i, val_len;
 	StringInfoData query;
@@ -788,8 +839,12 @@ void flush_attribute_node_buffer(xml_index_globals_ptr globals)
 	elog(INFO, "flushed attribute_nodes");
 }
 
-//Flush the text buffer
-void flush_text_node_buffer(xml_index_globals_ptr globals)
+/**
+ * Flush the text buffer to text_table
+ * @param globals variables used for global handling
+ */
+void
+flush_text_node_buffer(xml_index_globals_ptr globals)
 {
 	int i, val_len;
 	StringInfoData query;
@@ -804,6 +859,8 @@ void flush_text_node_buffer(xml_index_globals_ptr globals)
 	{
 		for(i = 0; i < globals->text_node_buffer_count; i++)
 		{
+			if (text_node_buffer[i].value != NULL)
+			{
 				appendStringInfo(&query,
 							" (%d, %d, %d, %d, %d, '%s')",
 						text_node_buffer[i].did,
@@ -813,7 +870,17 @@ void flush_text_node_buffer(xml_index_globals_ptr globals)
 						text_node_buffer[i].prev_id,
 						text_node_buffer[i].value
 				);
-
+			} else
+			{
+				appendStringInfo(&query,
+							" (%d, %d, %d, %d, %d, NULL)",
+						text_node_buffer[i].did,
+						text_node_buffer[i].order,
+						text_node_buffer[i].depth,
+						text_node_buffer[i].parent_id,
+						text_node_buffer[i].prev_id
+				);
+			}
 				if ((i+1) < globals->text_node_buffer_count)
 				{
 					appendStringInfo(&query, ",");
@@ -844,5 +911,3 @@ void flush_text_node_buffer(xml_index_globals_ptr globals)
 	}
 	elog(INFO, "flushed text_nodes");
 }
-
-

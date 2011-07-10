@@ -3,7 +3,7 @@
 // project:	Indexing native XML datatype as was proposed on tomaspospisil.com
 // file:	xmlindex.c
 // date:	2.4.2011
-// desc:	Model of index structure, proposal
+// desc:	Model of index structure
 //
 ////////////////////////////////////////////////////////////////////////////////
 #include "postgres.h"

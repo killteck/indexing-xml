@@ -1,7 +1,13 @@
-/* 
+/**
  * File:   xml_index_loader.h
- * Author: xpospi04
+ * Authors: Philip Harding (harding@cs.arizona.edu)
+ * XISS/R project : University of Arizona, Computer Science Department
+ * http://www.xiss.cs.arizona.edu
  *
+ * Description: Implementation of XISS/R in PostgreSQL by Tomas Pospisil
+ * Ideas are based on Philip Hardings algorithm with PostgreSQL needs
+ * and specific memory menagement
+ * www.tomaspospisil.com
  */
 
 #ifndef XML_INDEX_LOADER_H
@@ -139,8 +145,8 @@ attribute_node		attribute_node_buffer[BUFFER_SIZE];
 
 int extern xml_index_entry(const char *xml_document, int length);
 
-static int preorder_traverse(int parent_id, int sibling_id,	xmlTextReaderPtr reader,
-		xml_index_globals_ptr globals);
+static int preorder_traverse(int parent_id, int sibling_id,	
+		xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
 void init_values(xml_index_globals_ptr globals);
 
@@ -148,7 +154,8 @@ int read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals);
 
 int create_new_element(xml_index_globals_ptr globals);
 
-int process_attributes(int parent_id, xmlTextReaderPtr reader, xml_index_globals_ptr globals);
+int process_attributes(int parent_id, xmlTextReaderPtr reader,
+		xml_index_globals_ptr globals);
 
 int create_new_attribute(xml_index_globals_ptr globals);
 
