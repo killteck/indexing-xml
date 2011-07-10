@@ -40,7 +40,8 @@ xml2 is extended contrib module from PostgreSQL source code, so best way is
 replace it and call make clean; make; sudo make install and after it call
 in psql instalation SQL file, which will load new functions to PostgreSQL.
 
-Will be automaticaly created new tables as was described above and new 
-xml validation functions, which are part of my master thesis.
+SQL will automaticaly create new tables as was described above and new 
+xml validation functions, which are part of my master thesis. Desciption of usage
+is set as notice in pgxml.sql
 
 
