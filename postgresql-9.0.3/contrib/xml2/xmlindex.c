@@ -45,20 +45,62 @@
 #include "utils/xml.h"
 #include <assert.h>
 
-
 //Level of debugging we want to do, set equal to DEBUG
 int debug_level;
 
-
 /* externally accessible functions */
-
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
 Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
 
+/*
+ * Internal function which add XML data into xml_documents_table and return
+ * ID of just inserted data
+ * @param xmldata
+ * @param name name of XML document
+ * @return SQL int (value from serial sequence)
+ */
+Datum
+insert_xmldata_into_table(char* xmldata, char* name)
+{
+	Oid oids[2];
+	Datum data[2];
+	char* nulls = NULL;
 
+	oids[0] = TEXTOID;
+	oids[1] = TEXTOID;
+
+	data[0] = name;
+	data[1] = xmldata;
+
+	SPI_connect();
+
+	if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2);",
+			oids, data, nulls, 2, false, 0) == SPI_ERROR_ARGUMENT)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("invalid query")));
+
+	SPI_finish();
+}
+
+/*
+ * Create indexes on shreded data
+ * @return true if succed
+ */
+bool
+create_indexes_on_tables(void)
+{
+	
+}
+
+/*
+ * Create tables as storage of shreded data
+ * @param none
+ * @return true/false
+ */
 Datum
 create_xmlindex_tables(PG_FUNCTION_ARGS)
 {
@@ -80,7 +122,8 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"depth int, "
 							"parent_id int, "
 							"prev_id int, "
-							"value text); "
+							"value text,"
+							"PRIMARY KEY (did,nid)); "
 			"CREATE TABLE element_table "
 							"(name text, "
 							"did int not null, "
@@ -116,6 +159,12 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(true);
 }
 
+/*
+ * Entry point for native XML support, shred XML document into tables and
+ * create indexes for future XQuery support
+ * @param
+ * @return
+ */
 Datum
 build_xmlindex(PG_FUNCTION_ARGS)
 {
@@ -139,14 +188,11 @@ build_xmlindex(PG_FUNCTION_ARGS)
 
 	loader_return = xml_index_entry(xmldataint, xmldatalen);
 
-
 	elog(INFO, "build_xmlindex ended");
-	PG_RETURN_BOOL(true);
+	PG_RETURN_BOOL(loader_return);
 #else
     NO_XML_SUPPORT();
     PG_RETURN_BOOL (false);
 #endif
 }
-
-
 
