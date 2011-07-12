@@ -55,6 +55,10 @@ Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
 
+/* ordinary internal (static) functions */
+int4 insert_xmldata_into_table(char* xmldata, char* name);
+bool create_indexes_on_tables(void);
+
 /*
  * Internal function which add XML data into xml_documents_table and return
  * ID of just inserted data
@@ -62,28 +66,68 @@ PG_FUNCTION_INFO_V1(create_xmlindex_tables);
  * @param name name of XML document
  * @return SQL int (value from serial sequence)
  */
-Datum
+int4
 insert_xmldata_into_table(char* xmldata, char* name)
 {
 	Oid oids[2];
 	Datum data[2];
-	char* nulls = NULL;
+	int4 result = -1;
+	
+	// for select result
+	TupleDesc tupdesc;
+	SPITupleTable *tuptable;
+	HeapTuple row;
 
 	oids[0] = TEXTOID;
-	oids[1] = TEXTOID;
+	oids[1] = XMLOID;
 
-	data[0] = name;
-	data[1] = xmldata;
+	data[0] = CStringGetDatum(name);
+	data[1] = CStringGetDatum(xmldata);
 
 	SPI_connect();
 
-	if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2);",
-			oids, data, nulls, 2, false, 0) == SPI_ERROR_ARGUMENT)
+/*
+// IT's not working !!
+	if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2)",
+			2, oids, data, NULL, false, 0) != SPI_OK_INSERT)
+	{
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("invalid query")));
+				 errmsg("Can not insert values into xml_documents_table")));
+	}
+*/
+
+/*
+// IT's working
+	if (SPI_execute("INSERT INTO xml_documents_table(name, value) VALUES ('pokus', '<pokus>aaa</pokus>')",
+			false, 0) != SPI_OK_INSERT)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("Can not get ID of lastly inserted XML document")));
+	}
+*/
+
+	if (SPI_execute("SELECT currval('xml_documents_table_did_seq');",
+			true, 1) != SPI_OK_SELECT)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("Can not get ID of lastly inserted XML document")));
+	}
+
+	if (SPI_tuptable != NULL)
+    {
+		tupdesc = SPI_tuptable->tupdesc;
+		tuptable = SPI_tuptable;
+		row = tuptable->vals[0];
+		result = atoi(SPI_getvalue(row, tupdesc, 0));
+		elog(INFO, "ID of inserted row %d", result);
+	}
 
 	SPI_finish();
+
+	return result;
 }
 
 /*
@@ -93,7 +137,25 @@ insert_xmldata_into_table(char* xmldata, char* name)
 bool
 create_indexes_on_tables(void)
 {
-	
+	bool result = false;
+
+	SPI_connect();
+
+	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, nid); "
+					"CREATE INDEX did_tab_name_index ON xml_documents_table (name); "
+					"CREATE INDEX elem_tab_all_index ON element_table (name, did, nid, size); "
+					"CREATE INDEX text_tab_index ON text_table (parent_id,did)",
+					false, 0) == SPI_ERROR_PARAM)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("Can not get ID of lastly inserted XML document")));
+	}
+
+	result = true;
+	SPI_finish();
+
+	return result;
 }
 
 /*
@@ -106,14 +168,13 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 {
 	StringInfoData query;
 
-	elog(INFO, "create tables start");
-
 	initStringInfo(&query);
 	appendStringInfo(&query,
 			"CREATE TABLE xml_documents_table "
 							"(did serial not null, "
 							"name text, "
-							"value xml); "
+							"value xml,"
+							"xdb_sequence int default 0); "
 			"CREATE TABLE attribute_table "
 							"(name text, "
 							"did int not null, "
@@ -148,14 +209,16 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 	SPI_connect();
 
 	if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
+	{
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("invalid query")));
+	}
+
+// TODO add foreign key to xml_documents_table
 
 	SPI_finish();
 
-
-	elog(INFO, "create tables end");
 	PG_RETURN_BOOL(true);
 }
 
@@ -170,8 +233,11 @@ build_xmlindex(PG_FUNCTION_ARGS)
 {
     xmltype     *xmldata    = NULL;
     char        *xmldataint = NULL;
+	text		*xml_name	= NULL;
+	char		*xml_nameint;
 	int			xmldatalen	= -1;
-	int			loader_return;
+	int			loader_return = 0;	// false
+
 
 #ifdef USE_LIBXML
 	elog(INFO, "build_xmlindex started");
@@ -180,14 +246,21 @@ build_xmlindex(PG_FUNCTION_ARGS)
     xmldataint  = VARDATA(xmldata);
 	xmldatalen  = VARSIZE(xmldata) - VARHDRSZ;
 	xmldataint[xmldatalen] = 0;
+
+	xml_name	= PG_GETARG_TEXT_P(1);
+	xml_nameint	= VARDATA(xml_name);
+	xml_nameint[VARSIZE(xml_name) - VARHDRSZ] = 0;
 	
-	elog(INFO, "data sended as argument %s, size %d", xmldataint, xmldatalen);
 	//initialize LibXML structures, if allready done -> do nothing
     pg_xml_init();
 	xmlInitParser();
 
+//TODO turn it on with parsed data
+	//insert_xmldata_into_table(xmldataint, xml_nameint);
+
 	loader_return = xml_index_entry(xmldataint, xmldatalen);
 
+	create_indexes_on_tables();
 	elog(INFO, "build_xmlindex ended");
 	PG_RETURN_BOOL(loader_return);
 #else

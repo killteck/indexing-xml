@@ -724,7 +724,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 	appendStringInfo(&query,
 						"INSERT INTO element_table(did, nid, size, name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
 
-	if(DO_FLUSH == TRUE)
+	if ((DO_FLUSH == TRUE) && ((globals->element_node_buffer_count-1) > 0))
 	{
 		for(i = 0; i < (globals->element_node_buffer_count-1); i++)
 		{
@@ -790,7 +790,7 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 	appendStringInfo(&query,
 						"INSERT INTO attribute_table(did, nid, size, name, depth, parent_id, prev_id, value) VALUES ");
 
-	if(DO_FLUSH == TRUE)
+	if ((DO_FLUSH == TRUE)  && (globals->attribute_node_buffer_count > 0))
 	{		
 		for(i = 0; i < globals->attribute_node_buffer_count; i++)
 		{
@@ -855,7 +855,7 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 	appendStringInfo(&query,
 						"INSERT INTO text_table(did, nid, depth, parent_id, prev_id, value) VALUES ");
 
-	if(DO_FLUSH == TRUE)
+	if ((DO_FLUSH == TRUE) && (globals->text_node_buffer_count > 0))
 	{
 		for(i = 0; i < globals->text_node_buffer_count; i++)
 		{
@@ -910,4 +910,18 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 		SPI_finish();
 	}
 	elog(INFO, "flushed text_nodes");
+}
+/**
+ * Prints a report 
+ * @param globals
+ */
+void
+report(xml_index_globals_ptr globals)
+{
+
+	elog(INFO, "Final report for loading XML into database");
+	elog(INFO, "total number of nodes = %d", globals->global_order);
+	elog(INFO, "total number of elements = %d", globals->element_node_count);
+	elog(INFO, "total number attribute = %d", globals->attribute_node_count);
+	elog(INFO, "total number of text nodes = %d", globals->text_node_count);
 }

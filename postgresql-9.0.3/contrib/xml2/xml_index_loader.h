@@ -171,7 +171,7 @@ int is_all_whitespace(char * text);
 void flush_text_node_buffer(xml_index_globals_ptr globals);
 void flush_attribute_node_buffer(xml_index_globals_ptr globals);
 void flush_element_node_buffer(xml_index_globals_ptr globals);
-
+void report(xml_index_globals_ptr globals);
 #ifdef	__cplusplus
 }
 #endif

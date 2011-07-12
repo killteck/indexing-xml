@@ -176,7 +176,7 @@ CREATE FUNCTION xmlvalidate_dtd(xml, dtd) RETURNS boolean
 -- Tomas Pospisil, GSoC project
 --
 
-CREATE FUNCTION build_xmlindex(xml) RETURNS boolean
+CREATE FUNCTION build_xmlindex(xml, text) RETURNS boolean
     AS 'MODULE_PATHNAME', 'build_xmlindex'
     LANGUAGE C STRICT;
 
