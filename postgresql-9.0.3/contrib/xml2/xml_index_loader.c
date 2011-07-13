@@ -136,7 +136,9 @@ create_new_element(xml_index_globals_ptr globals)
 	my_ind = globals->element_node_buffer_count;
 
 	if (DEBUG == TRUE)
-		elog(INFO, "creating new element at index: %d", my_ind);
+	{
+		elog(INFO, ">> creating new element at index: %d", my_ind);
+	}
 
 	element_node_buffer[my_ind].did = NO_VALUE;
 	element_node_buffer[my_ind].order = NO_VALUE;
@@ -156,7 +158,7 @@ create_new_element(xml_index_globals_ptr globals)
 	globals->element_node_buffer_count++;
 
 
-	globals->element_node_buffer_count++;
+	globals->element_node_count++;
 	return my_ind;
 
 }
@@ -724,9 +726,9 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 	appendStringInfo(&query,
 						"INSERT INTO element_table(did, nid, size, name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
 
-	if ((DO_FLUSH == TRUE) && ((globals->element_node_buffer_count-1) > 0))
+	if ((DO_FLUSH == TRUE) && (globals->element_node_buffer_count > 0))
 	{
-		for(i = 0; i < (globals->element_node_buffer_count-1); i++)
+		for(i = 0; i < globals->element_node_buffer_count; i++)
 		{
 			if(element_node_buffer[i].tag_name != NULL)
 			{
@@ -750,7 +752,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 							element_node_buffer[i].parent_id
 				);
 
-			if ((i+1) < (globals->element_node_buffer_count-1))
+			if ((i+1) < globals->element_node_buffer_count)
 			{
 				appendStringInfo(&query, ",");
 			} else
