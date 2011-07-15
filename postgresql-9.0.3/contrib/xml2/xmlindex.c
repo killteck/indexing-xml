@@ -51,9 +51,11 @@ int debug_level;
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
 Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
+Datum	is_ancestor(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
+PG_FUNCTION_INFO_V1(is_ancestor);
 
 /* ordinary internal (static) functions */
 int4 insert_xmldata_into_table(char* xmldata, char* name);
@@ -69,20 +71,25 @@ bool create_indexes_on_tables(void);
 int4
 insert_xmldata_into_table(char* xmldata, char* name)
 {
-	Oid oids[2];
-	Datum data[2];
 	int4 result = -1;
-	
+	StringInfoData query;
+
 	// for select result
 	TupleDesc tupdesc;
 	SPITupleTable *tuptable;
 	HeapTuple row;
+
+	elog(INFO, "name:%s", name);
+/*
+	Oid oids[2];
+	Datum data[2];
 
 	oids[0] = TEXTOID;
 	oids[1] = XMLOID;
 
 	data[0] = CStringGetDatum(name);
 	data[1] = CStringGetDatum(xmldata);
+*/
 
 	SPI_connect();
 
@@ -97,32 +104,48 @@ insert_xmldata_into_table(char* xmldata, char* name)
 	}
 */
 
-/*
+
 // IT's working
-	if (SPI_execute("INSERT INTO xml_documents_table(name, value) VALUES ('pokus', '<pokus>aaa</pokus>')",
-			false, 0) != SPI_OK_INSERT)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("Can not get ID of lastly inserted XML document")));
-	}
-*/
 
-	if (SPI_execute("SELECT currval('xml_documents_table_did_seq');",
-			true, 1) != SPI_OK_SELECT)
+	initStringInfo(&query);
+	appendStringInfo(&query, "INSERT INTO xml_documents_table(name) VALUES ('%s')", name);
+	elog(INFO, "=== will be queried: %s", query.data);
+
+	if (SPI_execute(query.data,	false, 0) != SPI_OK_INSERT)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("Can not get ID of lastly inserted XML document")));
 	}
 
+	elog(INFO, "insert passed");
+
+	SPI_finish();
+
+
+	SPI_connect(); // because of session
+	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
+			true, 0) != SPI_OK_SELECT)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_DATA_EXCEPTION),
+				 errmsg("Can not get ID of lastly inserted XML document")));
+	}
+
+	elog(INFO, "get sequence passed");
+	
 	if (SPI_tuptable != NULL)
     {
 		tupdesc = SPI_tuptable->tupdesc;
+		elog(INFO, "1");
 		tuptable = SPI_tuptable;
+		elog(INFO, "2");
 		row = tuptable->vals[0];
-		result = atoi(SPI_getvalue(row, tupdesc, 0));
-		elog(INFO, "ID of inserted row %d", result);
+		elog(INFO, "3");
+		
+		//result = atoi);
+		elog(INFO, "4");
+		elog(INFO, "ID of inserted row %s", SPI_getvalue(row, tupdesc, 0));
 	}
 
 	SPI_finish();
@@ -144,7 +167,7 @@ create_indexes_on_tables(void)
 	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, nid); "
 					"CREATE INDEX did_tab_name_index ON xml_documents_table (name); "
 					"CREATE INDEX elem_tab_all_index ON element_table (name, did, nid, size); "
-					"CREATE INDEX text_tab_index ON text_table (parent_id,did)",
+					"CREATE INDEX text_tab_index ON text_table (parent_id,did);",
 					false, 0) == SPI_ERROR_PARAM)
 	{
 		ereport(ERROR,
@@ -237,6 +260,7 @@ build_xmlindex(PG_FUNCTION_ARGS)
 	char		*xml_nameint;
 	int			xmldatalen	= -1;
 	int			loader_return = 0;	// false
+	int4		did;
 
 
 #ifdef USE_LIBXML
@@ -255,17 +279,43 @@ build_xmlindex(PG_FUNCTION_ARGS)
     pg_xml_init();
 	xmlInitParser();
 
-//TODO turn it on with parsed data
-	//insert_xmldata_into_table(xmldataint, xml_nameint);
 
-	loader_return = xml_index_entry(xmldataint, xmldatalen);
+	did = insert_xmldata_into_table(xmldataint, xml_nameint);
+
+	loader_return = xml_index_entry(xmldataint, xmldatalen, did);
 
 	create_indexes_on_tables();
+	
 	elog(INFO, "build_xmlindex ended");
 	PG_RETURN_BOOL(loader_return);
 #else
     NO_XML_SUPPORT();
     PG_RETURN_BOOL (false);
 #endif
+}
+
+/**
+ * Check if For two sibling nodes x and y, if x is the predecessor of y in
+ * preorder traversal, order(x) + size(x) < order(y)
+ * @param nid(x) = order(x), nid(y) = order(y), size(x)
+ * @return true/false
+ */
+Datum
+is_ancestor(PG_FUNCTION_ARGS)
+{
+	int4 order_x	= PG_GETARG_INT32(0);
+	int4 order_y	= PG_GETARG_INT32(2);
+	int4 size_x		= PG_GETARG_INT32(1);
+
+	bool result		= false;
+
+
+
+	if (order_x + size_x < order_y)
+	{
+		result = true;
+	}
+
+	PG_RETURN_BOOL(result);
 }
 

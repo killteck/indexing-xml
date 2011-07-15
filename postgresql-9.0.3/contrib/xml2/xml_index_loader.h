@@ -143,7 +143,7 @@ attribute_node		attribute_node_buffer[BUFFER_SIZE];
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int extern xml_index_entry(const char *xml_document, int length);
+int extern xml_index_entry(const char *xml_document, int length, int4 did);
 
 static int preorder_traverse(int parent_id, int sibling_id,	
 		xmlTextReaderPtr reader, xml_index_globals_ptr globals);

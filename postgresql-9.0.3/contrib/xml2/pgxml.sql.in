@@ -184,4 +184,8 @@ CREATE FUNCTION create_xmlindex_tables() RETURNS void
     AS 'MODULE_PATHNAME', 'create_xmlindex_tables'
     LANGUAGE C STRICT VOLATILE;
 
+CREATE FUNCTION is_ancestor(int, int, int) RETURNS boolean
+    AS 'MODULE_PATHNAME', 'is_ancestor'
+    LANGUAGE C STRICT;
+
 SELECT create_xmlindex_tables();

@@ -43,7 +43,7 @@
  * @return true/false if all XML shredding
  */
 int extern
-xml_index_entry(const char *xml_document, int length)
+xml_index_entry(const char *xml_document, int length, int4 did)
 {
 	xml_index_globals		globals;
 	int preorder_result;
