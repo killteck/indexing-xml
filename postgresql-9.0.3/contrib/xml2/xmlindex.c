@@ -1,12 +1,18 @@
-////////////////////////////////////////////////////////////////////////////////
-// author:	Tomas Pospisil, xpospi04@stud.fit.vutbr.cz, killteck@seznam.cz
-// project:	Indexing native XML datatype as was proposed on tomaspospisil.com
-// file:	xmlindex.c
-// date:	2.4.2011
-// desc:	Model of index structure
-// todo:	add foreign key to xml_documents_table
-//
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * file:	xmlindex.c
+ * date:	2.4.2011
+ * author:	Tomas Pospisil, xpospi04@stud.fit.vutbr.cz, killteck@seznam.cz
+ * project:	Indexing native XML datatype as was proposed on tomaspospisil.com
+ *
+ * desc:	Model of index structure see http://www.tomaspospisil.com
+ *
+
+ * TODO: I will cut off my ears for stringbuilder created SQL commands
+ *		create functional index with conjuction of is_ancestor called on all values
+ *		figure out range type for needs of R-tree GiST based index
+ *		create tests on HEAD git revision
+ */
+
 #include "postgres.h"
 #include "xml_index_loader.h"
 
