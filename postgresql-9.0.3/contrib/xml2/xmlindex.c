@@ -4,6 +4,7 @@
 // file:	xmlindex.c
 // date:	2.4.2011
 // desc:	Model of index structure
+// todo:	add foreign key to xml_documents_table
 //
 ////////////////////////////////////////////////////////////////////////////////
 #include "postgres.h"
@@ -75,11 +76,11 @@ insert_xmldata_into_table(char* xmldata, char* name)
 	StringInfoData query;
 
 	// for select result
-	TupleDesc tupdesc;
-	SPITupleTable *tuptable;
-	HeapTuple row;
+	TupleDesc	tupdesc;
+	HeapTuple	row;
+	SPITupleTable	*tuptable;
+	char			*rowIdStr;	// data are returned as string
 
-	elog(INFO, "name:%s", name);
 /*
 	Oid oids[2];
 	Datum data[2];
@@ -118,10 +119,7 @@ insert_xmldata_into_table(char* xmldata, char* name)
 				 errmsg("Can not get ID of lastly inserted XML document")));
 	}
 
-	elog(INFO, "insert passed");
-
 	SPI_finish();
-
 
 	SPI_connect(); // because of session
 	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
@@ -131,21 +129,17 @@ insert_xmldata_into_table(char* xmldata, char* name)
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("Can not get ID of lastly inserted XML document")));
 	}
-
-	elog(INFO, "get sequence passed");
 	
 	if (SPI_tuptable != NULL)
     {
 		tupdesc = SPI_tuptable->tupdesc;
-		elog(INFO, "1");
 		tuptable = SPI_tuptable;
-		elog(INFO, "2");
 		row = tuptable->vals[0];
-		elog(INFO, "3");
+
+		rowIdStr = SPI_getvalue(row, tupdesc, 1);
+		result = atoi(rowIdStr);
 		
-		//result = atoi);
-		elog(INFO, "4");
-		elog(INFO, "ID of inserted row %s", SPI_getvalue(row, tupdesc, 0));
+		elog(INFO, "ID int of inserted row %d", result);
 	}
 
 	SPI_finish();
@@ -242,6 +236,8 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 
 	SPI_finish();
 
+	create_indexes_on_tables();
+
 	PG_RETURN_BOOL(true);
 }
 
@@ -283,8 +279,6 @@ build_xmlindex(PG_FUNCTION_ARGS)
 	did = insert_xmldata_into_table(xmldataint, xml_nameint);
 
 	loader_return = xml_index_entry(xmldataint, xmldatalen, did);
-
-	create_indexes_on_tables();
 	
 	elog(INFO, "build_xmlindex ended");
 	PG_RETURN_BOOL(loader_return);

@@ -8,6 +8,8 @@
  * Ideas are based on Philip Hardings algorithm with PostgreSQL needs
  * and specific memory menagement
  * http://www.tomaspospisil.com
+ *
+ * TODO: I will cut off my ears for stringbuilder created SQL commands
  */
 
 #include "postgres.h"
@@ -59,6 +61,7 @@ xml_index_entry(const char *xml_document, int length, int4 did)
     }
 
 	init_values(&globals);
+	globals.global_doc_id = did;
 
 	xmlTextReaderRead(reader);
 	// parse and compute whole shredding
@@ -82,7 +85,6 @@ void
 init_values(xml_index_globals_ptr globals)
 {
 	globals->global_order					= 0;
-	globals->global_doc_id					= 0;
 	globals->element_node_count				= 0;
 	globals->element_node_buffer_count		= 0;
 	globals->attribute_node_count			= 0;
