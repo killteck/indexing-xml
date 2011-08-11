@@ -1,5 +1,5 @@
 /*
- * $PostgreSQL: pgsql/contrib/xml2/xpath.c,v 1.30 2010/07/06 19:18:55 momjian Exp $
+ * contrib/xml2/xpath.c
  *
  * Parser interface for DOM-based parser (libxml) rather than
  * stream-based SAX-type parser
@@ -61,7 +61,7 @@ static text *pgxml_result_to_text(xmlXPathObjectPtr res, xmlChar *toptag,
 static xmlChar *pgxml_texttoxmlchar(text *textstring);
 
 static xmlXPathObjectPtr pgxml_xpath(text *document, xmlChar *xpath,
-									 xpath_workspace *workspace);
+			xpath_workspace *workspace);
 
 static void cleanup_workspace(xpath_workspace *workspace);
 
@@ -83,7 +83,14 @@ pgxml_parser_init(void)
 }
 
 
-/* Returns true if document is well-formed */
+/*
+ * Returns true if document is well-formed
+ *
+ * Note: this has been superseded by a core function.  We still have to
+ * have it in the contrib module so that existing SQL-level references
+ * to the function won't fail; but in normal usage with up-to-date SQL
+ * definitions for the contrib module, this won't be called.
+ */
 
 PG_FUNCTION_INFO_V1(xml_is_well_formed);
 
@@ -227,7 +234,7 @@ Datum
 xpath_nodeset(PG_FUNCTION_ARGS)
 {
 	text	   *document = PG_GETARG_TEXT_P(0);
-	text	   *xpathsupp = PG_GETARG_TEXT_P(1);	/* XPath expression */
+	text	   *xpathsupp = PG_GETARG_TEXT_P(1);		/* XPath expression */
 	xmlChar    *toptag = pgxml_texttoxmlchar(PG_GETARG_TEXT_P(2));
 	xmlChar    *septag = pgxml_texttoxmlchar(PG_GETARG_TEXT_P(3));
 	xmlChar    *xpath;
@@ -260,7 +267,7 @@ Datum
 xpath_list(PG_FUNCTION_ARGS)
 {
 	text	   *document = PG_GETARG_TEXT_P(0);
-	text	   *xpathsupp = PG_GETARG_TEXT_P(1);	/* XPath expression */
+	text	   *xpathsupp = PG_GETARG_TEXT_P(1);		/* XPath expression */
 	xmlChar    *plainsep = pgxml_texttoxmlchar(PG_GETARG_TEXT_P(2));
 	xmlChar    *xpath;
 	text	   *xpres;
@@ -289,7 +296,7 @@ Datum
 xpath_string(PG_FUNCTION_ARGS)
 {
 	text	   *document = PG_GETARG_TEXT_P(0);
-	text	   *xpathsupp = PG_GETARG_TEXT_P(1);	/* XPath expression */
+	text	   *xpathsupp = PG_GETARG_TEXT_P(1);		/* XPath expression */
 	xmlChar    *xpath;
 	int32		pathsize;
 	text	   *xpres;
@@ -330,7 +337,7 @@ Datum
 xpath_number(PG_FUNCTION_ARGS)
 {
 	text	   *document = PG_GETARG_TEXT_P(0);
-	text	   *xpathsupp = PG_GETARG_TEXT_P(1);	/* XPath expression */
+	text	   *xpathsupp = PG_GETARG_TEXT_P(1);		/* XPath expression */
 	xmlChar    *xpath;
 	float4		fRes;
 	xmlXPathObjectPtr res;
@@ -362,7 +369,7 @@ Datum
 xpath_bool(PG_FUNCTION_ARGS)
 {
 	text	   *document = PG_GETARG_TEXT_P(0);
-	text	   *xpathsupp = PG_GETARG_TEXT_P(1);	/* XPath expression */
+	text	   *xpathsupp = PG_GETARG_TEXT_P(1);		/* XPath expression */
 	xmlChar    *xpath;
 	int			bRes;
 	xmlXPathObjectPtr res;

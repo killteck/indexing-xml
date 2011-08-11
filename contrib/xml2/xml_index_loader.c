@@ -726,7 +726,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-						"INSERT INTO element_table(did, nid, size, name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
+						"INSERT INTO element_table(did, pre_order, size, name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
 
 	if ((DO_FLUSH == TRUE) && (globals->element_node_buffer_count > 0))
 	{
@@ -792,7 +792,7 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-						"INSERT INTO attribute_table(did, nid, size, name, depth, parent_id, prev_id, value) VALUES ");
+						"INSERT INTO attribute_table(did, pre_order, size, name, depth, parent_id, prev_id, value) VALUES ");
 
 	if ((DO_FLUSH == TRUE)  && (globals->attribute_node_buffer_count > 0))
 	{		
@@ -857,7 +857,7 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-						"INSERT INTO text_table(did, nid, depth, parent_id, prev_id, value) VALUES ");
+						"INSERT INTO text_table(did, pre_order, depth, parent_id, prev_id, value) VALUES ");
 
 	if ((DO_FLUSH == TRUE) && (globals->text_node_buffer_count > 0))
 	{

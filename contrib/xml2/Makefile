@@ -1,14 +1,14 @@
-# $PostgreSQL: pgsql/contrib/xml2/Makefile,v 1.14 2010/03/01 18:07:59 tgl Exp $
+# contrib/xml2/Makefile
 
 MODULE_big = pgxml
+OBJS = xpath.o xslt_proc.o schema_datatypes.o  xmlindex.o xml_index_loader.o xml_validation.o
 
-OBJS = xpath.o xslt_proc.o schema_datatypes.o xml_validation.o xmlindex.o xml_index_loader.o
+EXTENSION = xml2
+DATA = xml2--1.0.sql xml2--unpackaged--1.0.sql
+
+REGRESS = xml2
 
 SHLIB_LINK += $(filter -lxslt, $(LIBS)) $(filter -lxml2, $(LIBS))
-
-DATA_built = pgxml.sql
-DATA = uninstall_pgxml.sql
-REGRESS = xml2
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

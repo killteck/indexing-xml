@@ -8,8 +8,6 @@
  *
 
  * TODO: I will cut off my ears for stringbuilder created SQL commands
- *		create functional index with conjuction of is_ancestor called on all values
- *		figure out range type for needs of R-tree GiST based index
  *		create tests on HEAD git revision
  */
 
@@ -58,11 +56,11 @@ int debug_level;
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
 Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
-Datum	is_ancestor(PG_FUNCTION_ARGS);
+//Datum	is_ancestor(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
-PG_FUNCTION_INFO_V1(is_ancestor);
+//PG_FUNCTION_INFO_V1(is_ancestor);
 
 /* ordinary internal (static) functions */
 int4 insert_xmldata_into_table(char* xmldata, char* name);
@@ -164,10 +162,13 @@ create_indexes_on_tables(void)
 
 	SPI_connect();
 
-	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, nid); "
+	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, pre_order); "
+					"CREATE INDEX attr_tab_range_index ON element_table USING gist (range_i(pre_order, (pre_order+size)));"
 					"CREATE INDEX did_tab_name_index ON xml_documents_table (name); "
-					"CREATE INDEX elem_tab_all_index ON element_table (name, did, nid, size); "
-					"CREATE INDEX text_tab_index ON text_table (parent_id,did);",
+					"CREATE INDEX elem_tab_all_index ON element_table (name, did, pre_order, size); "
+					"CREATE INDEX elem_tab_range_index ON element_table USING gist (range(pre_order, (pre_order+size)));"
+					"CREATE INDEX text_tab_index ON text_table (parent_id,did);"
+					,
 					false, 0) == SPI_ERROR_PARAM)
 	{
 		ereport(ERROR,
@@ -201,32 +202,32 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 			"CREATE TABLE attribute_table "
 							"(name text, "
 							"did int not null, "
-							"nid int not null, "
+							"pre_order int not null, "
 							"size int not null, "
 							"depth int, "
 							"parent_id int, "
 							"prev_id int, "
 							"value text,"
-							"PRIMARY KEY (did,nid)); "
+							"PRIMARY KEY (did,pre_order)); "
 			"CREATE TABLE element_table "
 							"(name text, "
 							"did int not null, "
-							"nid int not null, "
-							"size int, "
+							"pre_order int not null, "
+							"size int not null, "
 							"depth int, "
 							"parent_id int, "
 							"prev_id int, "
 							"child_id int, "
 							"attr_id int, "
-							"PRIMARY KEY (did,nid));"
+							"PRIMARY KEY (did,pre_order,size));"
 			"CREATE TABLE text_table "
 							"(did int not null, "
-							"nid int not null, "
+							"pre_order int not null, "
 							"depth int not null, "
 							"parent_id int, "
 							"prev_id int, "
 							"value text, "
-							"PRIMARY KEY  (nid, did));"
+							"PRIMARY KEY  (pre_order, did));"
 			);
 
 	SPI_connect();
@@ -287,7 +288,13 @@ build_xmlindex(PG_FUNCTION_ARGS)
 	loader_return = xml_index_entry(xmldataint, xmldatalen, did);
 	
 	elog(INFO, "build_xmlindex ended");
-	PG_RETURN_BOOL(loader_return);
+	if (loader_return == XML_INDEX_LOADER_SUCCES)
+	{
+		PG_RETURN_BOOL(true);
+	} else
+	{
+		PG_RETURN_BOOL(false);
+	}
 #else
     NO_XML_SUPPORT();
     PG_RETURN_BOOL (false);
@@ -297,9 +304,9 @@ build_xmlindex(PG_FUNCTION_ARGS)
 /**
  * Check if For two sibling nodes x and y, if x is the predecessor of y in
  * preorder traversal, order(x) + size(x) < order(y)
- * @param nid(x) = order(x), nid(y) = order(y), size(x)
+ * @param pre_order(x) = order(x), pre_order(y) = order(y), size(x)
  * @return true/false
- */
+
 Datum
 is_ancestor(PG_FUNCTION_ARGS)
 {
@@ -319,3 +326,4 @@ is_ancestor(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(result);
 }
 
+ */
