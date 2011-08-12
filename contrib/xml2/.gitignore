@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 # Generated subdirectories
 /log/
 /results/
 /tmp_check/
+=======
+/pgxml.sql
+# Generated subdirectories
+/results/
+>>>>>>> master

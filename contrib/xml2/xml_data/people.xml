@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<people>
+	<person sex = "male">
+		<name>
+			<firstname>Quanzhong</firstname>
+			<lastname>Li</lastname>
+		</name>
+		<title>XML indexing</title>
+		<price unit = "USD">120</price>
+	</person>
+	<person sex = "female">
+		<name>
+			<firstname>Bongki</firstname>
+			<lastname>Moon</lastname>
+		</name>
+		<title>javelina javelina</title>
+		<price unit = "USD">100</price>
+	</person>
+</people>

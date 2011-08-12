@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<books>
+	<book>
+		<author>
+			<firstname>Quanzhong</firstname>
+			<lastname>Li</lastname>
+		</author>
+		<title>XML indexing</title>
+		<price unit = "USD">120</price>
+	</book>
+	<book>
+		<author>
+			<firstname>Bongki</firstname>
+			<lastname>Moon</lastname>
+		</author>
+		<title>javelina javelina</title>
+		<price unit = "USD" test = "A&amp;M">100</price>
+	</book>
+</books>

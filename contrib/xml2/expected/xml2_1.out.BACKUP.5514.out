@@ -1,9 +1,6 @@
 <<<<<<< HEAD
 CREATE EXTENSION xml2;
 =======
-<<<<<<< HEAD
-CREATE EXTENSION xml2;
-=======
 --
 -- first, define the functions.  Turn off echoing so that expected file
 -- does not depend on contents of pgxml.sql.
@@ -12,7 +9,6 @@ SET client_min_messages = warning;
 \set ECHO none
 RESET client_min_messages;
 >>>>>>> indexing-xml/master
->>>>>>> master
 select query_to_xml('select 1 as x',true,false,'');
                          query_to_xml                          
 ---------------------------------------------------------------
@@ -29,12 +25,8 @@ select query_to_xml('select 1 as x',true,false,'');
 <<<<<<< HEAD
 select xslt_process( query_to_xml('select x from generate_series(1,5) as
 =======
-<<<<<<< HEAD
-select xslt_process( query_to_xml('select x from generate_series(1,5) as
-=======
 select xslt_process( query_to_xml('select x from generate_series(1,5) as 
 >>>>>>> indexing-xml/master
->>>>>>> master
 x',true,false,'')::text,
 $$<xsl:stylesheet version="1.0"
                xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -50,35 +42,7 @@ $$<xsl:stylesheet version="1.0"
 </xsl:template>
 </xsl:stylesheet>
 $$::text);
-                         xslt_process                          
----------------------------------------------------------------
- <?xml version="1.0"?>                                        +
- <table xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">+
-                                                              +
- <row>                                                        +
-   <x>1</x>                                                   +
- </row>                                                       +
-                                                              +
- <row>                                                        +
-   <x>2</x>                                                   +
- </row>                                                       +
-                                                              +
- <row>                                                        +
-   <x>3</x>                                                   +
- </row>                                                       +
-                                                              +
- <row>                                                        +
-   <x>4</x>                                                   +
- </row>                                                       +
-                                                              +
- <row>                                                        +
-   <x>5</x>                                                   +
- </row>                                                       +
-                                                              +
- </table>                                                     +
- 
-(1 row)
-
+ERROR:  xslt_process() is not available without libxslt
 CREATE TABLE xpath_test (id integer NOT NULL, t xml);
 INSERT INTO xpath_test VALUES (1, '<doc><int>1</int></doc>');
 SELECT * FROM xpath_table('id', 't', 'xpath_test', '/doc/int', 'true')
@@ -134,12 +98,7 @@ xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
       </xsl:copy>
    </xsl:template>
 </xsl:stylesheet>$$)::xml;
- xslt_process 
---------------
- <aaa/>      +
- 
-(1 row)
-
+ERROR:  xslt_process() is not available without libxslt
 select xslt_process('<aaa/>',$$<xsl:stylesheet version="1.0"
 xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
 <xsl:template match="@*|node()">
@@ -148,12 +107,7 @@ xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
       </xsl:copy>
    </xsl:template>
 </xsl:stylesheet>$$)::xml;
- xslt_process 
---------------
- <aaa/>      +
- 
-(1 row)
-
+ERROR:  xslt_process() is not available without libxslt
 create table t1 (id integer, xml_data xml);
 insert into t1 (id, xml_data)
 values
@@ -162,9 +116,6 @@ Value</attribute></attributes>');
 create index idx_xpath on t1 ( xpath_string
 ('/attributes/attribute[@name="attr_1"]/text()', xml_data::text));
 <<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> master
 SELECT xslt_process('<employee><name>cim</name><age>30</age><pay>400</pay></employee>'::text, $$<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
   <xsl:output method="xml" omit-xml-declaration="yes" indent="yes"/>
   <xsl:strip-space elements="*"/>
@@ -214,27 +165,6 @@ SELECT xslt_process('<employee><name>cim</name><age>30</age><pay>400</pay></empl
     </xsl:element>
   </xsl:template>
 </xsl:stylesheet>$$::text, 'n1="v1",n2="v2",n3="v3",n4="v4",n5="v5",n6="v6",n7="v7",n8="v8",n9="v9",n10="v10",n11="v11",n12="v12"'::text);
-      xslt_process      
-------------------------
- <samples>             +
-   <sample>v1</sample> +
-   <sample>v2</sample> +
-   <sample>v3</sample> +
-   <sample>v4</sample> +
-   <sample>v5</sample> +
-   <sample>v6</sample> +
-   <sample>v7</sample> +
-   <sample>v8</sample> +
-   <sample>v9</sample> +
-   <sample>v10</sample>+
-   <sample>v11</sample>+
-   <sample>v12</sample>+
- </samples>            +
- 
-(1 row)
-
-<<<<<<< HEAD
-=======
+ERROR:  xslt_process() is not available without libxslt
 =======
 >>>>>>> indexing-xml/master
->>>>>>> master
