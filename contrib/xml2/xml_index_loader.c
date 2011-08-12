@@ -39,6 +39,11 @@
 #include <assert.h>
 
 
+//Buffers
+element_node		element_node_buffer[BUFFER_SIZE];
+text_node			text_node_buffer[BUFFER_SIZE];
+attribute_node		attribute_node_buffer[BUFFER_SIZE];
+
 /**
  * Entry point of loader
  * @param xml_document
@@ -104,8 +109,10 @@ int
 read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
 {
 	int err_val = xmlTextReaderRead(reader);
-
-	elog(INFO, "reading next node");
+	if (DEBUG)
+	{
+		elog(INFO, "reading next node");
+	}
 
 //TODO better handling
 	if(err_val == LIBXML_ERR)
@@ -137,7 +144,7 @@ create_new_element(xml_index_globals_ptr globals)
 
 	my_ind = globals->element_node_buffer_count;
 
-	if (DEBUG == TRUE)
+	if (DEBUG)
 	{
 		elog(INFO, ">> creating new element at index: %d", my_ind);
 	}
@@ -204,7 +211,7 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	my_depth = xmlTextReaderDepth(reader);
 
 
-	if(DEBUG == TRUE)
+	if(DEBUG)
 	{
 		elog(INFO, "--PREORDER-- Parsing %d:%s at depth %d\n", my_order, my_tag_name, my_depth);
 	}
@@ -221,7 +228,7 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	//Check whether next node is empty
 	if(xmlTextReaderIsEmptyElement(reader) == 1)
 	{
-		if(DEBUG == TRUE)
+		if(DEBUG)
 		{
 			elog(INFO, "Node %d:%s at depth %d, does not have a closing tag.\n", my_order, my_tag_name, my_depth);
 		}
@@ -240,19 +247,20 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	//Type of next node
 	node_type = xmlTextReaderNodeType(reader);
 
-	if(DEBUG == TRUE && node_type == ELEMENT_END)
+	if(DEBUG && node_type == ELEMENT_END)
 	{
 		elog(INFO, "Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
 	}
 
 	while(node_type != ELEMENT_END)  //While we have unvisited children
 	{
-		elog(INFO, "while (node_type != ELEMENT_END)");
+		if (DEBUG)
+		{
+			elog(INFO, "while (node_type != ELEMENT_END)");
+		}
 
 		if(node_type == TEXT_NODE || node_type == CDATA_SEC) //Visit text nodes
 		{
-			elog(INFO, "je to text node");
-
 			err_val = process_text_node(my_order, prev_child, reader, globals);
 			if(err_val == REAL_TEXT_NODE)
 			{
@@ -261,7 +269,6 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 		} else if(node_type == ELEMENT_START) //Recurse on elements
 		{
-			elog(INFO, "je to element_start");
 
 			recent_child = (globals->global_order) + 1; //Next time we have a child it will know this as its nearest sibling
 			size_res = preorder_traverse(my_order,  prev_child, reader, globals);
@@ -294,11 +301,8 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 			return(LIBXML_ERR);
 		}
 
-		elog(INFO, "je to v pisi reader:%d  X my_depth:%d, is",
-				xmlTextReaderDepth(reader), my_depth);
-
 		node_type = xmlTextReaderNodeType(reader);
-		if(DEBUG == TRUE && node_type == ELEMENT_END)
+		if(DEBUG && node_type == ELEMENT_END)
 		{
 			elog(INFO,"Found end of %d:%s with %d children at depth %d returning to %d.\n",
 					my_order, my_tag_name, my_size, my_depth, parent_id );
@@ -306,7 +310,7 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 
 		if(my_depth >= xmlTextReaderDepth(reader))
 		{
-			if(DEBUG == TRUE)
+			if(DEBUG)
 			{
 				elog(INFO,"Node %d:%s with %d children at depth %d has no end "
 						"tag, now returning to %d\n",my_order, my_tag_name,
@@ -343,7 +347,7 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
 	//	}
 	}
 
-	if (DEBUG == true)
+	if (DEBUG)
 	{
 		elog(INFO, "== CREATE == element[%d] values did:%d, order:%d, size:%d "
 				"depth:%d, first_attr_id:%d, , child_id:%d, parent_id:%d",
@@ -388,8 +392,10 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 	int last_attr = NO_VALUE;
 
 	num_attributes = xmlTextReaderAttributeCount(reader);
-
-	elog(INFO, "processing attributes it is there %d", num_attributes);
+	if (DEBUG)
+	{
+		elog(INFO, "processing attributes it is there %d", num_attributes);
+	}
 
 	if(num_attributes == LIBXML_ERR || num_attributes == 0)
 	{
@@ -402,7 +408,7 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 		err = xmlTextReaderMoveToAttributeNo(reader, i);
 		if(err != LIBXML_SUCCESS)
 		{
-			elog(INFO,"LIBXML_SUCCESS not found error");
+			elog(INFO,"process_attributes found error");
 			//error
 			i--;
 			break;
@@ -422,7 +428,10 @@ process_attributes(int parent_id, xmlTextReaderPtr reader,
 		if(attribute_node_buffer[my_ind].depth == -1)
 		{
 			//Possible place to implement error handling code
-			elog(INFO,"LIBXML_SUCCESS not found error"); 
+			if (DEBUG)
+			{
+				elog(INFO,"LIBXML_SUCCESS not found error");
+			}
 			exit(LIBXML_ATTRIBUTE_ERROR);
 		}
 		attribute_node_buffer[my_ind].parent_id = parent_id;
@@ -484,7 +493,10 @@ create_new_text_node(xml_index_globals_ptr globals)
 	}
 	my_ind = globals->text_node_buffer_count;
 
-	elog(INFO, "creating new text node at index: %d", my_ind);
+	if (DEBUG)
+	{
+		elog(INFO, "creating new text node at index: %d", my_ind);
+	}
 
 	text_node_buffer[my_ind].did = NO_VALUE;
 	text_node_buffer[my_ind].order = NO_VALUE;
@@ -525,8 +537,11 @@ create_new_attribute(xml_index_globals_ptr globals)
 	}
 	
 	my_ind = globals->attribute_node_buffer_count;
-
-	elog(INFO, "creating new attribute at index: %d", my_ind);
+	
+	if (DEBUG)
+	{
+		elog(INFO, "creating new attribute at index: %d", my_ind);
+	}
 
 	attribute_node_buffer[my_ind].did = NO_VALUE;
 	attribute_node_buffer[my_ind].order = NO_VALUE;
@@ -719,10 +734,12 @@ void
 flush_element_node_buffer(xml_index_globals_ptr globals)
 {
 	int i, name_length;
-
 	StringInfoData query;
 
-	elog(INFO, "flushing element_nodes");
+	if (DEBUG)
+	{
+		elog(INFO, "flushing element_nodes");
+	}
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
@@ -762,8 +779,10 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 				appendStringInfo(&query, ";");
 			}
 		}
-
-		elog(INFO, "flush element: %s\n", query.data);
+		if (DEBUG)
+		{
+			elog(INFO, "flush element: %s\n", query.data);
+		}
 
 		SPI_connect();
 
@@ -787,8 +806,11 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 {
 	int i, val_len;
 	StringInfoData query;
-
-	elog(INFO, "flushing attribute_nodes");
+	
+	if (DEBUG)
+	{
+		elog(INFO, "flushing attribute_nodes");
+	}
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
@@ -828,8 +850,11 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 			}
 		}
 
-		elog(INFO, "flush attributes: %s\n", query.data);
-
+		if (DEBUG)
+		{
+			elog(INFO, "flush attributes: %s\n", query.data);
+		}
+		
 		SPI_connect();
 
 		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
@@ -839,8 +864,10 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 
 		SPI_finish();
 	}
-
-	elog(INFO, "flushed attribute_nodes");
+	if (DEBUG)
+	{
+		elog(INFO, "flushed attribute_nodes");
+	}
 }
 
 /**
@@ -853,7 +880,10 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 	int i, val_len;
 	StringInfoData query;
 
-	elog(INFO, "flushing text_nodes");
+	if (DEBUG)
+	{
+		elog(INFO, "flushing text_nodes");
+	}
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
@@ -901,8 +931,11 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 				val_len = 7;
 			}
 		}
-
-		elog(INFO, "flush text nodes: %s\n", query.data);
+		
+		if (DEBUG)
+		{
+			elog(INFO, "flush text nodes: %s\n", query.data);
+		}
 
 		SPI_connect();
 
@@ -913,7 +946,11 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 
 		SPI_finish();
 	}
-	elog(INFO, "flushed text_nodes");
+
+	if (DEBUG)
+	{
+		elog(INFO, "flushed text_nodes");
+	}
 }
 /**
  * Prints a report 
@@ -922,7 +959,6 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 void
 report(xml_index_globals_ptr globals)
 {
-
 	elog(INFO, "Final report for loading XML into database");
 	elog(INFO, "total number of nodes = %d", globals->global_order);
 	elog(INFO, "total number of elements = %d", globals->element_node_count);

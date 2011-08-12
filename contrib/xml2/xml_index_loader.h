@@ -32,7 +32,7 @@ extern "C" {
 	#include <libxml/xmlreader.h>
 #endif   /* USE_LIBXML */
 
-#define DEBUG TRUE				//If TRUE DEBUG mode is turned on
+#define DEBUG FALSE				//If TRUE DEBUG mode is turned on
 
 
 //Error Codes
@@ -135,11 +135,6 @@ struct xml_index_globals {
 	int text_node_buffer_count;
 };
 
-
-//Buffers
-element_node		element_node_buffer[BUFFER_SIZE];
-text_node			text_node_buffer[BUFFER_SIZE];
-attribute_node		attribute_node_buffer[BUFFER_SIZE];
 
 ////////////////////////////////////////////////////////////////////////////////
 

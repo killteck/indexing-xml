@@ -10,6 +10,7 @@
  * TODO: I will cut off my ears for stringbuilder created SQL commands
  *		create tests on HEAD git revision
  *		create foreign key on did
+ *		test if range index on attribute_table is needed
  */
 
 #include "postgres.h"
@@ -52,7 +53,7 @@
 #include <assert.h>
 
 //Level of debugging we want to do, set equal to DEBUG
-int debug_level;
+int debug_level = 0;
 
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
@@ -113,7 +114,11 @@ insert_xmldata_into_table(char* xmldata, char* name)
 
 	initStringInfo(&query);
 	appendStringInfo(&query, "INSERT INTO xml_documents_table(name) VALUES ('%s')", name);
-	elog(INFO, "=== will be queried: %s", query.data);
+
+	if (debug_level > 1)
+	{
+		elog(INFO, "=== will be queried: %s", query.data);
+	}
 
 	if (SPI_execute(query.data,	false, 0) != SPI_OK_INSERT)
 	{
@@ -142,7 +147,10 @@ insert_xmldata_into_table(char* xmldata, char* name)
 		rowIdStr = SPI_getvalue(row, tupdesc, 1);
 		result = atoi(rowIdStr);
 		
-		elog(INFO, "ID int of inserted row %d", result);
+		if (debug_level > 1)
+		{
+			elog(INFO, "ID int of inserted row %d", result);
+		}
 	}
 
 	SPI_finish();
@@ -262,7 +270,10 @@ build_xmlindex(PG_FUNCTION_ARGS)
 
 
 #ifdef USE_LIBXML
-	elog(INFO, "build_xmlindex started");
+	if (debug_level > 1)
+	{
+		elog(INFO, "build_xmlindex started");
+	}
 
 	// getting C string from first argument, as needed by LibXML
 	xmldata = DatumGetCString(DirectFunctionCall1(xml_out, PG_GETARG_DATUM(0)));
@@ -276,8 +287,11 @@ build_xmlindex(PG_FUNCTION_ARGS)
 
 	did = insert_xmldata_into_table(xmldata, text_to_cstring(xml_name));
 	loader_return = xml_index_entry(xmldata, xmldatalen, did);
+	if (debug_level > 1)
+	{
+		elog(INFO, "build_xmlindex ended");
+	}
 	
-	elog(INFO, "build_xmlindex ended");
 	if (loader_return == XML_INDEX_LOADER_SUCCES)
 	{
 		PG_RETURN_BOOL(true);
