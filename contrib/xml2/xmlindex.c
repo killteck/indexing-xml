@@ -9,7 +9,6 @@
 
  * TODO: I will cut off my ears for stringbuilder created SQL commands
  *		create tests on HEAD git revision
- *		create foreign key on did
  *		test if range index on attribute_table is needed
  */
 
@@ -53,7 +52,7 @@
 #include <assert.h>
 
 //Level of debugging we want to do, set equal to DEBUG
-int debug_level = 0;
+int debug_level = 4;
 
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
@@ -63,7 +62,7 @@ PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
 
 /* ordinary internal (static) functions */
-int4 insert_xmldata_into_table(char* xmldata, char* name);
+int4 insert_xmldata_into_table(xmltype* xmldata, text *name);
 bool create_indexes_on_tables(void);
 
 /*
@@ -74,10 +73,9 @@ bool create_indexes_on_tables(void);
  * @return SQL int (value from serial sequence)
  */
 int4
-insert_xmldata_into_table(char* xmldata, char* name)
+insert_xmldata_into_table(xmltype* xmldata, text *name)
 {
-	int4 result = -1;
-	StringInfoData query;
+	int4 result = -1;	
 
 	// for select result
 	TupleDesc	tupdesc;
@@ -85,33 +83,30 @@ insert_xmldata_into_table(char* xmldata, char* name)
 	SPITupleTable	*tuptable;
 	char			*rowIdStr;	// data are returned as string
 
-/*
 	Oid oids[2];
 	Datum data[2];
 
 	oids[0] = TEXTOID;
 	oids[1] = XMLOID;
 
-	data[0] = CStringGetDatum(name);
-	data[1] = CStringGetDatum(xmldata);
-*/
+	data[0] = PointerGetDatum(name);
+	data[1] = XmlPGetDatum(xmldata);
 
 	SPI_connect();
 
-/*
 // IT's not working !!
 	if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2)",
-			2, oids, data, NULL, false, 0) != SPI_OK_INSERT)
+			2, oids, data, NULL, false, 1) != SPI_OK_INSERT)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("Can not insert values into xml_documents_table")));
 	}
-*/
+
 
 
 // IT's working
-
+/*
 	initStringInfo(&query);
 	appendStringInfo(&query, "INSERT INTO xml_documents_table(name) VALUES ('%s')", name);
 
@@ -126,10 +121,11 @@ insert_xmldata_into_table(char* xmldata, char* name)
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("Can not get ID of lastly inserted XML document")));
 	}
+*/
+// try it again
+//	SPI_finish();
 
-	SPI_finish();
-
-	SPI_connect(); // because of session
+//	SPI_connect(); // because of session
 	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
 			true, 0) != SPI_OK_SELECT)
 	{
@@ -262,9 +258,9 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 Datum
 build_xmlindex(PG_FUNCTION_ARGS)
 {
-    char        *xmldata	= NULL;		// xml document, need to be string for libxml
+
+	xmltype		*xmldata	= NULL;
 	text		*xml_name	= NULL;
-	int			xmldatalen	= -1;
 	int			loader_return = 0;		// false
 	int4		did;					
 
@@ -275,18 +271,18 @@ build_xmlindex(PG_FUNCTION_ARGS)
 		elog(INFO, "build_xmlindex started");
 	}
 
-	// getting C string from first argument, as needed by LibXML
-	xmldata = DatumGetCString(DirectFunctionCall1(xml_out, PG_GETARG_DATUM(0)));
-	xmldatalen = strnlen(xmldata, MAXINT);
-
-	xml_name	= PG_GETARG_TEXT_P(1);		// get text pointer from second argument
+	xmldata		= PG_GETARG_XML_P(0);
+	xml_name	= PG_GETARG_TEXT_P(1);	
 	
 	//initialize LibXML structures, if allready done -> do nothing
     pg_xml_init();
 	xmlInitParser();
 
-	did = insert_xmldata_into_table(xmldata, text_to_cstring(xml_name));
-	loader_return = xml_index_entry(xmldata, xmldatalen, did);
+	did = insert_xmldata_into_table(xmldata, xml_name);
+	loader_return = xml_index_entry(
+			DatumGetCString(DirectFunctionCall1(xml_out,
+				XmlPGetDatum(xmldata))), 
+			did);
 	if (debug_level > 1)
 	{
 		elog(INFO, "build_xmlindex ended");

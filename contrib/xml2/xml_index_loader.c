@@ -50,10 +50,11 @@ attribute_node		attribute_node_buffer[BUFFER_SIZE];
  * @return true/false if all XML shredding
  */
 int extern
-xml_index_entry(const char *xml_document, int length, int4 did)
+xml_index_entry(const char *xml_document, int4 did)
 {
 	xml_index_globals		globals;
 	int preorder_result;
+	int length			=	strlen(xml_document);
 
 	//globals.reader
 	xmlTextReaderPtr reader		= xmlReaderForMemory(xml_document, length,
@@ -61,7 +62,7 @@ xml_index_entry(const char *xml_document, int length, int4 did)
 
 	if (reader == NULL)
 	{ // error with loading
-		elog(INFO, "HUGE problem with libXML in memory loading of XML document");
+		elog(DEBUG1, "HUGE problem with libXML in memory loading of XML document");
 		return LIBXML_ERR;
     }
 
