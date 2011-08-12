@@ -9,12 +9,12 @@
 
  * TODO: I will cut off my ears for stringbuilder created SQL commands
  *		create tests on HEAD git revision
+ *		create foreign key on did
  */
 
 #include "postgres.h"
 #include "xml_index_loader.h"
 
-//#define USE_LIBXML
 #ifdef USE_LIBXML
 	#include <libxml/chvalid.h>
 	#include <libxml/parser.h>
@@ -48,6 +48,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/xml.h"
+#include "snowball/libstemmer/header.h"
 #include <assert.h>
 
 //Level of debugging we want to do, set equal to DEBUG
@@ -56,11 +57,9 @@ int debug_level;
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
 Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
-//Datum	is_ancestor(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
-//PG_FUNCTION_INFO_V1(is_ancestor);
 
 /* ordinary internal (static) functions */
 int4 insert_xmldata_into_table(char* xmldata, char* name);
@@ -147,7 +146,6 @@ insert_xmldata_into_table(char* xmldata, char* name)
 	}
 
 	SPI_finish();
-
 	return result;
 }
 
@@ -162,8 +160,7 @@ create_indexes_on_tables(void)
 
 	SPI_connect();
 
-	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, pre_order); "
-					"CREATE INDEX attr_tab_range_index ON element_table USING gist (range_i(pre_order, (pre_order+size)));"
+	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, pre_order); "					
 					"CREATE INDEX did_tab_name_index ON xml_documents_table (name); "
 					"CREATE INDEX elem_tab_all_index ON element_table (name, did, pre_order, size); "
 					"CREATE INDEX elem_tab_range_index ON element_table USING gist (range(pre_order, (pre_order+size)));"
@@ -257,35 +254,28 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 Datum
 build_xmlindex(PG_FUNCTION_ARGS)
 {
-    xmltype     *xmldata    = NULL;
-    char        *xmldataint = NULL;
+    char        *xmldata	= NULL;		// xml document, need to be string for libxml
 	text		*xml_name	= NULL;
-	char		*xml_nameint;
 	int			xmldatalen	= -1;
-	int			loader_return = 0;	// false
-	int4		did;
+	int			loader_return = 0;		// false
+	int4		did;					
 
 
 #ifdef USE_LIBXML
 	elog(INFO, "build_xmlindex started");
 
-	xmldata     = PG_GETARG_XML_P(0);
-    xmldataint  = VARDATA(xmldata);
-	xmldatalen  = VARSIZE(xmldata) - VARHDRSZ;
-	xmldataint[xmldatalen] = 0;
+	// getting C string from first argument, as needed by LibXML
+	xmldata = DatumGetCString(DirectFunctionCall1(xml_out, PG_GETARG_DATUM(0)));
+	xmldatalen = strnlen(xmldata, MAXINT);
 
-	xml_name	= PG_GETARG_TEXT_P(1);
-	xml_nameint	= VARDATA(xml_name);
-	xml_nameint[VARSIZE(xml_name) - VARHDRSZ] = 0;
+	xml_name	= PG_GETARG_TEXT_P(1);		// get text pointer from second argument
 	
 	//initialize LibXML structures, if allready done -> do nothing
     pg_xml_init();
 	xmlInitParser();
 
-
-	did = insert_xmldata_into_table(xmldataint, xml_nameint);
-
-	loader_return = xml_index_entry(xmldataint, xmldatalen, did);
+	did = insert_xmldata_into_table(xmldata, text_to_cstring(xml_name));
+	loader_return = xml_index_entry(xmldata, xmldatalen, did);
 	
 	elog(INFO, "build_xmlindex ended");
 	if (loader_return == XML_INDEX_LOADER_SUCCES)
@@ -300,30 +290,3 @@ build_xmlindex(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL (false);
 #endif
 }
-
-/**
- * Check if For two sibling nodes x and y, if x is the predecessor of y in
- * preorder traversal, order(x) + size(x) < order(y)
- * @param pre_order(x) = order(x), pre_order(y) = order(y), size(x)
- * @return true/false
-
-Datum
-is_ancestor(PG_FUNCTION_ARGS)
-{
-	int4 order_x	= PG_GETARG_INT32(0);
-	int4 order_y	= PG_GETARG_INT32(2);
-	int4 size_x		= PG_GETARG_INT32(1);
-
-	bool result		= false;
-
-
-
-	if (order_x + size_x < order_y)
-	{
-		result = true;
-	}
-
-	PG_RETURN_BOOL(result);
-}
-
- */
