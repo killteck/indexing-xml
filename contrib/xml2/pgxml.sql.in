@@ -180,6 +180,10 @@ CREATE FUNCTION build_xmlindex(xml, text) RETURNS boolean
     AS 'MODULE_PATHNAME', 'build_xmlindex'
     LANGUAGE C STRICT;
 
+CREATE FUNCTION build_xmlindex(xml, text, bool) RETURNS boolean
+    AS 'MODULE_PATHNAME', 'build_xmlindex'
+    LANGUAGE C STRICT;
+
 CREATE FUNCTION create_xmlindex_tables() RETURNS void
     AS 'MODULE_PATHNAME', 'create_xmlindex_tables'
     LANGUAGE C STRICT VOLATILE;

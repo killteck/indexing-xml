@@ -62,7 +62,7 @@ PG_FUNCTION_INFO_V1(build_xmlindex);
 PG_FUNCTION_INFO_V1(create_xmlindex_tables);
 
 /* ordinary internal (static) functions */
-int4 insert_xmldata_into_table(xmltype* xmldata, text *name);
+int4 insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original);
 bool create_indexes_on_tables(void);
 
 /*
@@ -70,10 +70,11 @@ bool create_indexes_on_tables(void);
  * ID of just inserted data
  * @param xmldata
  * @param name name of XML document
+ * @param insert_original indicate if user want to store original XML document as well
  * @return SQL int (value from serial sequence)
  */
 int4
-insert_xmldata_into_table(xmltype* xmldata, text *name)
+insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 {
 	int4 result = -1;	
 
@@ -94,38 +95,29 @@ insert_xmldata_into_table(xmltype* xmldata, text *name)
 
 	SPI_connect();
 
-// IT's not working !!
-	if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2)",
-			2, oids, data, NULL, false, 1) != SPI_OK_INSERT)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("Can not insert values into xml_documents_table")));
+	if (insert_original)
+	{ // insert original XML document to xml_documents_table
+		if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2)",
+				2, oids, data, NULL, false, 1) != SPI_OK_INSERT)
+		{ // insert
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("Can not insert values into xml_documents_table")));
+		}
+	} else
+	{ // do not include original XML document
+		if (SPI_execute_with_args("INSERT INTO xml_documents_table(name) VALUES ($1)",
+				1, oids, data, NULL, false, 1) != SPI_OK_INSERT)
+		{ // insert
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_EXCEPTION),
+					 errmsg("Can not insert values into xml_documents_table")));
+		}
 	}
 
+//	SPI_finish();	// works, but I'm not sure if it is not necessary
+//	SPI_connect();
 
-
-// IT's working
-/*
-	initStringInfo(&query);
-	appendStringInfo(&query, "INSERT INTO xml_documents_table(name) VALUES ('%s')", name);
-
-	if (debug_level > 1)
-	{
-		elog(INFO, "=== will be queried: %s", query.data);
-	}
-
-	if (SPI_execute(query.data,	false, 0) != SPI_OK_INSERT)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("Can not get ID of lastly inserted XML document")));
-	}
-*/
-// try it again
-//	SPI_finish();
-
-//	SPI_connect(); // because of session
 	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
 			true, 0) != SPI_OK_SELECT)
 	{
@@ -261,8 +253,9 @@ build_xmlindex(PG_FUNCTION_ARGS)
 
 	xmltype		*xmldata	= NULL;
 	text		*xml_name	= NULL;
-	int			loader_return = 0;		// false
-	int4		did;					
+	int			loader_return = 0;				// false
+	int4		did;							// document ID
+	bool		store_original_xml	= false;	// indication for INSERTs
 
 
 #ifdef USE_LIBXML
@@ -272,13 +265,18 @@ build_xmlindex(PG_FUNCTION_ARGS)
 	}
 
 	xmldata		= PG_GETARG_XML_P(0);
-	xml_name	= PG_GETARG_TEXT_P(1);	
+	xml_name	= PG_GETARG_TEXT_P(1);
+
+	if (!PG_ARGISNULL(2))
+	{
+		store_original_xml	= PG_GETARG_BOOL(2);
+	}
 	
 	//initialize LibXML structures, if allready done -> do nothing
     pg_xml_init();
 	xmlInitParser();
 
-	did = insert_xmldata_into_table(xmldata, xml_name);
+	did = insert_xmldata_into_table(xmldata, xml_name, store_original_xml);
 	loader_return = xml_index_entry(
 			DatumGetCString(DirectFunctionCall1(xml_out,
 				XmlPGetDatum(xmldata))), 
