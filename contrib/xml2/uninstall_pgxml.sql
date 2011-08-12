@@ -49,7 +49,7 @@ DROP FUNCTION xmlvalidate_dtd(xml, text);
 -- Tomas Pospisil, GSoC project
 --
 DROP FUNCTION build_xmlindex(xml, text);
-
+DROP FUNCTION build_xmlindex(xml, text, bool);
 DROP FUNCTION create_xmlindex_tables();
 
 DROP TABLE attribute_table CASCADE;

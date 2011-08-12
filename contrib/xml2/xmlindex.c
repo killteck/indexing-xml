@@ -7,9 +7,9 @@
  * desc:	Model of index structure see http://www.tomaspospisil.com
  *
 
- * TODO: I will cut off my ears for stringbuilder created SQL commands
- *		create tests on HEAD git revision
+ * TODO: create more tests 
  *		test if range index on attribute_table is needed
+ *		add column comments to created tables
  */
 
 #include "postgres.h"
@@ -191,7 +191,8 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"(did serial not null, "
 							"name text, "
 							"value xml,"
-							"xdb_sequence int default 0); "
+							"xdb_sequence int default 0,"
+							"PRIMARY KEY (did)); "
 			"CREATE TABLE attribute_table "
 							"(name text, "
 							"did int not null, "
@@ -221,6 +222,9 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"prev_id int, "
 							"value text, "
 							"PRIMARY KEY  (pre_order, did));"
+			"ALTER TABLE attribute_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
+			"ALTER TABLE element_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
+			"ALTER TABLE text_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
 			);
 
 	SPI_connect();
@@ -231,8 +235,6 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("invalid query")));
 	}
-
-// TODO add foreign key to xml_documents_table
 
 	SPI_finish();
 
