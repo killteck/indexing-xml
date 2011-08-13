@@ -1,0 +1,108 @@
+== xml2 contrib module ==
+
+This module implements the support functions for storing/validating/quering sets of
+XML documents above of standard functions presented in core PostgreSQL. This can
+be useful in various scenarios, such as heavily changes on XML document or
+validations with DTD, XSD, RNG.
+
+== how install this module ==
+
+You must compile it from source code or dowload prepared package and then install
+this package to PostgreSQL. Here is brief manual how to do that.
+
+Preconditions:
+You have to have compilation machine prepared see http://www.postgresql.org/docs/9.1/static/installation.html
+ LibXML 2 header files installed and properly set enviroment variables. I'm
+reffering to official http://xmlsoft.org/ site.
+
+1. download it (you can use git repository git://github.com/killteck/indexing-xml.git)
+2. configure project with ./configure --with-libxml --with-libxslt
+3. change directory to contrib/xml2
+4. make # and compile this module
+5. sudo make install # will copy module to proper directory and you have to register it
+6. registration is made by this SQL execution in psql: \i /usr/local/pgsql/share/contrib/pgxml.sq
+	but your path may be different
+7. succed you just install new contrib module to PostgreSQL!
+8. Uninstall is made by  \i /usr/local/pgsql/share/contrib/uninstall_pgxml.sql
+
+
+
+== functions included in xml2 module ==
+
+Xml2 contrib module include set of functions for XML document handling. We will
+briefly describe each.
+
+                                     List of functions
+ Schema |           Name           | Result data type |     Argument data types      |  Type
+--------+--------------------------+------------------+------------------------------+--------
+ public | build_xmlindex           | boolean          | xml, text                    | normal
+ public | build_xmlindex           | boolean          | xml, text, boolean           | normal
+
+This 2 functions are used for shredding XML document to prepared tables,
+
+ Schema |        Name         | Type
+--------+---------------------+-------
+ public | attribute_table     | table
+ public | element_table       | table
+ public | text_table          | table
+ public | xml_documents_table | table
+
+which are created by next function create_xmlindex_tables. Please be sure, that
+you don't have tables with same name.
+
+ public | create_xmlindex_tables   | void             |                              | normal
+
+This function create mentioned tables. Tables are created automaticaly after
+module installation, so check it before you call this function twice.
+
+ public | dtd_in                   | dtd              | cstring                      | normal
+ public | dtd_out                  | cstring          | dtd                          | normal
+ public | rng_in                   | rng              | cstring                      | normal
+ public | rng_out                  | cstring          | rng                          | normal
+ public | xsd_in                   | xsd              | cstring                      | normal
+ public | xsd_out                  | cstring          | xsd                          | normal
+
+These functions are I/O for new validation schema data types. Regular user doesn't
+need them.
+
+ public | xmlvalidate_dtd          | boolean          | xml, dtd                     | normal
+ public | xmlvalidate_dtd          | boolean          | xml, text                    | normal
+ public | xmlvalidate_rng          | boolean          | xml, rng                     | normal
+ public | xmlvalidate_rng          | boolean          | xml, text                    | normal
+ public | xmlvalidate_xsd          | boolean          | xml, xsd                     | normal
+ public | xmlvalidate_xsd          | boolean          | xml, text                    | normal
+
+These funcitons do validations for specific validaiton schemas. You can use DTD,
+XSD and RNG for validations.
+
+
+
+ public | xml_encode_special_chars | text             | text                         | normal
+ public | xml_valid                | boolean          | text                         | normal
+ public | xpath_bool               | boolean          | text, text                   | normal
+ public | xpath_list               | text             | text, text                   | normal
+ public | xpath_list               | text             | text, text, text             | normal
+ public | xpath_nodeset            | text             | text, text                   | normal
+ public | xpath_nodeset            | text             | text, text, text             | normal
+ public | xpath_nodeset            | text             | text, text, text, text       | normal
+ public | xpath_number             | real             | text, text                   | normal
+ public | xpath_string             | text             | text, text                   | normal
+ public | xpath_table              | SETOF record     | text, text, text, text, text | normal
+ public | xslt_process             | text             | text, text                   | normal
+ public | xslt_process             | text             | text, text, text             | normal
+
+See documentation for these funcitons.
+
+== usage examples ==
+
+If you succed with xml2 module installation, you can use these functions for
+XML document handlings. Typical scenario will describe how you can store XML
+as shreded type as well as normal text representation. Each of them have own
+advantages and disadvantages.
+
+If you shred XML into tables you can do INSERTs, UPDATEs, DELETEs with little
+cost and you can use SQL with benefits of INDEXEs. Disadvantage of this approach
+is need of XML document reconstruction. So if you want to validate shreded XML
+document, you have to deconstruct it and then call validation functions.
+
+
