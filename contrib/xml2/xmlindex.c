@@ -51,9 +51,6 @@
 #include "snowball/libstemmer/header.h"
 #include <assert.h>
 
-//Level of debugging we want to do, set equal to DEBUG
-int debug_level = 4;
-
 /* externally accessible functions */
 Datum	build_xmlindex(PG_FUNCTION_ARGS);
 Datum	create_xmlindex_tables(PG_FUNCTION_ARGS);
@@ -115,7 +112,7 @@ insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 		}
 	}
 
-//	SPI_finish();	// works, but I'm not sure if it is not necessary
+//	SPI_finish();	// works, but I'm not sure if it's not better to do that
 //	SPI_connect();
 
 	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
@@ -134,11 +131,9 @@ insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 
 		rowIdStr = SPI_getvalue(row, tupdesc, 1);
 		result = atoi(rowIdStr);
+				
+		elog(DEBUG1, "ID int of inserted row %d", result);
 		
-		if (debug_level > 1)
-		{
-			elog(INFO, "ID int of inserted row %d", result);
-		}
 	}
 
 	SPI_finish();
@@ -261,10 +256,8 @@ build_xmlindex(PG_FUNCTION_ARGS)
 
 
 #ifdef USE_LIBXML
-	if (debug_level > 1)
-	{
-		elog(INFO, "build_xmlindex started");
-	}
+
+	elog(DEBUG1, "build_xmlindex started");
 
 	xmldata		= PG_GETARG_XML_P(0);
 	xml_name	= PG_GETARG_TEXT_P(1);
@@ -283,10 +276,8 @@ build_xmlindex(PG_FUNCTION_ARGS)
 			DatumGetCString(DirectFunctionCall1(xml_out,
 				XmlPGetDatum(xmldata))), 
 			did);
-	if (debug_level > 1)
-	{
-		elog(INFO, "build_xmlindex ended");
-	}
+
+	elog(DEBUG1, "build_xmlindex ended");
 	
 	if (loader_return == XML_INDEX_LOADER_SUCCES)
 	{

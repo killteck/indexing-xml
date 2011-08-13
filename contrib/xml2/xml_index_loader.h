@@ -32,9 +32,6 @@ extern "C" {
 	#include <libxml/xmlreader.h>
 #endif   /* USE_LIBXML */
 
-#define DEBUG FALSE				//If TRUE DEBUG mode is turned on
-
-
 //Error Codes
 #define LIBXML_NO_EFFECT 0
 #define LIBXML_SUCCESS 1
