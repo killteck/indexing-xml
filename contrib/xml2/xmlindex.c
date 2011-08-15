@@ -71,7 +71,9 @@ bool create_indexes_on_tables(void);
  * @return SQL int (value from serial sequence)
  */
 int4
-insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
+insert_xmldata_into_table(xmltype* xmldata, 
+		text *name,
+		bool insert_original)
 {
 	int4 result = -1;	
 

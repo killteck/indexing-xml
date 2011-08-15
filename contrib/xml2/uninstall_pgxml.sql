@@ -52,7 +52,7 @@ DROP FUNCTION build_xmlindex(xml, text);
 DROP FUNCTION build_xmlindex(xml, text, bool);
 DROP FUNCTION create_xmlindex_tables();
 
-DROP TABLE attribute_table CASCADE;
-DROP TABLE element_table CASCADE;
-DROP TABLE text_table CASCADE;
-DROP TABLE xml_documents_table CASCADE;
+DROP TABLE xml_attribute_nodes CASCADE;
+DROP TABLE xml_element_nodes CASCADE;
+DROP TABLE xml_text_nodes CASCADE;
+DROP TABLE xml_documents CASCADE;

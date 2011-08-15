@@ -1,5 +1,5 @@
 # xml2 extension
-comment = 'XPath querying and XSLT'
+comment = 'XPath querying XSLT, XML shreding and XML validation'
 default_version = '1.0'
 module_pathname = '$libdir/pgxml'
 # non-relocatable because xml2--unpackaged--1.0.sql needs to use @extschema@

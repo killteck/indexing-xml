@@ -51,7 +51,8 @@ attribute_node		attribute_node_buffer[BUFFER_SIZE];
  * @return true/false if all XML shredding
  */
 int extern
-xml_index_entry(const char *xml_document, int4 did)
+xml_index_entry(const char *xml_document,
+		int4 did)
 {
 	xml_index_globals		globals;
 	int preorder_result;
@@ -108,7 +109,8 @@ init_values(xml_index_globals_ptr globals)
  * @return err value return by xmlTextReaderRead (1 if exist another nodes)
  */
 int 
-read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals)
+read_next_node(xmlTextReaderPtr reader,
+		xml_index_globals_ptr globals)
 {
 	int err_val = xmlTextReaderRead(reader);
 	elog(DEBUG1, "reading next node");
@@ -178,7 +180,9 @@ create_new_element(xml_index_globals_ptr globals)
  * @return
  */
 int 
-preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
+preorder_traverse(int parent_id, 
+		int sibling_id,
+		xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
 {
 
@@ -357,7 +361,8 @@ preorder_traverse(int parent_id, int sibling_id, xmlTextReaderPtr reader,
  * @return  Returns the number of attributes processed.
  */
 int 
-process_attributes(int parent_id, xmlTextReaderPtr reader,
+process_attributes(int parent_id,
+		xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
 {
 	int i, my_ind, err;
@@ -536,7 +541,9 @@ create_new_attribute(xml_index_globals_ptr globals)
  * @return
  */
 int
-process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
+process_text_node(int parent_id, 
+		int prev_id,
+		xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
 {
 	int my_ind;
