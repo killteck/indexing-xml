@@ -48,7 +48,7 @@ attribute_node		attribute_node_buffer[BUFFER_SIZE];
 /**
  * Entry point of loader
  * @param xml_document
- * @return true/false if all XML shredding
+ * @return 0 if all XML shredding is ok, otherwise negative values
  */
 int extern
 xml_index_entry(const char *xml_document,

@@ -107,9 +107,58 @@ SELECT build_xmlindex('<?xml version="1.0" encoding="utf-8"?>
 			<lastname>Moon</lastname>
 		</author>
 		<title>javelina javelina</title>
-		<price unit = "USD" test = "A&amp;M">100</price>
+		<price unit = "USD" test = "AM">100</price>
 	</book>
 </books>', 'bookshelf', true);
+
+first argument is XML document, second is description of it and third idicate if
+user want to store original XML document in xml_documents table
+--------------------------------------------------------------------------------
+
+SQL example 2: What data are stored in tables
+XML document is cut off by nodes and tables xml_documents, xml_element_nodes,
+xml_attribute_nodes and xml_text_nodes are filled. For SQL example 1 data looks
+like:
+--------------------------------------------------------------------------------
+SELECT * from xml_element_nodes ;
+   name    | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id
+-----------+-----+-----------+------+-------+-----------+---------+----------+---------
+ firstname |   1 |         4 |    1 |     3 |         3 |         |          |
+ lastname  |   1 |         6 |    1 |     3 |         3 |       4 |          |
+ author    |   1 |         3 |    4 |     2 |         2 |         |        6 |
+ title     |   1 |         8 |    1 |     2 |         2 |       3 |          |
+ price     |   1 |        10 |    2 |     2 |         2 |       8 |          |      11
+ book      |   1 |         2 |   10 |     1 |         1 |         |       10 |
+ firstname |   1 |        15 |    1 |     3 |        14 |         |          |
+ lastname  |   1 |        17 |    1 |     3 |        14 |      15 |          |
+ author    |   1 |        14 |    4 |     2 |        13 |         |       17 |
+ title     |   1 |        19 |    1 |     2 |        13 |      14 |          |
+ price     |   1 |        21 |    3 |     2 |        13 |      19 |          |      23
+ book      |   1 |        13 |   11 |     1 |         1 |       2 |       21 |
+ books     |   1 |         1 |   23 |     0 |           |         |       13 |
+(13 rows)
+
+SELECT * from xml_attribute_nodes ;
+ name | did | pre_order | size | depth | parent_id | prev_id | value
+------+-----+-----------+------+-------+-----------+---------+-------
+ unit |   1 |        11 |    0 |     3 |        10 |         | USD
+ unit |   1 |        22 |    0 |     3 |        21 |         | USD
+ test |   1 |        23 |    0 |     3 |        21 |      22 | AM
+(3 rows)
+
+SELECT * from xml_text_nodes ;
+order | depth | parent_id | prev_id
+------+-------+-----------+---------
+    5 |     4 |         4 |
+    7 |     4 |         6 |
+    9 |     3 |         8 |
+   12 |     3 |        10 |
+   16 |     4 |        15 |
+   18 |     4 |        17 |
+   20 |     3 |        19 |
+   24 |     3 |        21 |
+
+
 --------------------------------------------------------------------------------
 
 \todo show XPath/XQuery to SQL and indexes are used

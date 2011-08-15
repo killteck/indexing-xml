@@ -44,31 +44,18 @@ extern "C" {
 #define INPUT_ERROR -12
 #define FILE_IO_ERROR -13
 #define DATABASE_ERROR -14
-#define TRUE 1
-#define FALSE 0
 #define NO_VALUE -1
-
-
 #define XML_ERROR -1
 #define XML_NO_ERROR 0
-
 #define REAL_TEXT_NODE 1
 #define FAKE_TEXT_NODE -1
-
 #define XML_INDEX_LOADER_SUCCES 0
 #define MAX_INT_SIZE 10 //Maximum digits in an Integer
-
 #define DOCUMENT_ROOT "DOCUMENT_ROOT"  //The node name of the document root in the XISS/R database
-
-
 #define DO_FLUSH TRUE 			//If TRUE write data to database
 #define FREE TRUE 				//If true free all malloced memory
-#define REPLACE_BAD_CHARS TRUE  //if True replace_bad_chars in misc.c is executed.
-
-
+#define REPLACE_BAD_CHARS FALSE
 #define BUFFER_SIZE 10000		//Size of Buffer for Element, Attribute and Text Node queues
-
-
 
 //Structs
 typedef struct element_node element_node;
@@ -129,23 +116,16 @@ struct xml_index_globals {
 ////////////////////////////////////////////////////////////////////////////////
 
 int extern xml_index_entry(const char *xml_document, int4 did);
-
 int preorder_traverse(int parent_id, int sibling_id,	
 		xmlTextReaderPtr reader, xml_index_globals_ptr globals);
-
 void init_values(xml_index_globals_ptr globals);
-
 int read_next_node(xmlTextReaderPtr reader, xml_index_globals_ptr globals);
-
 int create_new_element(xml_index_globals_ptr globals);
-
 int process_attributes(int parent_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals);
 
 int create_new_attribute(xml_index_globals_ptr globals);
-
 int create_new_text_node(xml_index_globals_ptr globals);
-
 int process_text_node(int parent_id, int prev_id, xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals);
 
