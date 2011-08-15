@@ -774,55 +774,75 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 void
 flush_attribute_node_buffer(xml_index_globals_ptr globals)
 {
-	int i, val_len;
-	StringInfoData query;
+	int			i;			// iterator index
+	int			spi_result;	// result of SPI calls
+	char		nulls[8];	// c string with 'n' on position, where is NULL value
+	SPIPlanPtr	pplan;		// prepared plan
+	Oid			oids[8];	// type OIDs of values
+	Datum		data[8];	// one row of values
+
+	oids[0] = INT4OID;
+	oids[1] = INT4OID;
+	oids[2] = INT4OID;
+	oids[3] = TEXTOID;
+	oids[4] = INT4OID;
+	oids[5] = INT4OID;
+	oids[6] = INT4OID;
+	oids[7] = TEXTOID;
 
 	elog(DEBUG1, "flushing attribute_nodes");
 
-
-	initStringInfo(&query);
-	appendStringInfo(&query,
-			"INSERT INTO xml_attribute_nodes(did, pre_order, size, name, depth, parent_id, "
-			"prev_id, value) VALUES ");
-
 	if ((DO_FLUSH == TRUE)  && (globals->attribute_node_buffer_count > 0))
-	{		
-		for(i = 0; i < globals->attribute_node_buffer_count; i++)
-		{
-			if(attribute_node_buffer[i].value != NULL)
-			{
-				val_len = strlen(attribute_node_buffer[i].value);
-			}
+	{
 
-			appendStringInfo(&query,
-							" (%d, %d, %d, '%s', %d, %d, %d, '%s')",
-							attribute_node_buffer[i].did,
-							attribute_node_buffer[i].order,
-							attribute_node_buffer[i].size,
-							attribute_node_buffer[i].tag_name,
-							attribute_node_buffer[i].depth,
-							attribute_node_buffer[i].parent_id,
-							attribute_node_buffer[i].prev_id,
-							attribute_node_buffer[i].value
-				);
-
-			if ((i+1) < globals->attribute_node_buffer_count)
-			{
-				appendStringInfo(&query, ",");
-			} else
-			{
-				appendStringInfo(&query, ";");
-			}
-		}
-
-		elog(DEBUG1, "flush attributes: %s\n", query.data);
-		
 		SPI_connect();
 
-		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATA_EXCEPTION),
-					 errmsg("invalid query")));
+		pplan = SPI_prepare("INSERT INTO xml_attribute_nodes(did, pre_order, "
+				"size, name, depth, parent_id, prev_id, value) "
+				"VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", 8, oids);
+
+		if (pplan != NULL)
+		{
+
+			for(i = 0; i < globals->attribute_node_buffer_count; i++)
+			{
+				strncpy(nulls, "        ", 8);		// spaces indicates not null values
+
+				data[0] = Int32GetDatum(attribute_node_buffer[i].did);
+				data[1] = Int32GetDatum(attribute_node_buffer[i].order);
+				data[2] = Int32GetDatum(attribute_node_buffer[i].size);
+				data[3] = PointerGetDatum(cstring_to_text(attribute_node_buffer[i].tag_name));
+				data[4] = Int32GetDatum(attribute_node_buffer[i].depth);
+				data[5] = Int32GetDatum(attribute_node_buffer[i].parent_id);
+				data[6] = Int32GetDatum(attribute_node_buffer[i].prev_id);
+				data[7] = PointerGetDatum(cstring_to_text(attribute_node_buffer[i].value));
+
+				if (attribute_node_buffer[i].parent_id == -1)
+				{ // -1 indicate null value, then set it to nulls string
+					nulls[5] = 'n';
+				}
+				if (text_node_buffer[i].prev_id == -1)
+				{ // -1 indicate null value, then set it to nulls string
+					nulls[6] = 'n';
+				}
+				if (attribute_node_buffer[i].value == NULL)
+				{
+					nulls[7] = 'n';
+				}
+
+				if ((spi_result = SPI_execute_plan(pplan, data, nulls, false, 1)) != SPI_processed)
+				{
+					if (spi_result == SPI_ERROR_ARGUMENT) {
+						elog(DEBUG1, "xml2/xml_index_loader.flush_attribute_node_buffer spi error argument");
+					} else if (spi_result == SPI_ERROR_PARAM) {
+						elog(DEBUG1, "xml2/xml_index_loader.flush_attribute_node_buffer spi error param");
+					}
+				}
+			}
+		} else
+		{
+			elog(DEBUG1, "xml2/xml_index_loader.flush_attribute_node_buffer node value or pplan is null !!");
+		}		
 
 		SPI_finish();
 	}
