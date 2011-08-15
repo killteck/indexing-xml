@@ -60,13 +60,6 @@ extern "C" {
 
 #define DOCUMENT_ROOT "DOCUMENT_ROOT"  //The node name of the document root in the XISS/R database
 
-//As defined by LIBXML
-#define ELEMENT_START 1
-#define ELEMENT_END 15
-#define TEXT_NODE 3
-#define CDATA_SEC 4
-#define ENTITY_REF 5
-#define ENTITY_DEC 6
 
 #define DO_FLUSH TRUE 			//If TRUE write data to database
 #define FREE TRUE 				//If true free all malloced memory

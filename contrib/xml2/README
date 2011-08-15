@@ -20,11 +20,10 @@ reffering to official http://xmlsoft.org/ site.
 3. change directory to contrib/xml2
 4. make # and compile this module
 5. sudo make install # will copy module to proper directory and you have to register it
-6. registration is made by this SQL execution in psql: \i /usr/local/pgsql/share/contrib/pgxml.sq
+6. registration is made by this SQL execution in psql: \i /usr/local/pgsql/share/extension/xml2--1.0.sql
 	but your path may be different
 7. succed you just install new contrib module to PostgreSQL!
-8. Uninstall is made by  \i /usr/local/pgsql/share/contrib/uninstall_pgxml.sql
-
+8. Uninstall is made by  \i /usr/local/pgsql/share/extension/xml2--unpackaged--1.0.sql
 
 
 == functions included in xml2 module ==
@@ -87,6 +86,30 @@ cost and you can use SQL with benefits of INDEXEs. Disadvantage of this approach
 is need of XML document reconstruction. So if you want to validate shreded XML
 document, you have to deconstruct it and then call validation functions.
 
+SQL example 1: How shred XML document
+For shreding you need XML document without any external references, for example
+to entity definitions or URI of validation schemas.
 
-examples of usage,
-show XPath/XQuery to SQL and indexes are used
+--------------------------------------------------------------------------------
+SELECT build_xmlindex('<?xml version="1.0" encoding="utf-8"?>
+<books>
+	<book>
+		<author>
+			<firstname>Quanzhong</firstname>
+			<lastname>Li</lastname>
+		</author>
+		<title>XML indexing</title>
+		<price unit = "USD">120</price>
+	</book>
+	<book>
+		<author>
+			<firstname>Bongki</firstname>
+			<lastname>Moon</lastname>
+		</author>
+		<title>javelina javelina</title>
+		<price unit = "USD" test = "A&amp;M">100</price>
+	</book>
+</books>', 'bookshelf', true);
+--------------------------------------------------------------------------------
+
+\todo show XPath/XQuery to SQL and indexes are used

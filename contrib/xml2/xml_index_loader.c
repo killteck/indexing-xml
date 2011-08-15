@@ -224,7 +224,7 @@ preorder_traverse(int parent_id,
 	//Check whether next node is empty
 	if(xmlTextReaderIsEmptyElement(reader) == 1)
 	{
-		elog(DEBUG1, "Node %d:%s at depth %d, does not have a closing tag.\n", my_order, my_tag_name, my_depth);	
+		elog(INFO, "Node %d:%s at depth %d, does not have a closing tag.\n", my_order, my_tag_name, my_depth);
 		//Possibly implement error code here
 	}
 
@@ -233,53 +233,66 @@ preorder_traverse(int parent_id,
 
 	if(err_val == 0)
 	{
-		elog(DEBUG1, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
+		elog(INFO, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
 		return(LIBXML_ERR);
 	}
 
 	//Type of next node
 	node_type = xmlTextReaderNodeType(reader);
 
-	if(node_type == ELEMENT_END)
+	if(node_type == XML_READER_TYPE_END_ELEMENT)
 	{
-		elog(DEBUG1, "Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
+		elog(INFO, "Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
 	}
 
-	while(node_type != ELEMENT_END)  //While we have unvisited children
+	while(node_type != XML_READER_TYPE_END_ELEMENT)  //While we have unvisited children
 	{
 		elog(DEBUG1, "while (node_type != ELEMENT_END)");
 
-		if(node_type == TEXT_NODE || node_type == CDATA_SEC) //Visit text nodes
+		switch(node_type)
 		{
-			err_val = process_text_node(my_order, prev_child, reader, globals);
-			if(err_val == REAL_TEXT_NODE)
-			{
-				my_size++;
-			}
-
-		} else if(node_type == ELEMENT_START) //Recurse on elements
-		{
-
-			recent_child = (globals->global_order) + 1; //Next time we have a child it will know this as its nearest sibling
-			size_res = preorder_traverse(my_order,  prev_child, reader, globals);
-
-
-			my_size += size_res;
-			prev_child = recent_child;
-			if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == ELEMENT_END)
-			{
-				elog(DEBUG1, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);			
+			case XML_READER_TYPE_TEXT:
+			case XML_READER_TYPE_CDATA: //Visit text nodes
+				err_val = process_text_node(my_order, prev_child, reader, globals);
+				if(err_val == REAL_TEXT_NODE)
+				{
+					my_size++;
+				}
 				break;
-			}
-		} else
-		{
-			elog(DEBUG1, "Encounted an node of type %d where it should not be\n", node_type);
-			return(LIBXML_ERR);
-			//Possibly implement error handling code here
-		}
-		
-		err_val = read_next_node(reader, globals);
+			case XML_READER_TYPE_ELEMENT: //Recurse on elements
+				recent_child = (globals->global_order) + 1; //Next time we have a child it will know this as its nearest sibling
+				size_res = preorder_traverse(my_order,  prev_child, reader, globals);
+				my_size += size_res;
+				prev_child = recent_child;
+				if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == XML_READER_TYPE_END_ELEMENT)
+				{
+					elog(DEBUG1, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
+					return(LIBXML_ERR);
+				}
+				break;
+			case XML_READER_TYPE_WHITESPACE:
+			case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:	// do nothing with white spaces
+				break;
 
+			case XML_READER_TYPE_NONE:
+			case XML_READER_TYPE_ENTITY_REFERENCE:
+			case XML_READER_TYPE_ENTITY:
+			case XML_READER_TYPE_PROCESSING_INSTRUCTION:
+			case XML_READER_TYPE_COMMENT:
+			case XML_READER_TYPE_DOCUMENT:
+			case XML_READER_TYPE_DOCUMENT_TYPE:
+			case XML_READER_TYPE_DOCUMENT_FRAGMENT:
+			case XML_READER_TYPE_NOTATION:
+			case XML_READER_TYPE_END_ENTITY:
+			case XML_READER_TYPE_XML_DECLARATION:
+			default:
+				elog(INFO, "Encounted an node of type %d where it should not be\n", node_type);
+				return(LIBXML_ERR);
+				//Possibly implement error handling code here
+				break;
+		}
+
+		err_val = read_next_node(reader, globals);
 		if(err_val == 0)
 		{
 			elog(DEBUG1, "Malformed XML: reached end of document without reaching "
@@ -288,7 +301,7 @@ preorder_traverse(int parent_id,
 		}
 
 		node_type = xmlTextReaderNodeType(reader);
-		if(node_type == ELEMENT_END)
+		if(node_type == XML_READER_TYPE_END_ELEMENT)
 		{
 			elog(DEBUG1,"Found end of %d:%s with %d children at depth %d returning to %d.\n",
 					my_order, my_tag_name, my_size, my_depth, parent_id );
@@ -610,9 +623,9 @@ get_text_from_node(xmlTextReaderPtr reader)
 	}
 
 	node_type = xmlTextReaderNodeType(reader);
-	if(node_type !=  TEXT_NODE)
+	if(node_type !=  XML_READER_TYPE_TEXT)
 	{
-		if(node_type == CDATA_SEC)  //If we have CDATA
+		if(node_type == XML_READER_TYPE_CDATA)  //If we have CDATA
 		{
 			if(xmlTextReaderIsEmptyElement(reader))
 			{
