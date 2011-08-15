@@ -75,24 +75,6 @@ need them.
 These funcitons do validations for specific validaiton schemas. You can use DTD,
 XSD and RNG for validations.
 
-
-
- public | xml_encode_special_chars | text             | text                         | normal
- public | xml_valid                | boolean          | text                         | normal
- public | xpath_bool               | boolean          | text, text                   | normal
- public | xpath_list               | text             | text, text                   | normal
- public | xpath_list               | text             | text, text, text             | normal
- public | xpath_nodeset            | text             | text, text                   | normal
- public | xpath_nodeset            | text             | text, text, text             | normal
- public | xpath_nodeset            | text             | text, text, text, text       | normal
- public | xpath_number             | real             | text, text                   | normal
- public | xpath_string             | text             | text, text                   | normal
- public | xpath_table              | SETOF record     | text, text, text, text, text | normal
- public | xslt_process             | text             | text, text                   | normal
- public | xslt_process             | text             | text, text, text             | normal
-
-See documentation for these funcitons.
-
 == usage examples ==
 
 If you succed with xml2 module installation, you can use these functions for
@@ -106,3 +88,5 @@ is need of XML document reconstruction. So if you want to validate shreded XML
 document, you have to deconstruct it and then call validation functions.
 
 
+examples of usage,
+show XPath/XQuery to SQL and indexes are used

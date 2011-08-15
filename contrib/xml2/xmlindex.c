@@ -112,9 +112,6 @@ insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 		}
 	}
 
-//	SPI_finish();	// works, but I'm not sure if it's not better to do that
-//	SPI_connect();
-
 	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
 			true, 0) != SPI_OK_SELECT)
 	{

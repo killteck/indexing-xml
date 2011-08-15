@@ -710,10 +710,6 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 			{
 				name_length = strlen(element_node_buffer[i].tag_name);
 			}
-			else
-			{
-				name_length = 7;
-			}
 
 			appendStringInfo(&query,
 							" (%d, %d, %d, '%s', %d, %d, %d, %d, %d)",
@@ -777,10 +773,6 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 			{
 				val_len = strlen(attribute_node_buffer[i].value);
 			}
-			else
-			{
-				val_len = 7;
-			}
 
 			appendStringInfo(&query,
 							" (%d, %d, %d, '%s', %d, %d, %d, '%s')",
@@ -825,66 +817,64 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 void
 flush_text_node_buffer(xml_index_globals_ptr globals)
 {
-	int i, val_len;
-	StringInfoData query;
+	int			i;			// iterator index
+	int			spi_result;	// result of SPI calls
+	char		nulls[6];	// c string with 'n' on position, where is NULL value
+	SPIPlanPtr	pplan;		// prepared plan
+	Oid			oids[6];	// type OIDs of values
+	Datum		data[6];	// one row of values
 
-	elog(DEBUG1, "flushing text_nodes");
-
-	initStringInfo(&query);
-	appendStringInfo(&query,
-						"INSERT INTO text_table(did, pre_order, depth, parent_id, prev_id, value) VALUES ");
+	oids[0] = INT4OID;
+	oids[1] = INT4OID;
+	oids[2] = INT4OID;
+	oids[3] = INT4OID;
+	oids[4] = INT4OID;
+	oids[5] = TEXTOID;
 
 	if ((DO_FLUSH == TRUE) && (globals->text_node_buffer_count > 0))
 	{
-		for(i = 0; i < globals->text_node_buffer_count; i++)
-		{
-			if (text_node_buffer[i].value != NULL)
-			{
-				appendStringInfo(&query,
-							" (%d, %d, %d, %d, %d, '%s')",
-						text_node_buffer[i].did,
-						text_node_buffer[i].order,
-						text_node_buffer[i].depth,
-						text_node_buffer[i].parent_id,
-						text_node_buffer[i].prev_id,
-						text_node_buffer[i].value
-				);
-			} else
-			{
-				appendStringInfo(&query,
-							" (%d, %d, %d, %d, %d, NULL)",
-						text_node_buffer[i].did,
-						text_node_buffer[i].order,
-						text_node_buffer[i].depth,
-						text_node_buffer[i].parent_id,
-						text_node_buffer[i].prev_id
-				);
-			}
-				if ((i+1) < globals->text_node_buffer_count)
-				{
-					appendStringInfo(&query, ",");
-				} else
-				{
-					appendStringInfo(&query, ";");
-				}
-
-			if(text_node_buffer[i].value != NULL)
-			{
-				val_len = strlen(text_node_buffer[i].value);
-			} else
-			{ // TODO figure out what is mean
-				val_len = 7;
-			}
-		}
-		
-		elog(DEBUG1, "flush text nodes: %s\n", query.data);		
 
 		SPI_connect();
 
-		if (SPI_execute(query.data, false, 0) == SPI_ERROR_ARGUMENT)
-			ereport(ERROR,
-					(errcode(ERRCODE_DATA_EXCEPTION),
-					 errmsg("invalid query")));
+		pplan = SPI_prepare("INSERT INTO text_table(did, pre_order, depth, parent_id, "
+				"prev_id, value) VALUES ($1, $2, $3, $4, $5, $6)", 6, oids);
+
+		for(i = 0; i < globals->text_node_buffer_count; ++i)
+		{			
+
+			*nulls	= "      ";		// spaces indicates not null values
+
+			if ((text_node_buffer[i].value != NULL) && (pplan != NULL))
+			{
+				data[0] = Int32GetDatum(text_node_buffer[i].did);
+				data[1] = Int32GetDatum(text_node_buffer[i].order);
+				data[2] = Int32GetDatum(text_node_buffer[i].depth);
+				data[3] = Int32GetDatum(text_node_buffer[i].parent_id);
+				data[4] = Int32GetDatum(text_node_buffer[i].prev_id);
+				data[5] = PointerGetDatum(cstring_to_text(text_node_buffer[i].value));				
+
+				if (text_node_buffer[i].parent_id == -1)
+				{ // -1 indicate null value, then set it to nulls string
+					nulls[3] = 'n';
+				}
+				if (text_node_buffer[i].prev_id == -1)
+				{ // -1 indicate null value, then set it to nulls string
+					nulls[4] = 'n';
+				}
+
+				if ((spi_result = SPI_execute_plan(pplan, data, nulls, false, 1)) != SPI_processed)
+				{
+					if (spi_result == SPI_ERROR_ARGUMENT) {
+						elog(DEBUG1, "xml2/xml_index_loader.flush_text_node_buffer spi error argument");
+					} else if (spi_result == SPI_ERROR_PARAM) {
+						elog(DEBUG1, "xml2/xml_index_loader.flush_text_node_buffer spi error param");
+					}
+				}
+			} else
+			{
+				elog(DEBUG1, "xml2/xml_index_loader.flush_text_node_buffer node value or pplan is null !!");
+			}
+		}
 
 		SPI_finish();
 	}
