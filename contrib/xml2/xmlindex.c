@@ -94,25 +94,25 @@ insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 
 	if (insert_original)
 	{ // insert original XML document to xml_documents_table
-		if (SPI_execute_with_args("INSERT INTO xml_documents_table(name, value) VALUES ($1, $2)",
+		if (SPI_execute_with_args("INSERT INTO xml_documents(name, value) VALUES ($1, $2)",
 				2, oids, data, NULL, false, 1) != SPI_OK_INSERT)
 		{ // insert
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
-					 errmsg("Can not insert values into xml_documents_table")));
+					 errmsg("Can not insert values into xml_documents")));
 		}
 	} else
 	{ // do not include original XML document
-		if (SPI_execute_with_args("INSERT INTO xml_documents_table(name) VALUES ($1)",
+		if (SPI_execute_with_args("INSERT INTO xml_documents(name) VALUES ($1)",
 				1, oids, data, NULL, false, 1) != SPI_OK_INSERT)
 		{ // insert
 			ereport(ERROR,
 					(errcode(ERRCODE_DATA_EXCEPTION),
-					 errmsg("Can not insert values into xml_documents_table")));
+					 errmsg("Can not insert values into xml_documents")));
 		}
 	}
 
-	if (SPI_execute("SELECT currval('xml_documents_table_did_seq')",
+	if (SPI_execute("SELECT currval('xml_documents_did_seq')",
 			true, 0) != SPI_OK_SELECT)
 	{
 		ereport(ERROR,
@@ -129,8 +129,7 @@ insert_xmldata_into_table(xmltype* xmldata, text *name, bool insert_original)
 		rowIdStr = SPI_getvalue(row, tupdesc, 1);
 		result = atoi(rowIdStr);
 				
-		elog(DEBUG1, "ID int of inserted row %d", result);
-		
+		elog(DEBUG1, "ID int of inserted row %d", result);		
 	}
 
 	SPI_finish();
@@ -148,11 +147,11 @@ create_indexes_on_tables(void)
 
 	SPI_connect();
 
-	if (SPI_execute("CREATE INDEX attr_tab_all_index ON attribute_table (name, did, pre_order); "					
-					"CREATE INDEX did_tab_name_index ON xml_documents_table (name); "
-					"CREATE INDEX elem_tab_all_index ON element_table (name, did, pre_order, size); "
-					"CREATE INDEX elem_tab_range_index ON element_table USING gist (range(pre_order, (pre_order+size)));"
-					"CREATE INDEX text_tab_index ON text_table (parent_id,did);"
+	if (SPI_execute("CREATE INDEX attr_tab_all_index ON xml_attribute_nodes (name, did, pre_order); "
+					"CREATE INDEX did_tab_name_index ON xml_documents (name); "
+					"CREATE INDEX elem_tab_all_index ON xml_element_nodes (name, did, pre_order, size); "
+					"CREATE INDEX elem_tab_range_index ON xml_element_nodes USING gist (range(pre_order, (pre_order+size)));"
+					"CREATE INDEX text_tab_index ON xml_text_nodes (parent_id,did);"
 					,
 					false, 0) == SPI_ERROR_PARAM)
 	{
@@ -179,13 +178,13 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-			"CREATE TABLE xml_documents_table "
+			"CREATE TABLE xml_documents "
 							"(did serial not null, "
 							"name text, "
 							"value xml,"
 							"xdb_sequence int default 0,"
 							"PRIMARY KEY (did)); "
-			"CREATE TABLE attribute_table "
+			"CREATE TABLE xml_attribute_nodes "
 							"(name text, "
 							"did int not null, "
 							"pre_order int not null, "
@@ -195,7 +194,7 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"prev_id int, "
 							"value text,"
 							"PRIMARY KEY (did,pre_order)); "
-			"CREATE TABLE element_table "
+			"CREATE TABLE xml_element_nodes "
 							"(name text, "
 							"did int not null, "
 							"pre_order int not null, "
@@ -206,7 +205,7 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"child_id int, "
 							"attr_id int, "
 							"PRIMARY KEY (did,pre_order,size));"
-			"CREATE TABLE text_table "
+			"CREATE TABLE xml_text_nodes "
 							"(did int not null, "
 							"pre_order int not null, "
 							"depth int not null, "
@@ -214,9 +213,9 @@ create_xmlindex_tables(PG_FUNCTION_ARGS)
 							"prev_id int, "
 							"value text, "
 							"PRIMARY KEY  (pre_order, did));"
-			"ALTER TABLE attribute_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
-			"ALTER TABLE element_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
-			"ALTER TABLE text_table ADD FOREIGN KEY (did) REFERENCES xml_documents_table;"
+			"ALTER TABLE xml_attribute_nodes ADD FOREIGN KEY (did) REFERENCES xml_documents;"
+			"ALTER TABLE xml_element_nodes ADD FOREIGN KEY (did) REFERENCES xml_documents;"
+			"ALTER TABLE xml_text_nodes ADD FOREIGN KEY (did) REFERENCES xml_documents;"
 			);
 
 	SPI_connect();

@@ -699,7 +699,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-						"INSERT INTO element_table(did, pre_order, size, "
+						"INSERT INTO xml_element_nodes(did, pre_order, size, "
 						"name, depth, child_id, prev_id, attr_id, parent_id) VALUES ");
 
 	if ((DO_FLUSH == TRUE) && (globals->element_node_buffer_count > 0))
@@ -762,7 +762,7 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 
 	initStringInfo(&query);
 	appendStringInfo(&query,
-			"INSERT INTO attribute_table(did, pre_order, size, name, depth, parent_id, "
+			"INSERT INTO xml_attribute_nodes(did, pre_order, size, name, depth, parent_id, "
 			"prev_id, value) VALUES ");
 
 	if ((DO_FLUSH == TRUE)  && (globals->attribute_node_buffer_count > 0))
@@ -836,13 +836,13 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 
 		SPI_connect();
 
-		pplan = SPI_prepare("INSERT INTO text_table(did, pre_order, depth, parent_id, "
+		pplan = SPI_prepare("INSERT INTO xml_text_nodes(did, pre_order, depth, parent_id, "
 				"prev_id, value) VALUES ($1, $2, $3, $4, $5, $6)", 6, oids);
 
 		for(i = 0; i < globals->text_node_buffer_count; ++i)
 		{			
 
-			*nulls	= "      ";		// spaces indicates not null values
+			strncpy(nulls, "      ", 6);		// spaces indicates not null values
 
 			if ((text_node_buffer[i].value != NULL) && (pplan != NULL))
 			{
