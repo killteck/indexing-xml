@@ -270,11 +270,11 @@ preorder_traverse(int parent_id,
 					return(LIBXML_ERR);
 				}
 				break;
+			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_WHITESPACE:
 			case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:	// do nothing with white spaces
 				break;
 
-			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_ENTITY_REFERENCE:
 			case XML_READER_TYPE_ENTITY:
 			case XML_READER_TYPE_PROCESSING_INSTRUCTION:

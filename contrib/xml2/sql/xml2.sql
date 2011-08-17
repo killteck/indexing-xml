@@ -122,3 +122,20 @@ SELECT xslt_process('<employee><name>cim</name><age>30</age><pay>400</pay></empl
     </xsl:element>
   </xsl:template>
 </xsl:stylesheet>$$::text, 'n1="v1",n2="v2",n3="v3",n4="v4",n5="v5",n6="v6",n7="v7",n8="v8",n9="v9",n10="v10",n11="v11",n12="v12"'::text);
+
+CREATE OR REPLACE FUNCTION generate_xmls()
+RETURNS integer AS $$
+DECLARE
+	node text = '<inner> in value </inner>';
+BEGIN
+
+	FOR i IN 1..100 LOOP
+	node = '<a>a value</a>' || node || '<b>b value</b>';	
+	PERFORM build_xmlindex(('<envelope>' || node || '</envelope>')::xml, 'regress test' || i, true);
+	END LOOP;
+
+	return 0;
+END;
+  $$ LANGUAGE 'plpgsql';
+
+SELECT generate_xmls();
