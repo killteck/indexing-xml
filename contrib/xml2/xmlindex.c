@@ -6,10 +6,6 @@
  *
  * desc:	Model of index structure see http://www.tomaspospisil.com
  *
-
- * TODO: create more tests 
- *		test if range index on attribute_table is needed
- *		add column comments to created tables
  */
 
 #include "postgres.h"

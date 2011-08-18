@@ -20,9 +20,9 @@ reffering to official http://xmlsoft.org/ site.
 3. change directory to contrib/xml2
 4. make # and compile this module
 5. sudo make install # will copy module to proper directory and you have to register it
-7. CREATE EXTENSION xml2; -- run this query in your SQL interpreter
+6. CREATE EXTENSION xml2; -- run this query in your SQL interpreter
 
-Succed, you just install new contrib module to PostgreSQL! You can check now
+Succeed, you just install new contrib module to PostgreSQL! You can check now
 if xml_documents, xml_element_nodes, xml_attribute_nodes, xml_text_nodes tables
 are present. If you want to uninstall module, just run DROP EXTENSION xml2;
 
@@ -39,13 +39,13 @@ briefly describe each.
  public | build_xmlindex           | boolean          | xml, text, boolean           | normal
 
 This 2 functions are used for shredding XML document to prepared tables,
-
+           List of relations
  Schema |        Name         | Type
 --------+---------------------+-------
- public | attribute_table     | table
- public | element_table       | table
- public | text_table          | table
- public | xml_documents_table | table
+ public | xml_attribute_nodes | table
+ public | xml_documents       | table
+ public | xml_element_nodes   | table
+ public | xml_text_nodes      | table 
 
 which are created by next function create_xmlindex_tables. Please be sure, that
 you don't have tables with same name.
@@ -72,7 +72,7 @@ need them.
  public | xmlvalidate_xsd          | boolean          | xml, xsd                     | normal
  public | xmlvalidate_xsd          | boolean          | xml, text                    | normal
 
-These funcitons do validations for specific validaiton schemas. You can use DTD,
+These functions do validations for specific validaiton schemas. You can use DTD,
 XSD and RNG for validations.
 
 == usage examples ==
@@ -116,30 +116,46 @@ first argument is XML document, second is description of it and third idicate if
 user want to store original XML document in xml_documents table
 --------------------------------------------------------------------------------
 
+
 SQL example 2: What data are stored in tables
 XML document is cut off by nodes and tables xml_documents, xml_element_nodes,
 xml_attribute_nodes and xml_text_nodes are filled. For SQL example 1 data looks
 like:
 --------------------------------------------------------------------------------
-SELECT * from xml_element_nodes ;
+SELECT * FROM xml_element_nodes ORDER BY pre_order;
    name    | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id
 -----------+-----+-----------+------+-------+-----------+---------+----------+---------
+ books     |   1 |         1 |   23 |     0 |           |         |       13 |
+ book      |   1 |         2 |   10 |     1 |         1 |         |       10 |
+ author    |   1 |         3 |    4 |     2 |         2 |         |        6 |
  firstname |   1 |         4 |    1 |     3 |         3 |         |          |
  lastname  |   1 |         6 |    1 |     3 |         3 |       4 |          |
- author    |   1 |         3 |    4 |     2 |         2 |         |        6 |
  title     |   1 |         8 |    1 |     2 |         2 |       3 |          |
  price     |   1 |        10 |    2 |     2 |         2 |       8 |          |      11
- book      |   1 |         2 |   10 |     1 |         1 |         |       10 |
+ book      |   1 |        13 |   11 |     1 |         1 |       2 |       21 |
+ author    |   1 |        14 |    4 |     2 |        13 |         |       17 |
  firstname |   1 |        15 |    1 |     3 |        14 |         |          |
  lastname  |   1 |        17 |    1 |     3 |        14 |      15 |          |
- author    |   1 |        14 |    4 |     2 |        13 |         |       17 |
  title     |   1 |        19 |    1 |     2 |        13 |      14 |          |
  price     |   1 |        21 |    3 |     2 |        13 |      19 |          |      23
- book      |   1 |        13 |   11 |     1 |         1 |       2 |       21 |
- books     |   1 |         1 |   23 |     0 |           |         |       13 |
 (13 rows)
 
-SELECT * from xml_attribute_nodes ;
+did			= Document ID, it's foreign key to xml_documents
+pre_order	= Pre order value from tree traverse throught XML tree
+size		= number of nodes in subtree, for example 'author' has 4, where are counted
+				text nodes, attribute nodes and text nodes
+			<author>
+				<firstname>Quanzhong</firstname>
+				<lastname>Li</lastname>
+			</author>
+depth		= level of node
+parent_id	= ID of parent element (text, attribute, tag), can be NULL
+prev_id		= ID of element (text, attribute, tag) on same level, can be NULL.
+				For example	book with pre_order 13 has previous elem with value 2.
+child_id	= ID of first child element, can be NULL
+attr_id		= ID of first attribute, can be NULL
+
+SELECT * FROM xml_attribute_nodes ORDER BY pre_order;
  name | did | pre_order | size | depth | parent_id | prev_id | value
 ------+-----+-----------+------+-------+-----------+---------+-------
  unit |   1 |        11 |    0 |     3 |        10 |         | USD
@@ -147,19 +163,203 @@ SELECT * from xml_attribute_nodes ;
  test |   1 |        23 |    0 |     3 |        21 |      22 | AM
 (3 rows)
 
-SELECT * from xml_text_nodes ;
-order | depth | parent_id | prev_id
-------+-------+-----------+---------
-    5 |     4 |         4 |
-    7 |     4 |         6 |
-    9 |     3 |         8 |
-   12 |     3 |        10 |
-   16 |     4 |        15 |
-   18 |     4 |        17 |
-   20 |     3 |        19 |
-   24 |     3 |        21 |
+SELECT * FROM xml_text_nodes ORDER BY pre_order;
+ did | pre_order | depth | parent_id | prev_id |       value
+-----+-----------+-------+-----------+---------+-------------------
+   1 |         5 |     4 |         4 |         | Quanzhong
+   1 |         7 |     4 |         6 |         | Li
+   1 |         9 |     3 |         8 |         | XML indexing
+   1 |        12 |     3 |        10 |         | 120
+   1 |        16 |     4 |        15 |         | Bongki
+   1 |        18 |     4 |        17 |         | Moon
+   1 |        20 |     3 |        19 |         | javelina javelina
+   1 |        24 |     3 |        21 |         | 100
+(8 rows)
 
+
+SQL example 3: Query with XPath (on 1 XML document)
+--------------------------------------------------------------------------------
+SELECT xpath('/books/book', value ) AS regular_xpath
+FROM xml_documents
+WHERE did = 1;
+                regular_xpath
+---------------------------------------------
+ {"<book>                                   +
+ <author>                                   +
+ <firstname>Quanzhong</firstname>           +
+ <lastname>Li</lastname>                    +
+ </author>                                  +
+ <title>XML indexing</title>                +
+ <price unit=\"USD\">120</price>            +
+ </book>","<book>                           +
+ <author>                                   +
+ <firstname>Bongki</firstname>              +
+ <lastname>Moon</lastname>                  +
+ </author>                                  +
+ <title>javelina javelina</title>           +
+ <price unit=\"USD\" test=\"AM\">100</price>+
+ </book>"}
+(1 row)
+
+It returns array (with 2 items) of xml elements for result of query, which want
+ to find "all subtree under root/books/book".
 
 --------------------------------------------------------------------------------
 
-\todo show XPath/XQuery to SQL and indexes are used
+SQL example 4: Query with XPath and result as table (on 1 XML document)
+--------------------------------------------------------------------------------
+SELECT unnest(xpath('/books/book', value )) AS regular_xpath
+FROM xml_documents
+WHERE did = 1;
+              regular_xpath
+-----------------------------------------
+ <book>                                 +
+ <author>                               +
+ <firstname>Quanzhong</firstname>       +
+ <lastname>Li</lastname>                +
+ </author>                              +
+ <title>XML indexing</title>            +
+ <price unit="USD">120</price>          +
+ </book>
+ <book>                                 +
+ <author>                               +
+ <firstname>Bongki</firstname>          +
+ <lastname>Moon</lastname>              +
+ </author>                              +
+ <title>javelina javelina</title>       +
+ <price unit="USD" test="AM">100</price>+
+ </book>
+(2 rows)
+
+Result is quite similar but it's returns 2 row of xml trees.
+--------------------------------------------------------------------------------
+
+SQL example 5: Query with XPath and result as table (on all XML documents)
+--------------------------------------------------------------------------------
+SELECT did as Document_ID,
+	 unnest(xpath('/books/book', value )) AS regular_xpath
+FROM xml_documents
+WHERE xpath_exists('/books/book', value) = true
+ORDER BY did;
+ document_id |              regular_xpath
+-------------+-----------------------------------------
+           1 | <book>                                 +
+             | <author>                               +
+             | <firstname>Quanzhong</firstname>       +
+             | <lastname>Li</lastname>                +
+             | </author>                              +
+             | <title>XML indexing</title>            +
+             | <price unit="USD">120</price>          +
+             | </book>
+           1 | <book>                                 +
+             | <author>                               +
+             | <firstname>Bongki</firstname>          +
+             | <lastname>Moon</lastname>              +
+             | </author>                              +
+             | <title>javelina javelina</title>       +
+             | <price unit="USD" test="AM">100</price>+
+             | </book>
+(2 rows)
+
+This query call xpath function on alls xml documents in xml_documents tables, so
+if you have table with lots of bigs xml document, then it must execute query on
+every single row. Range when is this approach faster is based on every machine,
+please do testing before push to production.
+--------------------------------------------------------------------------------
+
+
+SQL example 6: Query with XPath and result as table (on 1 XML document)
+--------------------------------------------------------------------------------
+SELECT
+	et2.*
+FROM
+	xml_element_nodes et0, xml_element_nodes et1, xml_element_nodes et2
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did AND
+	et2.did = et1.did AND
+	range(et1.pre_order, et1.pre_order+et1.size) @>
+		range(et2.pre_order, (et2.pre_order + et2.size))
+ORDER BY et2.did, et2.pre_order;
+
+This SQL query do somethig similar to SQL example 5, but only with regular
+SQL commands, so you have full power of this computational machine and you can
+do INSERT/UPDATE/DELETES as well.
+
+Query with xpath checking is fast if you have one document, but if you have
+plenty of huge XML documents than it's faster use XML shredding technique.
+--------------------------------------------------------------------------------
+
+
+== FAQ ==
+1.	[What kind of XML documents fits' shreddding technique?]
+
+Data centric XML documents are best because they have defined structure and you
+can query this structure with XPath/XQuery and off course with SQL. One example
+of data centric XML is
+
+<books>
+	<book>
+		<author>
+			<firstname>Quanzhong</firstname>
+			<lastname>Li</lastname>
+		</author>
+		<title>XML indexing</title>
+		<price unit = "USD">120</price>
+	</book>
+	<book>
+		<author>
+			<firstname>Bongki</firstname>
+			<lastname>Moon</lastname>
+		</author>
+		<title>javelina javelina</title>
+		<price unit = "USD" test = "AM">100</price>
+	</book>
+</books>
+
+Have a notice that it has 1 root element <books>. It's common for data centric
+XML documents and it's REQUIRED by xml2 module to have PRECISLY one.
+
+Document centric XML can be used too. But XML document have to  have
+one root element. If you want, you can create tsvector index on xml_text_nodes
+table for information retrivial queries (index is not created by implicit ).
+
+2.	[What indexes are created after xml2 extension install?]
+Indexes for table xml_element_nodes table:
+    "xml_element_nodes_pkey" PRIMARY KEY, btree (did, pre_order, size)
+    "elem_tab_all_index" btree (name, did, pre_order, size)
+    "elem_tab_range_index" gist (range(pre_order, pre_order + size))
+
+Indexes for xml_attribute_nodes table:
+    "xml_attribute_nodes_pkey" PRIMARY KEY, btree (did, pre_order)
+    "attr_tab_all_index" btree (name, did, pre_order)
+
+Indexes for xml_text_nodes table:
+    "xml_text_nodes_pkey" PRIMARY KEY, btree (pre_order, did)
+    "text_tab_index" btree (parent_id, did)
+
+3. [How can I benefit from these indexes?]
+Indexes are created with XPath/Xquery in mind, so if you try translate then
+to SQL then by natural will be used. Please have a notice of the
+"elem_tab_range_index" gist (range(pre_order, pre_order + size)), which is
+esential part.
+
+For example typical subquery is "give me all subtree within this
+element(pre_order = 1, size = 10)", this is quite complicated for regular query,
+but with this index you can just call
+
+SELECT xml_element_nodes
+WHERE range(pre_order, pre_order+size) <@ range(1, 10);
+
+<@ which is operator "is contained by" and then see how elem_tab_range_index
+is utilized.
+
+For other operators see documentation in section 9.18. Range Functions and Operators
+(will be included in 9.2 PostgreSQL)
+
+
+4. [Why are external(entity, validation, namespaces) forbidden?]
+Because of security, it could be huge problem if someone include to external
+entity definition any SQL query, if so this will be new generation of SQL
+poisonig.

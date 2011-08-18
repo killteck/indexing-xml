@@ -11,6 +11,8 @@
  *
  * TODO: set index to proper value
  * test external entities as well as error handlings
+ * precisly describe parameters
+ * add missing erro handling for other types of errors
  */
 
 #include "postgres.h"
@@ -83,7 +85,6 @@ xml_index_entry(const char *xml_document,
 
 	return XML_INDEX_LOADER_SUCCES;
 }
-
 
 /**
  * Initialize global values
@@ -273,7 +274,7 @@ preorder_traverse(int parent_id,
 			case XML_READER_TYPE_WHITESPACE:
 			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:	// do nothing with white spaces
-				elog(DEBUG1, "non significant element");
+				elog(DEBUG1, "no significant element");
 				break;
 			
 			case XML_READER_TYPE_ENTITY_REFERENCE:
@@ -681,6 +682,7 @@ is_all_whitespace(char* text)
 }
 
 /**
+ * Depricated
  * Replaces ' with \' if macro REPLACE_BAD_CHARS is set to TRUE
  * @param globals variables used for global handling
  */
