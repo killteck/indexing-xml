@@ -123,6 +123,31 @@ SELECT xslt_process('<employee><name>cim</name><age>30</age><pay>400</pay></empl
   </xsl:template>
 </xsl:stylesheet>$$::text, 'n1="v1",n2="v2",n3="v3",n4="v4",n5="v5",n6="v6",n7="v7",n8="v8",n9="v9",n10="v10",n11="v11",n12="v12"'::text);
 
+-- basic test for shredding
+SELECT build_xmlindex('<?xml version="1.0" encoding="utf-8"?>
+<books>
+	<book>
+		<author>
+			<firstname>Quanzhong</firstname>
+			<lastname>Li</lastname>
+		</author>
+		<title>XML indexing</title>
+		<price unit = "USD">120</price>
+	</book>
+	<book>
+		<author>
+			<firstname>Bongki</firstname>
+			<lastname>Moon</lastname>
+		</author>
+		<title>javelina javelina</title>
+		<price unit = "USD" test = "AM">100</price>
+	</book>
+</books>', 'bookshelf', true);
+
+SELECT * FROM xml_documents xd WHERE xd.name = 'bookshelf';
+SELECT * FROM xml_attribute_nodes WHERE did = 1;
+SELECT * FROM xml_text_nodes WHERE did = 1;
+
 CREATE OR REPLACE FUNCTION generate_xmls()
 RETURNS integer AS $$
 DECLARE
@@ -130,7 +155,7 @@ DECLARE
 BEGIN
 
 	FOR i IN 1..100 LOOP
-	node = '<a>a value</a>' || node || '<b>b value</b>';	
+	node = '<a>a value</a>' || node || '<b>b value</b>';
 	PERFORM build_xmlindex(('<envelope>' || node || '</envelope>')::xml, 'regress test' || i, true);
 	END LOOP;
 
@@ -138,4 +163,94 @@ BEGIN
 END;
   $$ LANGUAGE 'plpgsql';
 
+-- generate xmls and shred them
 SELECT generate_xmls();
+
+-- execute XPath query on longest XML document (non shreded) DocumentID == 100
+SELECT unnest(xpath('/envelope/a',
+		(select value from xml_documents where did = 100)))
+	AS regular_xpath;
+
+-- Xpath to SQL translation with same result as above DocumentID == 100
+-- do not use range index
+SELECT elements.did as Document_ID, elements.pre_order as Node_ID,
+	xmlforest(tv.value as a) as xpath_to_sql
+FROM
+	(SELECT		
+		et1.pre_order, et1.did
+	FROM
+		xml_element_nodes et0, xml_element_nodes et1
+	WHERE
+		et0.name = 'envelope' AND
+		et1.name = 'a' AND
+		et0.DID = et1.DID AND
+		et1.parent_id = et0.pre_order AND
+		et0.did = 100
+	ORDER BY et1.pre_order
+	) AS elements
+LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND tv.did = 100);
+
+-- range index tests
+set enable_seqscan = f;
+set enable_bitmapscan = f;
+set enable_indexscan = t;
+
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) < range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <= range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) = range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) >= range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) > range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) @> range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <@ range(1,100);
+
+-- searching for * xml subtree with /envelope/a in all xml documents
+SELECT elements.did as Document_ID, elements.pre_order as Node_ID,
+	xmlforest(tv.value as a) as xpath_to_sql
+FROM
+	(SELECT
+		et1.pre_order, et1.did
+	FROM
+		xml_element_nodes et0, xml_element_nodes et1
+	WHERE
+		et0.name = 'envelope' AND
+		et1.name = 'a' AND
+		et0.did = et1.did AND
+		et1.parent_id = et0.pre_order
+	) AS elements
+LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND
+	tv.did = elements.did)
+ORDER BY tv.did, tv.pre_order;
+
+SELECT did as Document_ID, 
+	 unnest(xpath('/envelope/a', value )) AS regular_xpath
+FROM xml_documents
+WHERE xpath_exists('/envelope/a', value) = true
+ORDER BY did;
+
+-- test XPath to SQL with range benefit
+SELECT et.*
+FROM
+	(SELECT
+			et1.pre_order, et1.size, et1.did
+		FROM
+			xml_element_nodes et0, xml_element_nodes et1
+		WHERE
+			et0.name = 'books' AND
+			et1.name = 'book' AND
+			et0.did = et1.did) AS sub
+LEFT JOIN xml_element_nodes et ON (range(et.pre_order, et.pre_order+et.size) <@ 
+	range(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
+ORDER BY et.did, et.pre_order;
+
+SELECT
+	et2.*
+FROM
+	xml_element_nodes et0, xml_element_nodes et1, xml_element_nodes et2
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did AND
+	et2.did = et1.did AND
+	range(et1.pre_order, et1.pre_order+et1.size) @>
+		range(et2.pre_order, (et2.pre_order + et2.size))
+ORDER BY et2.did, et2.pre_order;

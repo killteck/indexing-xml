@@ -266,15 +266,16 @@ preorder_traverse(int parent_id,
 				prev_child = recent_child;
 				if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == XML_READER_TYPE_END_ELEMENT)
 				{
-					elog(DEBUG1, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
+					elog(ERROR, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
 					return(LIBXML_ERR);
 				}
 				break;
-			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_WHITESPACE:
+			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:	// do nothing with white spaces
+				elog(DEBUG1, "non significant element");
 				break;
-
+			
 			case XML_READER_TYPE_ENTITY_REFERENCE:
 			case XML_READER_TYPE_ENTITY:
 			case XML_READER_TYPE_PROCESSING_INSTRUCTION:
@@ -286,7 +287,7 @@ preorder_traverse(int parent_id,
 			case XML_READER_TYPE_END_ENTITY:
 			case XML_READER_TYPE_XML_DECLARATION:
 			default:
-				elog(INFO, "Encounted an node of type %d where it should not be\n", node_type);
+				elog(ERROR, "Encounted an node of type %d where it should not be\n", node_type);
 				return(LIBXML_ERR);
 				//Possibly implement error handling code here
 				break;
@@ -295,7 +296,7 @@ preorder_traverse(int parent_id,
 		err_val = read_next_node(reader, globals);
 		if(err_val == 0)
 		{
-			elog(DEBUG1, "Malformed XML: reached end of document without reaching "
+			elog(ERROR, "Malformed XML: reached end of document without reaching "
 					"the end tag for the current element\n");
 			return(LIBXML_ERR);
 		}
@@ -590,7 +591,7 @@ process_text_node(int parent_id,
 	text_node_buffer[my_ind].parent_id = parent_id;
 
 	 //Replace any characters that the DBMS has problems with.
-	text_node_buffer[my_ind].value = replace_bad_chars(value);
+	text_node_buffer[my_ind].value = value;
 	elog(DEBUG1, "== CREATE == text node[%d] depth:%d, did:%d, order:%d, parent_id:%d, "
 			"prev_id:%d, size:%d, value:%s", my_ind,
 			text_node_buffer[my_ind].depth,
