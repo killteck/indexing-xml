@@ -20,10 +20,11 @@ reffering to official http://xmlsoft.org/ site.
 3. change directory to contrib/xml2
 4. make # and compile this module
 5. sudo make install # will copy module to proper directory and you have to register it
-6. registration is made by this SQL execution in psql: \i /usr/local/pgsql/share/extension/xml2--1.0.sql
-	but your path may be different
-7. succed you just install new contrib module to PostgreSQL!
-8. Uninstall is made by  \i /usr/local/pgsql/share/extension/xml2--unpackaged--1.0.sql
+7. CREATE EXTENSION xml2; -- run this query in your SQL interpreter
+
+Succed, you just install new contrib module to PostgreSQL! You can check now
+if xml_documents, xml_element_nodes, xml_attribute_nodes, xml_text_nodes tables
+are present. If you want to uninstall module, just run DROP EXTENSION xml2;
 
 
 == functions included in xml2 module ==
