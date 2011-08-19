@@ -52,9 +52,6 @@ extern "C" {
 #define XML_INDEX_LOADER_SUCCES 0
 #define MAX_INT_SIZE 10 //Maximum digits in an Integer
 #define DOCUMENT_ROOT "DOCUMENT_ROOT"  //The node name of the document root in the XISS/R database
-#define DO_FLUSH TRUE 			//If TRUE write data to database
-#define FREE TRUE 				//If true free all malloced memory
-#define REPLACE_BAD_CHARS FALSE
 #define BUFFER_SIZE 10000		//Size of Buffer for Element, Attribute and Text Node queues
 
 //Structs

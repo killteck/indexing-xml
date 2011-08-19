@@ -195,11 +195,6 @@ set enable_seqscan = f;
 set enable_bitmapscan = f;
 set enable_indexscan = t;
 
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) < range(1,100);
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <= range(1,100);
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) = range(1,100);
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) >= range(1,100);
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) > range(1,100);
 SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) @> range(1,100);
 SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <@ range(1,100);
 

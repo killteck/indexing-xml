@@ -9,9 +9,8 @@
  * and specific memory menagement
  * http://www.tomaspospisil.com
  *
- * TODO: set index to proper value
+ * TODO: 
  * test external entities as well as error handlings
- * precisly describe parameters
  * add missing erro handling for other types of errors
  */
 
@@ -56,11 +55,10 @@ int extern
 xml_index_entry(const char *xml_document,
 		int4 did)
 {
-	xml_index_globals		globals;
-	int preorder_result;
-	int length			=	strlen(xml_document);
+	xml_index_globals		globals;		// holder of counters for pre order traversal
+	int preorder_result;					// result code of preorder traversal
+	int length			=	strlen(xml_document);	// length of xml_document
 
-	//globals.reader
 	xmlTextReaderPtr reader		= xmlReaderForMemory(xml_document, length,
 			NULL,NULL, 0);
 
@@ -70,8 +68,10 @@ xml_index_entry(const char *xml_document,
 		return LIBXML_ERR;
     }
 
+	assert(did > 0);	// check if ID is properly set by after SQL INSERT
+
 	init_values(&globals);
-	globals.global_doc_id = did;
+	globals.global_doc_id = did;	// set document ID,
 
 	xmlTextReaderRead(reader);
 	// parse and compute whole shredding
@@ -79,6 +79,7 @@ xml_index_entry(const char *xml_document,
 
 	xmlFreeTextReader(reader);    // clean up document in memmory
 
+	// finall flush of remain nodes
 	flush_element_node_buffer(&globals);
 	flush_attribute_node_buffer(&globals);
 	flush_text_node_buffer(&globals);
@@ -88,7 +89,7 @@ xml_index_entry(const char *xml_document,
 
 /**
  * Initialize global values
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  */
 void
 init_values(xml_index_globals_ptr globals)
@@ -106,7 +107,7 @@ init_values(xml_index_globals_ptr globals)
 /**
  * Read the next node (move the stream to the next node) and return an error code if neccesary.
  * @param reader LibXML stream reader pointer
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return err value return by xmlTextReaderRead (1 if exist another nodes)
  */
 int 
@@ -128,7 +129,7 @@ read_next_node(xmlTextReaderPtr reader,
 /**
  * Clears the next element record in the element buffer and may flush the buffer
  * and reset the index if the buffer is full.
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return Returns the index to the buffer for the "new" element
  */
 int 
@@ -151,13 +152,6 @@ create_new_element(xml_index_globals_ptr globals)
 	element_node_buffer[my_ind].did = NO_VALUE;
 	element_node_buffer[my_ind].order = NO_VALUE;
 	element_node_buffer[my_ind].size = NO_VALUE;
-	
-	if((FREE == TRUE) && (element_node_buffer[my_ind].tag_name != NULL) &&
-			(globals->element_node_buffer_count > BUFFER_SIZE))
-	{
-		free(element_node_buffer[my_ind].tag_name);
-	}
-
 	element_node_buffer[my_ind].tag_name = NULL;
 	element_node_buffer[my_ind].depth = NO_VALUE;
 	element_node_buffer[my_ind].child_id = NO_VALUE;
@@ -168,7 +162,6 @@ create_new_element(xml_index_globals_ptr globals)
 
 	globals->element_node_count++;
 	return my_ind;
-
 }
 
 /**
@@ -177,7 +170,7 @@ create_new_element(xml_index_globals_ptr globals)
  * @param parent_id parent node's order
  * @param sibling_id Order of this node's nearest sibling
  * @param reader pointer to LibXML stream reader
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return
  */
 int 
@@ -334,15 +327,10 @@ preorder_traverse(int parent_id,
 	if(my_tag_name == NULL && my_order == 1  && parent_id == NO_VALUE)
 	{
 		element_node_buffer[my_ind].tag_name = (char*) strdup(DOCUMENT_ROOT);
-		//error
-	}
-	else
+	} else
 	{
-		element_node_buffer[my_ind].tag_name = (char *)my_tag_name;//(char*)strdup(my_tag_name);
-	//	if(FREE == TRUE)
-	//	{
-	//		free(my_tag_name);
-	//	}
+		element_node_buffer[my_ind].tag_name = (char*)pstrdup((char *)my_tag_name);
+		free(my_tag_name);		// must be free because LibXML malloc it
 	}
 
 
@@ -372,7 +360,7 @@ preorder_traverse(int parent_id,
  * stream is the element that is parent of these attributes.
  * @param parent_id element primary key
  * @param reader pointer to LibXML stream reader
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return  Returns the number of attributes processed.
  */
 int 
@@ -409,12 +397,14 @@ process_attributes(int parent_id,
 		attribute_node_buffer[my_ind].did = globals->global_doc_id;
 		attribute_node_buffer[my_ind].order = ++(globals->global_order);
 		attribute_node_buffer[my_ind].size = 0;
+
 		text = xmlTextReaderName(reader);
-		attribute_node_buffer[my_ind].tag_name = (char *)text;
-		//if(FREE == TRUE)
-		//{
-		//	xmlFree(text);
-		//}
+		if (text != NULL)
+		{
+			attribute_node_buffer[my_ind].tag_name = (char*)pstrdup((char*)text);
+			xmlFree(text);	// must be free, because LibXML malloc it
+		}
+		
 		attribute_node_buffer[my_ind].depth = xmlTextReaderDepth(reader);
 		if(attribute_node_buffer[my_ind].depth == -1)
 		{
@@ -462,7 +452,7 @@ process_attributes(int parent_id,
 /**
  * Clears the next text record in the text buffer and may flush the buffer and
  * reset the index if the buffer is full.
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return the index to the buffer for the "new" text node
  */
 int
@@ -486,16 +476,8 @@ create_new_text_node(xml_index_globals_ptr globals)
 	text_node_buffer[my_ind].depth = NO_VALUE;
 	text_node_buffer[my_ind].parent_id = NO_VALUE;
 	text_node_buffer[my_ind].prev_id = NO_VALUE;
-
-	if((FREE == TRUE) && (text_node_buffer[my_ind].value != NULL) &&
-			(globals->text_node_buffer_count > BUFFER_SIZE))
-	{
-		free(text_node_buffer[my_ind].value);
-	}
-
 	text_node_buffer[my_ind].value = NULL;
 	(globals->text_node_buffer_count)++;
-
 	(globals->text_node_count)++;
 
 	return my_ind;
@@ -504,7 +486,7 @@ create_new_text_node(xml_index_globals_ptr globals)
 /**
  * Clears the next attribute record in the attribute buffer and may Flush the
  * Buffer and reset the index if the buffer is full.
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return the index to the buffer for the "new" attribute
  */
 int
@@ -525,20 +507,10 @@ create_new_attribute(xml_index_globals_ptr globals)
 	attribute_node_buffer[my_ind].did = NO_VALUE;
 	attribute_node_buffer[my_ind].order = NO_VALUE;
 	attribute_node_buffer[my_ind].size = NO_VALUE;
-	if(FREE == TRUE && attribute_node_buffer[my_ind].tag_name != NULL &&
-			globals->attribute_node_buffer_count > BUFFER_SIZE)
-	{
-		free(attribute_node_buffer[my_ind].tag_name);
-	}
 	attribute_node_buffer[my_ind].tag_name = NULL;
 	attribute_node_buffer[my_ind].depth = NO_VALUE;
 	attribute_node_buffer[my_ind].parent_id = NO_VALUE;
 	attribute_node_buffer[my_ind].prev_id = NO_VALUE;
-	if(FREE == TRUE && attribute_node_buffer[my_ind].value != NULL &&
-			globals->attribute_node_buffer_count > BUFFER_SIZE)
-	{
-		free(attribute_node_buffer[my_ind].value);
-	}
 	attribute_node_buffer[my_ind].value = NULL;
 	globals->attribute_node_buffer_count++;
 
@@ -552,7 +524,7 @@ create_new_attribute(xml_index_globals_ptr globals)
  * @param parent_id element primary key
  * @param prev_id previous text node, sibling
  * @param reader pointer to LibXML stream reader
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  * @return
  */
 int
@@ -570,10 +542,8 @@ process_text_node(int parent_id,
 	// to include text nodes that are only white space.
 	if(is_all_whitespace(value))
 	{
-		if(FREE == TRUE)
-		{
-			free(value);
-		}
+		pfree(value);
+		value = NULL;
 		return FAKE_TEXT_NODE;
 	}
 
@@ -634,13 +604,11 @@ get_text_from_node(xmlTextReaderPtr reader)
 				return NULL;
 			}
 			text = (char *)xmlTextReaderValue(reader);
-			text2 = (char*) malloc(strlen(text) + 1 + 10);
+			text2 = (char*) palloc(strlen(text) + 1 + 10);
 			//One plus the length of the string + the length of ![[CDATA]]
 			sprintf(text2, "![CDATA[%s]]", text);
-			if(FREE == TRUE)
-			{
-				free(text);
-			}
+			free(text);		// must be free because of LibXML allocation
+
 			return text2;
 		}
 		return NULL;
@@ -648,12 +616,9 @@ get_text_from_node(xmlTextReaderPtr reader)
 	else
 	{
 		text = (char *)xmlTextReaderValue(reader);
-//TODO could be safer with strndup
-		text2 = (char*)strdup(text);
-		if(FREE == TRUE)
-		{
-			free(text);
-		}
+		text2 = (char*)pstrdup(text);
+		free(text);			// must be free because of LibXML allocation
+
 		return text2;
 	}
 
@@ -690,15 +655,11 @@ char*
 replace_bad_chars(char* value)
 {
 	char *temp;
-	if(REPLACE_BAD_CHARS != TRUE)
-	{
-		return "";
-	}
+
 	if(value == NULL)
 	{
 		return "";
 	}
-
 
 	while( (temp = strchr(value, (int)'\'')) != NULL)
 	{
@@ -710,7 +671,7 @@ replace_bad_chars(char* value)
 
 /**
  * Flush the element buffer to element_table
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  */
 void
 flush_element_node_buffer(xml_index_globals_ptr globals)
@@ -734,7 +695,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 
 	elog(DEBUG1, "flushing element_nodes");	
 
-	if ((DO_FLUSH == TRUE) && (globals->element_node_buffer_count > 0))
+	if (globals->element_node_buffer_count > 0)
 	{
 		SPI_connect();
 
@@ -798,7 +759,7 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 
 /**
  * Flush the attribute buffer to attribute_table
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  */
 void
 flush_attribute_node_buffer(xml_index_globals_ptr globals)
@@ -821,7 +782,7 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 
 	elog(DEBUG1, "flushing attribute_nodes");
 
-	if ((DO_FLUSH == TRUE)  && (globals->attribute_node_buffer_count > 0))
+	if (globals->attribute_node_buffer_count > 0)
 	{
 
 		SPI_connect();
@@ -881,7 +842,7 @@ flush_attribute_node_buffer(xml_index_globals_ptr globals)
 
 /**
  * Flush the text buffer to text_table
- * @param globals variables used for global handling
+ * @param globals holder of counters for pre order traversal
  */
 void
 flush_text_node_buffer(xml_index_globals_ptr globals)
@@ -900,7 +861,7 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 	oids[4] = INT4OID;
 	oids[5] = TEXTOID;
 
-	if ((DO_FLUSH == TRUE) && (globals->text_node_buffer_count > 0))
+	if (globals->text_node_buffer_count > 0)
 	{
 
 		SPI_connect();
@@ -950,9 +911,10 @@ flush_text_node_buffer(xml_index_globals_ptr globals)
 
 	elog(DEBUG1, "flushed text_nodes");
 }
+
 /**
  * Prints a report 
- * @param globals
+ * @param globals holder of counters for pre order traversal
  */
 void
 report(xml_index_globals_ptr globals)
