@@ -279,8 +279,8 @@ WHERE
 	et1.name = 'book' AND
 	et0.did = et1.did AND
 	et2.did = et1.did AND
-	range(et1.pre_order, et1.pre_order+et1.size) @>
-		range(et2.pre_order, (et2.pre_order + et2.size))
+	rangeii(et1.pre_order, et1.pre_order+et1.size) @>
+		rangeii(et2.pre_order, (et2.pre_order + et2.size))
 ORDER BY et2.did, et2.pre_order;
 
 This SQL query do somethig similar to SQL example 5, but only with regular
@@ -329,7 +329,7 @@ table for information retrivial queries (index is not created by implicit ).
 Indexes for table xml_element_nodes table:
     "xml_element_nodes_pkey" PRIMARY KEY, btree (did, pre_order, size)
     "elem_tab_all_index" btree (name, did, pre_order, size)
-    "elem_tab_range_index" gist (range(pre_order, pre_order + size))
+    "elem_tab_range_index" gist (rangeii(pre_order, pre_order + size))
 
 Indexes for xml_attribute_nodes table:
     "xml_attribute_nodes_pkey" PRIMARY KEY, btree (did, pre_order)
@@ -342,7 +342,7 @@ Indexes for xml_text_nodes table:
 3. [How can I benefit from these indexes?]
 Indexes are created with XPath/Xquery in mind, so if you try translate then
 to SQL then by natural will be used. Please have a notice of the
-"elem_tab_range_index" gist (range(pre_order, pre_order + size)), which is
+"elem_tab_range_index" gist (rangeii(pre_order, pre_order + size)), which is
 esential part.
 
 For example typical subquery is "give me all subtree within this
@@ -350,7 +350,7 @@ element(pre_order = 1, size = 10)", this is quite complicated for regular query,
 but with this index you can just call
 
 SELECT xml_element_nodes
-WHERE range(pre_order, pre_order+size) <@ range(1, 10);
+WHERE rangeii(pre_order, pre_order+size) <@ rangeii(1, 10);
 
 <@ which is operator "is contained by" and then see how elem_tab_range_index
 is utilized.
@@ -358,8 +358,20 @@ is utilized.
 For other operators see documentation in section 9.18. Range Functions and Operators
 (will be included in 9.2 PostgreSQL)
 
+4. [Why is used rangeii, instead of range]
+Because of XML node definition, that allow shortage of tag's name for example
+<a /> is 0 sized node without end tag. Rangeii is shortage for range with include
+of start and end value [1,2]. Please consider that [1,2] is in integer values
+same as [1,3), because there aren't any values between them.
 
-4. [Why are external(entity, validation, namespaces) forbidden?]
+5. [Why are external(entity, validation, namespaces) forbidden?]
 Because of security, it could be huge problem if someone include to external
 entity definition any SQL query, if so this will be new generation of SQL
 poisonig.
+
+== Known issues and future extension ==
+1. <a /> and <a></a> defined on same level make issues, because of LibXML handles.
+	I'm in touch with author of LibXML and hope that will be fixed in new release.
+
+2. attributes in document root <?xml version.... ?> and Document type is not
+parsed for now, but can	be considered if it can be usable

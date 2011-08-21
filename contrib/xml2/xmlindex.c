@@ -148,8 +148,8 @@ create_indexes_on_tables(void)
 	if (SPI_execute("CREATE INDEX attr_tab_all_index ON xml_attribute_nodes (name, did, pre_order); "
 					"CREATE INDEX did_tab_name_index ON xml_documents (name); "
 					"CREATE INDEX elem_tab_all_index ON xml_element_nodes (name, did, pre_order, size); "
-					"CREATE INDEX elem_tab_range_index ON xml_element_nodes USING gist (range(pre_order, (pre_order+size)));"
-					"CREATE INDEX text_tab_index ON xml_text_nodes (parent_id,did);"
+					"CREATE INDEX elem_tab_range_index ON xml_element_nodes USING gist (rangeii(pre_order, (pre_order+size)));"
+					"CREATE INDEX text_tab_index ON xml_text_nodes (parent_id,did);"	// order is correct
 					,
 					false, 0) == SPI_ERROR_PARAM)
 	{

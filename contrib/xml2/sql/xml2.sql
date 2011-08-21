@@ -145,6 +145,7 @@ SELECT build_xmlindex('<?xml version="1.0" encoding="utf-8"?>
 </books>', 'bookshelf', true);
 
 SELECT * FROM xml_documents xd WHERE xd.name = 'bookshelf';
+SELECT * FROM xml_element_nodes WHERE did = 1;
 SELECT * FROM xml_attribute_nodes WHERE did = 1;
 SELECT * FROM xml_text_nodes WHERE did = 1;
 
@@ -191,12 +192,12 @@ FROM
 LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND tv.did = 100);
 
 -- range index tests
-set enable_seqscan = f;
-set enable_bitmapscan = f;
-set enable_indexscan = t;
+SET enable_seqscan = f;
+SET enable_bitmapscan = f;
+SET enable_indexscan = t;
 
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) @> range(1,100);
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <@ range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE rangeii(pre_order, (pre_order+size)) @> rangeii(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE rangeii(pre_order, (pre_order+size)) <@ rangeii(1,100);
 
 -- searching for * xml subtree with /envelope/a in all xml documents
 SELECT elements.did as Document_ID, elements.pre_order as Node_ID,
@@ -233,8 +234,8 @@ FROM
 			et0.name = 'books' AND
 			et1.name = 'book' AND
 			et0.did = et1.did) AS sub
-LEFT JOIN xml_element_nodes et ON (range(et.pre_order, et.pre_order+et.size) <@ 
-	range(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
+LEFT JOIN xml_element_nodes et ON (rangeii(et.pre_order, et.pre_order+et.size) <@
+	rangeii(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
 ORDER BY et.did, et.pre_order;
 
 SELECT
@@ -246,6 +247,102 @@ WHERE
 	et1.name = 'book' AND
 	et0.did = et1.did AND
 	et2.did = et1.did AND
-	range(et1.pre_order, et1.pre_order+et1.size) @>
-		range(et2.pre_order, (et2.pre_order + et2.size))
+	rangeii(et1.pre_order, et1.pre_order+et1.size) @>
+		rangeii(et2.pre_order, (et2.pre_order + et2.size))
 ORDER BY et2.did, et2.pre_order;
+
+-- test of indexes
+EXPLAIN (costs off) SELECT elements.did as Document_ID, elements.pre_order as Node_ID,
+	xmlforest(tv.value as a) as xpath_to_sql
+FROM
+	(SELECT
+		et1.pre_order, et1.did
+	FROM
+		xml_element_nodes et0, xml_element_nodes et1
+	WHERE
+		et0.name = 'envelope' AND
+		et1.name = 'a' AND
+		et0.did = et1.did AND
+		et1.parent_id = et0.pre_order
+	) AS elements
+LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND
+	tv.did = elements.did)
+ORDER BY tv.did, tv.pre_order;
+
+-- test XPath to SQL with range benefit
+EXPLAIN (costs off) SELECT et.*
+FROM
+	(SELECT
+			et1.pre_order, et1.size, et1.did
+		FROM
+			xml_element_nodes et0, xml_element_nodes et1
+		WHERE
+			et0.name = 'books' AND
+			et1.name = 'book' AND
+			et0.did = et1.did) AS sub
+LEFT JOIN xml_element_nodes et ON (rangeii(et.pre_order, et.pre_order+et.size) <@
+	rangeii(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
+ORDER BY et.did, et.pre_order;
+
+EXPLAIN (costs off) SELECT
+	et2.*
+FROM
+	xml_element_nodes et0, xml_element_nodes et1, xml_element_nodes et2
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did AND
+	et2.did = et1.did AND
+	rangeii(et1.pre_order, et1.pre_order+et1.size) @>		-- contains
+		rangeii(et2.pre_order, (et2.pre_order + et2.size))
+ORDER BY et2.did, et2.pre_order;
+
+-- test of multiple calls on temp table for /books/book -> SQL
+-- in first step is temp table created and then is result used for sub tree query
+SELECT
+	rangeii(et1.pre_order, et1.pre_order+et1.size) as r
+INTO TEMP TABLE tmp_books_book
+FROM
+	xml_element_nodes et0, xml_element_nodes et1
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did;
+
+EXPLAIN (costs off) SELECT *
+FROM
+	((SELECT * FROM xml_element_nodes
+	WHERE
+		rangeii(pre_order, pre_order+size) <@		-- is contained
+		(SELECT r FROM tmp_books_book LIMIT 1 OFFSET 0))
+	UNION
+	(SELECT * FROM xml_element_nodes
+	WHERE
+		rangeii(pre_order, pre_order+size) <@		-- is contained
+		(SELECT r FROM tmp_books_book LIMIT 1 OFFSET 1))) as two_results
+ORDER BY two_results.did, two_results.pre_order;
+
+SET enable_seqscan = default;
+SET enable_bitmapscan = default;
+SET enable_indexscan = default;
+
+-- text for comments, do not include the ones behind xml document, only Comment 1
+SELECT build_xmlindex('<?xml version="1.0"?>
+<doc>Hello, world!<!-- Comment 1 --></doc>', 'comments', true);
+
+SELECT * FROM xml_documents xd WHERE xd.name = 'comments';
+SELECT * FROM xml_element_nodes WHERE did = 102;
+SELECT * FROM xml_attribute_nodes WHERE did = 102;
+SELECT * FROM xml_text_nodes WHERE did = 102;
+
+-- external href is used as regular text, do not open connection or file downloads
+SELECT build_xmlindex('<?xml version="1.0"?>
+<?xml-stylesheet   href="doc.xsl"
+   type="text/xsl"   ?>', 'external href', true);
+
+SELECT * FROM xml_documents xd WHERE xd.name = 'external href';
+SELECT * FROM xml_element_nodes WHERE did = 103;
+SELECT * FROM xml_attribute_nodes WHERE did = 103;
+SELECT * FROM xml_text_nodes WHERE did = 103;
+
+

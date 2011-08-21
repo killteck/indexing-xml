@@ -9,9 +9,7 @@
  * and specific memory menagement
  * http://www.tomaspospisil.com
  *
- * TODO: 
- * test external entities as well as error handlings
- * add missing erro handling for other types of errors
+ * TODO: LibXML problem with distinguish <a /> and <a></a> on same level
  */
 
 #include "postgres.h"
@@ -117,7 +115,7 @@ read_next_node(xmlTextReaderPtr reader,
 	int err_val = xmlTextReaderRead(reader);
 	elog(DEBUG1, "reading next node");
 
-//TODO better handling
+//place for more granularity error handling
 	if(err_val == LIBXML_ERR)
 	{
 		elog(DEBUG1, "Error reading node, at order = %d", globals->global_order);
@@ -173,8 +171,8 @@ create_new_element(xml_index_globals_ptr globals)
  * @param globals holder of counters for pre order traversal
  * @return
  */
-int 
-preorder_traverse(int parent_id, 
+int
+preorder_traverse(int parent_id,
 		int sibling_id,
 		xmlTextReaderPtr reader,
 		xml_index_globals_ptr globals)
@@ -218,35 +216,34 @@ preorder_traverse(int parent_id,
 	//Check whether next node is empty
 	if(xmlTextReaderIsEmptyElement(reader) == 1)
 	{
-		elog(INFO, "Node %d:%s at depth %d, does not have a closing tag.\n", my_order, my_tag_name, my_depth);
-		//Possibly implement error code here
+		elog(DEBUG1, "Node %d:%s at depth %d is empty", my_order, my_tag_name, my_depth);
+		node_type = XML_READER_TYPE_NONE;	// do note parse inside empty element
+		
+	} else
+	{			
+		if ((err_val = read_next_node(reader, globals)) == 0)
+		{ //Get next element or text node
+			elog(INFO, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
+			return(LIBXML_ERR);
+		}
+		
+		if ((node_type = xmlTextReaderNodeType(reader)) == XML_READER_TYPE_END_ELEMENT)
+		{ //Type of next node
+			elog(DEBUG1, "pre while Found end of %d:%s with no non-attribute children at depth %d returning to %d",my_order, my_tag_name,  my_depth, parent_id);
+			node_type = XML_READER_TYPE_NONE;	// do note parse inside empty element
+		}
 	}
-
-	//Get next element or text node
-	err_val = read_next_node(reader, globals);
-
-	if(err_val == 0)
+	
+	while(node_type != XML_READER_TYPE_NONE)  //While we have unvisited children
 	{
-		elog(INFO, "Malformed XML: reached end of document without reaching the end tag for the current element\n");
-		return(LIBXML_ERR);
-	}
-
-	//Type of next node
-	node_type = xmlTextReaderNodeType(reader);
-
-	if(node_type == XML_READER_TYPE_END_ELEMENT)
-	{
-		elog(INFO, "Found end of %d:%s with no non-attribute children at depth %d returning to %d.\n",my_order, my_tag_name,  my_depth, parent_id);
-	}
-
-	while(node_type != XML_READER_TYPE_END_ELEMENT)  //While we have unvisited children
-	{
-		elog(DEBUG1, "while (node_type != ELEMENT_END)");
+		elog(DEBUG1, "while (node_type != XML_READER_TYPE_NONE)");
 
 		switch(node_type)
 		{
+			case XML_READER_TYPE_COMMENT:
 			case XML_READER_TYPE_TEXT:
 			case XML_READER_TYPE_CDATA: //Visit text nodes
+				elog(DEBUG1, "found text");
 				err_val = process_text_node(my_order, prev_child, reader, globals);
 				if(err_val == REAL_TEXT_NODE)
 				{
@@ -254,26 +251,30 @@ preorder_traverse(int parent_id,
 				}
 				break;
 			case XML_READER_TYPE_ELEMENT: //Recurse on elements
+				elog(DEBUG1, "found element");
 				recent_child = (globals->global_order) + 1; //Next time we have a child it will know this as its nearest sibling
 				size_res = preorder_traverse(my_order,  prev_child, reader, globals);
 				my_size += size_res;
 				prev_child = recent_child;
-				if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == XML_READER_TYPE_END_ELEMENT)
+				if(my_depth == xmlTextReaderDepth(reader) && xmlTextReaderNodeType(reader) == XML_READER_TYPE_NONE)
 				{
-					elog(ERROR, "Node %d:%s at depth %d is done, its child has no closing tag.\n", my_order, my_tag_name, my_depth);
+					elog(ERROR, "Node %d:%s at depth %d is done, its child has no closing tag", my_order, my_tag_name, my_depth);
 					return(LIBXML_ERR);
 				}
 				break;
 			case XML_READER_TYPE_WHITESPACE:
-			case XML_READER_TYPE_NONE:
 			case XML_READER_TYPE_SIGNIFICANT_WHITESPACE:	// do nothing with white spaces
 				elog(DEBUG1, "no significant element");
+				read_next_node(reader, globals);
+				node_type = xmlTextReaderNodeType(reader);
+				continue;
 				break;
-			
+			case XML_READER_TYPE_END_ELEMENT:
+				elog(DEBUG1, "end element");
+				break;
 			case XML_READER_TYPE_ENTITY_REFERENCE:
 			case XML_READER_TYPE_ENTITY:
 			case XML_READER_TYPE_PROCESSING_INSTRUCTION:
-			case XML_READER_TYPE_COMMENT:
 			case XML_READER_TYPE_DOCUMENT:
 			case XML_READER_TYPE_DOCUMENT_TYPE:
 			case XML_READER_TYPE_DOCUMENT_FRAGMENT:
@@ -281,32 +282,31 @@ preorder_traverse(int parent_id,
 			case XML_READER_TYPE_END_ENTITY:
 			case XML_READER_TYPE_XML_DECLARATION:
 			default:
-				elog(ERROR, "Encounted an node of type %d where it should not be\n", node_type);
+				elog(ERROR, "Not supported element node. Encounted an node of type %d where it should not be", node_type);
 				return(LIBXML_ERR);
 				//Possibly implement error handling code here
 				break;
 		}
 
-		err_val = read_next_node(reader, globals);
-		if(err_val == 0)
+		if ((err_val = read_next_node(reader, globals)) == 0)
 		{
 			elog(ERROR, "Malformed XML: reached end of document without reaching "
 					"the end tag for the current element\n");
 			return(LIBXML_ERR);
 		}
 
-		node_type = xmlTextReaderNodeType(reader);
-		if(node_type == XML_READER_TYPE_END_ELEMENT)
+		if ((node_type = xmlTextReaderNodeType(reader)) == XML_READER_TYPE_END_ELEMENT)
 		{
 			elog(DEBUG1,"Found end of %d:%s with %d children at depth %d returning to %d.\n",
 					my_order, my_tag_name, my_size, my_depth, parent_id );
+			break;
 		}
-
+		
 		if(my_depth >= xmlTextReaderDepth(reader))
 		{
 			elog(DEBUG1,"Node %d:%s with %d children at depth %d has no end "
 						"tag, now returning to %d\n",my_order, my_tag_name,
-						my_size, my_depth, parent_id );		
+						my_size, my_depth, parent_id );
 			break;
 		}
 	}
@@ -330,21 +330,22 @@ preorder_traverse(int parent_id,
 	} else
 	{
 		element_node_buffer[my_ind].tag_name = (char*)pstrdup((char *)my_tag_name);
-		free(my_tag_name);		// must be free because LibXML malloc it
+		xmlFree(my_tag_name);		// must be free because LibXML malloc it
 	}
 
 
 	elog(DEBUG1, "== CREATE == element[%d] values did:%d, order:%d, size:%d "
-				"depth:%d, first_attr_id:%d, , child_id:%d, parent_id:%d",
+				"depth:%d, first_attr_id:%d, name:%s, child_id:%d, parent_id:%d",
 				my_ind,
 				element_node_buffer[my_ind].did,
 				element_node_buffer[my_ind].order,
 				element_node_buffer[my_ind].size,
 				element_node_buffer[my_ind].depth,
 				element_node_buffer[my_ind].first_attr_id,
+				element_node_buffer[my_ind].tag_name,
 				element_node_buffer[my_ind].child_id,
-				element_node_buffer[my_ind].parent_id);	
-	
+				element_node_buffer[my_ind].parent_id);
+
 	//Get Previous Sibling
 	if(sibling_id != NO_VALUE)
 	{
@@ -584,8 +585,8 @@ char*
 get_text_from_node(xmlTextReaderPtr reader)
 {
 	int node_type;
-	char * text;
-	char * text2;
+	char * text		= NULL;
+	char * text2	= NULL;
 
 	// called when we want to check and make sure we have text for an element.
 	// returns NULL if an error is encountered or the value otherwise.
@@ -597,27 +598,38 @@ get_text_from_node(xmlTextReaderPtr reader)
 	node_type = xmlTextReaderNodeType(reader);
 	if(node_type !=  XML_READER_TYPE_TEXT)
 	{
-		if(node_type == XML_READER_TYPE_CDATA)  //If we have CDATA
+		if(xmlTextReaderIsEmptyElement(reader))
 		{
-			if(xmlTextReaderIsEmptyElement(reader))
-			{
-				return NULL;
-			}
-			text = (char *)xmlTextReaderValue(reader);
-			text2 = (char*) palloc(strlen(text) + 1 + 10);
-			//One plus the length of the string + the length of ![[CDATA]]
-			sprintf(text2, "![CDATA[%s]]", text);
-			free(text);		// must be free because of LibXML allocation
-
-			return text2;
+			return NULL;
 		}
-		return NULL;
+
+		text = (char *)xmlTextReaderValue(reader);
+
+		switch (node_type)
+		{
+				case XML_READER_TYPE_CDATA:					
+					text2 = (char*) palloc(strlen(text) + 1 + 10);
+					//One plus the length of the string + the length of ![[CDATA]]
+					sprintf(text2, "![CDATA[%s]]", text);				
+				break;
+				case XML_READER_TYPE_COMMENT:
+					text2 = (char*) palloc(strlen(text) + 1 + 9);
+					//One plus the length of the string + the length of <!-- -->
+					sprintf(text2, "<!-- %s -->", text);
+					break;
+				default:
+					elog(DEBUG1, "Handling text node with non defined value");
+					break;
+		}
+					
+		xmlFree(text);		// must be free because of LibXML allocation
+		return text2;
 	}
 	else
 	{
 		text = (char *)xmlTextReaderValue(reader);
 		text2 = (char*)pstrdup(text);
-		free(text);			// must be free because of LibXML allocation
+		xmlFree(text);			// must be free because of LibXML allocation
 
 		return text2;
 	}
@@ -720,6 +732,9 @@ flush_element_node_buffer(xml_index_globals_ptr globals)
 				data[7] = Int32GetDatum(element_node_buffer[i].first_attr_id);
 				data[8] = Int32GetDatum(element_node_buffer[i].parent_id);
 
+				elog(DEBUG1, "pre_order: %d, size: %d, deph: %d", element_node_buffer[i].order,
+						element_node_buffer[i].size,
+						element_node_buffer[i].depth);
 
 				if (element_node_buffer[i].child_id == -1)
 				{ // -1 indicate null value, then set it to nulls string

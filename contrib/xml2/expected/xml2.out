@@ -255,6 +255,24 @@ SELECT * FROM xml_documents xd WHERE xd.name = 'bookshelf';
      |           | </books>                                                    | 
 (1 row)
 
+SELECT * FROM xml_element_nodes WHERE did = 1;
+   name    | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id 
+-----------+-----+-----------+------+-------+-----------+---------+----------+---------
+ firstname |   1 |         4 |    1 |     3 |         3 |         |          |        
+ lastname  |   1 |         6 |    1 |     3 |         3 |       4 |          |        
+ author    |   1 |         3 |    4 |     2 |         2 |         |        6 |        
+ title     |   1 |         8 |    1 |     2 |         2 |       3 |          |        
+ price     |   1 |        10 |    2 |     2 |         2 |       8 |          |      11
+ book      |   1 |         2 |   10 |     1 |         1 |         |       10 |        
+ firstname |   1 |        15 |    1 |     3 |        14 |         |          |        
+ lastname  |   1 |        17 |    1 |     3 |        14 |      15 |          |        
+ author    |   1 |        14 |    4 |     2 |        13 |         |       17 |        
+ title     |   1 |        19 |    1 |     2 |        13 |      14 |          |        
+ price     |   1 |        21 |    3 |     2 |        13 |      19 |          |      23
+ book      |   1 |        13 |   11 |     1 |         1 |       2 |       21 |        
+ books     |   1 |         1 |   23 |     0 |           |         |       13 |        
+(13 rows)
+
 SELECT * FROM xml_attribute_nodes WHERE did = 1;
  name | did | pre_order | size | depth | parent_id | prev_id | value 
 ------+-----+-----------+------+-------+-----------+---------+-------
@@ -526,46 +544,16 @@ LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND tv.did = 1
 (99 rows)
 
 -- range index tests
-set enable_seqscan = f;
-set enable_bitmapscan = f;
-set enable_indexscan = t;
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) < range(1,100);
- count 
--------
-    25
-(1 row)
-
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <= range(1,100);
- count 
--------
-    25
-(1 row)
-
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) = range(1,100);
- count 
--------
-     0
-(1 row)
-
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) >= range(1,100);
- count 
--------
- 10288
-(1 row)
-
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) > range(1,100);
- count 
--------
- 10288
-(1 row)
-
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) @> range(1,100);
+SET enable_seqscan = f;
+SET enable_bitmapscan = f;
+SET enable_indexscan = t;
+SELECT COUNT(*) FROM xml_element_nodes WHERE rangeii(pre_order, (pre_order+size)) @> rangeii(1,100);
  count 
 -------
     76
 (1 row)
 
-SELECT COUNT(*) FROM xml_element_nodes WHERE range(pre_order, (pre_order+size)) <@ range(1,100);
+SELECT COUNT(*) FROM xml_element_nodes WHERE rangeii(pre_order, (pre_order+size)) <@ rangeii(1,100);
  count 
 -------
   4385
@@ -10712,8 +10700,8 @@ FROM
 			et0.name = 'books' AND
 			et1.name = 'book' AND
 			et0.did = et1.did) AS sub
-LEFT JOIN xml_element_nodes et ON (range(et.pre_order, et.pre_order+et.size) <@ 
-	range(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
+LEFT JOIN xml_element_nodes et ON (rangeii(et.pre_order, et.pre_order+et.size) <@
+	rangeii(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
 ORDER BY et.did, et.pre_order;
    name    | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id 
 -----------+-----+-----------+------+-------+-----------+---------+----------+---------
@@ -10740,8 +10728,8 @@ WHERE
 	et1.name = 'book' AND
 	et0.did = et1.did AND
 	et2.did = et1.did AND
-	range(et1.pre_order, et1.pre_order+et1.size) @>
-		range(et2.pre_order, (et2.pre_order + et2.size))
+	rangeii(et1.pre_order, et1.pre_order+et1.size) @>
+		rangeii(et2.pre_order, (et2.pre_order + et2.size))
 ORDER BY et2.did, et2.pre_order;
    name    | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id 
 -----------+-----+-----------+------+-------+-----------+---------+----------+---------
@@ -10758,4 +10746,204 @@ ORDER BY et2.did, et2.pre_order;
  title     |   1 |        19 |    1 |     2 |        13 |      14 |          |        
  price     |   1 |        21 |    3 |     2 |        13 |      19 |          |      23
 (12 rows)
+
+-- test of indexes
+EXPLAIN (costs off) SELECT elements.did as Document_ID, elements.pre_order as Node_ID,
+	xmlforest(tv.value as a) as xpath_to_sql
+FROM
+	(SELECT
+		et1.pre_order, et1.did
+	FROM
+		xml_element_nodes et0, xml_element_nodes et1
+	WHERE
+		et0.name = 'envelope' AND
+		et1.name = 'a' AND
+		et0.did = et1.did AND
+		et1.parent_id = et0.pre_order
+	) AS elements
+LEFT JOIN xml_text_nodes tv ON (tv.parent_id = elements.pre_order AND
+	tv.did = elements.did)
+ORDER BY tv.did, tv.pre_order;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Sort Key: tv.did, tv.pre_order
+   ->  Nested Loop Left Join
+         ->  Merge Join
+               Merge Cond: (et1.did = et0.did)
+               Join Filter: (et0.pre_order = et1.parent_id)
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et1
+                     Index Cond: (name = 'a'::text)
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et0
+                     Index Cond: (name = 'envelope'::text)
+         ->  Index Scan using text_tab_index on xml_text_nodes tv
+               Index Cond: ((parent_id = et1.pre_order) AND (did = et1.did))
+(12 rows)
+
+-- test XPath to SQL with range benefit
+EXPLAIN (costs off) SELECT et.*
+FROM
+	(SELECT
+			et1.pre_order, et1.size, et1.did
+		FROM
+			xml_element_nodes et0, xml_element_nodes et1
+		WHERE
+			et0.name = 'books' AND
+			et1.name = 'book' AND
+			et0.did = et1.did) AS sub
+LEFT JOIN xml_element_nodes et ON (rangeii(et.pre_order, et.pre_order+et.size) <@
+	rangeii(sub.pre_order, (sub.pre_order + sub.size)) AND sub.did = et.did)
+ORDER BY et.did, et.pre_order;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: et.did, et.pre_order
+   ->  Nested Loop Left Join
+         Join Filter: (rangeii(et.pre_order, (et.pre_order + et.size)) <@ rangeii(et1.pre_order, (et1.pre_order + et1.size)))
+         ->  Merge Join
+               Merge Cond: (et0.did = et1.did)
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et0
+                     Index Cond: (name = 'books'::text)
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et1
+                     Index Cond: (name = 'book'::text)
+         ->  Index Scan using xml_element_nodes_pkey on xml_element_nodes et
+               Index Cond: (et1.did = did)
+(12 rows)
+
+EXPLAIN (costs off) SELECT
+	et2.*
+FROM
+	xml_element_nodes et0, xml_element_nodes et1, xml_element_nodes et2
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did AND
+	et2.did = et1.did AND
+	rangeii(et1.pre_order, et1.pre_order+et1.size) @>		-- contains
+		rangeii(et2.pre_order, (et2.pre_order + et2.size))
+ORDER BY et2.did, et2.pre_order;
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: et2.did, et2.pre_order
+   ->  Merge Join
+         Merge Cond: (et2.did = et1.did)
+         Join Filter: (rangeii(et1.pre_order, (et1.pre_order + et1.size)) @> rangeii(et2.pre_order, (et2.pre_order + et2.size)))
+         ->  Nested Loop
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et0
+                     Index Cond: (name = 'books'::text)
+               ->  Index Scan using xml_element_nodes_pkey on xml_element_nodes et2
+                     Index Cond: (did = et0.did)
+         ->  Materialize
+               ->  Index Scan using elem_tab_all_index on xml_element_nodes et1
+                     Index Cond: (name = 'book'::text)
+(13 rows)
+
+-- test of multiple calls on temp table for /books/book -> SQL
+-- in first step is temp table created and then is result used for sub tree query
+SELECT
+	rangeii(et1.pre_order, et1.pre_order+et1.size) as r
+INTO TEMP TABLE tmp_books_book
+FROM
+	xml_element_nodes et0, xml_element_nodes et1
+WHERE
+	et0.name = 'books' AND
+	et1.name = 'book' AND
+	et0.did = et1.did;
+EXPLAIN (costs off) SELECT *
+FROM
+	((SELECT * FROM xml_element_nodes
+	WHERE
+		rangeii(pre_order, pre_order+size) <@		-- is contained
+		(SELECT r FROM tmp_books_book LIMIT 1 OFFSET 0))
+	UNION
+	(SELECT * FROM xml_element_nodes
+	WHERE
+		rangeii(pre_order, pre_order+size) <@		-- is contained
+		(SELECT r FROM tmp_books_book LIMIT 1 OFFSET 1))) as two_results
+ORDER BY two_results.did, two_results.pre_order;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Sort Key: public.xml_element_nodes.did, public.xml_element_nodes.pre_order
+   ->  HashAggregate
+         ->  Append
+               ->  Index Scan using elem_tab_range_index on xml_element_nodes
+                     Index Cond: (rangeii(pre_order, (pre_order + size)) <@ $1)
+                     InitPlan 2 (returns $1)
+                       ->  Limit
+                             ->  Seq Scan on tmp_books_book
+               ->  Index Scan using elem_tab_range_index on xml_element_nodes
+                     Index Cond: (rangeii(pre_order, (pre_order + size)) <@ $0)
+                     InitPlan 1 (returns $0)
+                       ->  Limit
+                             ->  Seq Scan on tmp_books_book
+(14 rows)
+
+SET enable_seqscan = default;
+SET enable_bitmapscan = default;
+SET enable_indexscan = default;
+-- text for comments, do not include the ones behind xml document, only Comment 1
+SELECT build_xmlindex('<?xml version="1.0"?>
+<doc>Hello, world!<!-- Comment 1 --></doc>', 'comments', true);
+ build_xmlindex 
+----------------
+ t
+(1 row)
+
+SELECT * FROM xml_documents xd WHERE xd.name = 'comments';
+ did |   name   |                   value                    | xdb_sequence 
+-----+----------+--------------------------------------------+--------------
+ 102 | comments | <doc>Hello, world!<!-- Comment 1 --></doc> |            0
+(1 row)
+
+SELECT * FROM xml_element_nodes WHERE did = 102;
+ name | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id 
+------+-----+-----------+------+-------+-----------+---------+----------+---------
+ doc  | 102 |         1 |    2 |     0 |           |         |          |        
+(1 row)
+
+SELECT * FROM xml_attribute_nodes WHERE did = 102;
+ name | did | pre_order | size | depth | parent_id | prev_id | value 
+------+-----+-----------+------+-------+-----------+---------+-------
+(0 rows)
+
+SELECT * FROM xml_text_nodes WHERE did = 102;
+ did | pre_order | depth | parent_id | prev_id |        value         
+-----+-----------+-------+-----------+---------+----------------------
+ 102 |         2 |     1 |         1 |         | Hello, world!
+ 102 |         3 |     1 |         1 |         | <!--  Comment 1  -->
+(2 rows)
+
+-- external href is used as regular text, do not open connection or file downloads
+SELECT build_xmlindex('<?xml version="1.0"?>
+<?xml-stylesheet   href="doc.xsl"
+   type="text/xsl"   ?>', 'external href', true);
+ build_xmlindex 
+----------------
+ t
+(1 row)
+
+SELECT * FROM xml_documents xd WHERE xd.name = 'external href';
+ did |     name      |               value               | xdb_sequence 
+-----+---------------+-----------------------------------+--------------
+ 103 | external href | <?xml-stylesheet   href="doc.xsl"+|            0
+     |               |    type="text/xsl"   ?>           | 
+(1 row)
+
+SELECT * FROM xml_element_nodes WHERE did = 103;
+     name      | did | pre_order | size | depth | parent_id | prev_id | child_id | attr_id 
+---------------+-----+-----------+------+-------+-----------+---------+----------+---------
+ DOCUMENT_ROOT | 103 |         1 |    0 |     0 |           |         |          |        
+(1 row)
+
+SELECT * FROM xml_attribute_nodes WHERE did = 103;
+ name | did | pre_order | size | depth | parent_id | prev_id | value 
+------+-----+-----------+------+-------+-----------+---------+-------
+(0 rows)
+
+SELECT * FROM xml_text_nodes WHERE did = 103;
+ did | pre_order | depth | parent_id | prev_id | value 
+-----+-----------+-------+-----------+---------+-------
+(0 rows)
 
